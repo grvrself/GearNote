@@ -792,7 +792,7 @@ pub async fn test_agent_tools(state: State<'_, AgentState>) -> Result<ToolProbe,
         read: steps.iter().any(|step| step.starts_with("读取《") && step.contains("来源 [")), elapsed_ms: start.elapsed().as_millis(), steps, reason })
 }
 
-async fn auxiliary_completion(state: &AgentState, system: &str, user: String) -> Result<String, String> {
+pub(crate) async fn auxiliary_completion(state: &AgentState, system: &str, user: String) -> Result<String, String> {
     let config = state.config.lock().map_err(|_| "模型配置暂不可用")?.clone();
     let key = state.key.lock().map_err(|_| "模型密钥暂不可用")?.clone().ok_or("请先配置 API 密钥")?;
     if config.model.is_empty() { return Err("请先配置模型名称".into()); }

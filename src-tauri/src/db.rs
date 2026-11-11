@@ -24,7 +24,7 @@ pub fn backup_before_phase_four(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn open(path: &Path) -> Result<Connection, String> {
+pub(crate) fn open(path: &Path) -> Result<Connection, String> {
     let connection = Connection::open(path).map_err(|error| format!("数据库打开失败：{error}"))?;
     connection.busy_timeout(std::time::Duration::from_secs(5)).map_err(|error| error.to_string())?;
     connection.execute_batch("PRAGMA journal_mode=WAL;
@@ -72,7 +72,20 @@ fn open(path: &Path) -> Result<Connection, String> {
             role TEXT NOT NULL, created_at TEXT NOT NULL, json TEXT NOT NULL,
             PRIMARY KEY(session_id,id)
         );
-        CREATE INDEX IF NOT EXISTS idx_message_rows_order ON message_rows(session_id,ordinal);")
+        CREATE INDEX IF NOT EXISTS idx_message_rows_order ON message_rows(session_id,ordinal);
+        CREATE TABLE IF NOT EXISTS workflow_proposals (
+            id TEXT PRIMARY KEY, kind TEXT NOT NULL, target_id TEXT NOT NULL,
+            before_json TEXT NOT NULL, after_json TEXT NOT NULL,
+            mode TEXT NOT NULL, before_text TEXT NOT NULL, after_text TEXT NOT NULL,
+            reason TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL,
+            applied_at TEXT NOT NULL DEFAULT ''
+        );
+        CREATE INDEX IF NOT EXISTS idx_workflow_proposals_target ON workflow_proposals(target_id,created_at DESC);
+        CREATE TABLE IF NOT EXISTS workflow_events (
+            id TEXT PRIMARY KEY, proposal_id TEXT NOT NULL, action TEXT NOT NULL,
+            target_id TEXT NOT NULL, at TEXT NOT NULL, detail TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_workflow_events_target ON workflow_events(target_id,at DESC);")
         .map_err(|error| format!("数据库初始化失败：{error}"))?;
     Ok(connection)
 }

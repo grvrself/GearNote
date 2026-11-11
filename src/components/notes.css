@@ -33,4 +33,16 @@
 .notes-export { display:flex; flex-wrap:wrap; align-items:center; gap:var(--space-2); padding:var(--space-2); border:var(--edge) solid var(--line); color:var(--paper); font:var(--fs-11) var(--font-mono); overflow-wrap:anywhere; }
 .notes-export button { flex:none; border:0; color:var(--accent); background:transparent; }
 .notes-actions { display:flex; gap:var(--space-2); }
+.note-workflow { margin-top:var(--space-2); padding:var(--space-3); border:var(--edge) solid var(--line); background:var(--panel-2); }
+.note-workflow summary { color:var(--accent); cursor:pointer; font-size:var(--fs-12); font-weight:600; }
+.note-workflow > p, .note-workflow-events p { color:var(--muted); font-size:var(--fs-12); line-height:1.5; }
+.note-workflow > label { display:block; margin:var(--space-3) 0 var(--space-2); }
+.note-workflow > textarea { min-height:72px; max-height:150px; margin-bottom:var(--space-2); flex:none; }
+.note-proposal { display:grid; gap:var(--space-2); margin:var(--space-3) 0; padding:var(--space-3); border:var(--edge) solid var(--accent); }
+.note-proposal > strong, .note-workflow-events > strong { color:var(--accent); font-size:var(--fs-12); }
+.note-proposal p { margin:0; color:var(--paper); font-size:var(--fs-12); }
+.note-proposal span { color:var(--muted); font-size:var(--fs-11); }
+.note-proposal pre { max-height:180px; margin:var(--space-1) 0 0; padding:var(--space-2); overflow:auto; border:var(--edge) solid var(--line); color:var(--paper); background:var(--bg); white-space:pre-wrap; overflow-wrap:anywhere; font:var(--fs-12)/1.5 var(--font-body); }
+.note-workflow-events { margin-top:var(--space-3); padding-top:var(--space-3); border-top:var(--edge) solid var(--line); }
+.note-workflow-events p { margin:var(--space-2) 0 0; }
 @media (max-width:980px) { .notes-layout { grid-template-columns:minmax(150px, 30%) minmax(0, 1fr); } .notes-editor { padding:var(--space-3); } }

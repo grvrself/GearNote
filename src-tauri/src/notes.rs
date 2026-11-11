@@ -28,7 +28,7 @@ pub struct Note {
 #[serde(rename_all = "camelCase")]
 pub struct NoteSourceInput { pub record_id: String, pub at_seconds: Option<u32> }
 
-pub struct NotesState { path: PathBuf, notes: Mutex<Vec<Note>> }
+pub struct NotesState { pub(crate) path: PathBuf, pub(crate) notes: Mutex<Vec<Note>> }
 
 impl NotesState {
     pub fn load(app: &AppHandle) -> Result<Self, Box<dyn std::error::Error>> {

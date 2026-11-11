@@ -6,10 +6,18 @@ export type NoteSourceInput = { recordId: string; atSeconds?: number }
 export type NoteSource = NoteSourceInput & { title: string; url: string }
 export type Note = { id: string; title: string; body: string; sources: NoteSource[]; createdAt: number; updatedAt: number }
 export type NoteDraft = { title: string; body: string; sources: NoteSourceInput[] }
+export type NoteEditProposal = { id: string; noteId: string; mode: 'append' | 'replace'; beforeText: string; afterText: string; reason: string; status: string; createdAt: string }
+export type NoteWorkflowEvent = { id: string; proposalId: string; action: string; at: string; detail: string; undoable: boolean }
 
 export const listNotes = () => invoke<Note[]>('list_notes')
 export const saveNote = (draft: NoteDraft, id?: string) => invoke<Note>('save_note', { id: id ?? null, ...draft })
 export const exportNote = (id: string) => invoke<string>('export_note', { id })
+export const proposeNoteEdit = (noteId: string, instruction: string) => invoke<NoteEditProposal>('propose_note_edit', { noteId, instruction })
+export const applyNoteEdit = (proposalId: string) => invoke<Note>('apply_note_edit', { proposalId })
+export const undoNoteEdit = (proposalId: string) => invoke<Note>('undo_note_edit', { proposalId })
+export const rejectNoteEdit = (proposalId: string) => invoke<void>('reject_note_edit', { proposalId })
+export const listNoteWorkflowEvents = (noteId: string) => invoke<NoteWorkflowEvent[]>('list_note_workflow_events', { noteId })
+export const getPendingNoteEdit = (noteId: string) => invoke<NoteEditProposal | null>('get_pending_note_edit', { noteId })
 
 export function draftFromMessage(message: ChatMessage, records: KnowledgeRecord[]): NoteDraft {
   const sources: NoteSourceInput[] = []

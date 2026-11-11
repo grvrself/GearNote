@@ -8,6 +8,7 @@ mod secret;
 mod storage;
 mod storyboard;
 mod notes;
+mod workflow;
 pub use process_status::ProcessStatus;
 use tauri::Manager;
 
@@ -28,7 +29,9 @@ pub fn run() {
             agent::delete_chat_session, agent::set_chat_references, agent::save_working_context, agent::confirm_project_memory, agent::revoke_project_memory, agent::compact_chat_context, agent::suggest_working_context, agent::apply_working_suggestion, agent::preview_agent_context, agent::ask_agent,
             agent::get_persona, agent::save_persona, agent::get_default_persona, agent::reload_persona,
             agent::get_chat_frame_image,
-            notes::list_notes, notes::save_note, notes::export_note])
+            notes::list_notes, notes::save_note, notes::export_note,
+            workflow::propose_note_edit, workflow::apply_note_edit, workflow::undo_note_edit,
+            workflow::reject_note_edit, workflow::list_note_workflow_events, workflow::get_pending_note_edit])
         .run(tauri::generate_context!())
         .expect("failed to run KnowFlow");
 }
