@@ -32,8 +32,8 @@ type Props = {
   sending?: boolean
   streaming?: { question: string; answer: string; activity?: string } | null
   error?: string
-  onSend?: (question: string, frameId?: string, explore?: boolean, messageIds?: string[]) => Promise<boolean>
-  onPreviewContext?: (question: string, frameId?: string, explore?: boolean, messageIds?: string[]) => Promise<ContextPreview>
+  onSend?: (question: string, frameId?: string, messageIds?: string[]) => Promise<boolean>
+  onPreviewContext?: (question: string, frameId?: string, messageIds?: string[]) => Promise<ContextPreview>
   onOpenAgentSetup?: () => void
   onSummarize?: () => void
   onRemoveReference: (id: string) => void
@@ -58,7 +58,6 @@ function formatElapsed(seconds: number) {
 
 export function ChatPanel({ records, sessionId, referencedIds, workingContext = { goal: '', completed: '', nextStep: '', updatedAt: '' }, projectMemory = [], compactedSummary = '', compactedCount = 0, onCompactContext, onSuggestWorkingContext, onApplyWorkingSuggestion, onUndoWorkingSuggestion, onRejectWorkingSuggestion, onGetPendingWorkingSuggestion, onListWorkingWorkflowEvents, onSaveWorkingContext = async () => {}, onConfirmMemory = async () => {}, onRevokeMemory = async () => {}, historyOpen, agentAvailable, sending = false, streaming = null, error = '', onSend, onPreviewContext, onOpenAgentSetup, onSummarize, onRemoveReference, onRevealRecord, onToggleHistory, onShowHistory, onCreateNoteDraft, messages = [], compact = false }: Props) {
   const [draft, setDraft] = useState('')
-  const [explore, setExplore] = useState(false)
   const [attachedFrame, setAttachedFrame] = useState<ChatFrame | null>(null)
   const [selectedMessageIds, setSelectedMessageIds] = useState<string[]>([])
   const [dismissedNotes, setDismissedNotes] = useState<string[]>([])
@@ -79,7 +78,7 @@ export function ChatPanel({ records, sessionId, referencedIds, workingContext = 
   const sessionIdRef = useRef(sessionId)
   sessionIdRef.current = sessionId
   const flowRef = useRef<HTMLOListElement>(null)
-  const previewIdentity = `${sessionId ?? ''}\u0000${draft.trim()}\u0000${referencedIds.join('|')}\u0000${selectedMessageIds.join('|')}\u0000${attachedFrame?.imageId ?? ''}\u0000${explore}\u0000${workingContext.updatedAt}\u0000${projectMemory.map(item => item.id).join('|')}\u0000${compactedCount}`
+  const previewIdentity = `${sessionId ?? ''}\u0000${draft.trim()}\u0000${referencedIds.join('|')}\u0000${selectedMessageIds.join('|')}\u0000${attachedFrame?.imageId ?? ''}\u0000${workingContext.updatedAt}\u0000${projectMemory.map(item => item.id).join('|')}\u0000${compactedCount}`
   const previewIdentityRef = useRef(previewIdentity)
   previewIdentityRef.current = previewIdentity
   const referencedRecords = referencedIds.map(id => records.find(record => record.id === id)).filter((record): record is KnowledgeRecord => Boolean(record))
@@ -91,7 +90,7 @@ export function ChatPanel({ records, sessionId, referencedIds, workingContext = 
   const hasReference = referencedRecords.length > 0 || selectedMessages.length > 0 || Boolean(attachedFrame) || hasBackground
   const canSend = agentAvailable || isCaptureCommand(draft)
 
-  useEffect(() => { setDraft(''); setExplore(false); setAttachedFrame(null); setSelectedMessageIds([]); setDismissedNotes([]); setContextPreview(null); setContextPreviewOpen(false); setMemoryPanelOpen(false) }, [sessionId])
+  useEffect(() => { setDraft(''); setAttachedFrame(null); setSelectedMessageIds([]); setDismissedNotes([]); setContextPreview(null); setContextPreviewOpen(false); setMemoryPanelOpen(false) }, [sessionId])
   useEffect(() => { setContextPreview(null); setContextPreviewOpen(false) }, [referencedIds.join('|')])
   useEffect(() => { setContextPreview(null); setContextPreviewOpen(false) }, [workingContext, projectMemory, compactedSummary])
   useEffect(() => { setGoal(workingContext.goal); setCompleted(workingContext.completed); setNextStep(workingContext.nextStep) }, [sessionId, workingContext])
@@ -115,7 +114,7 @@ export function ChatPanel({ records, sessionId, referencedIds, workingContext = 
     setDraft('')
     setContextPreview(null)
     setContextPreviewOpen(false)
-    const sent = await onSend(question, capture ? undefined : attachedFrame?.imageId, explore && !capture && !attachedFrame && referencedRecords.length > 0, capture ? [] : selectedMessageIds)
+    const sent = await onSend(question, capture ? undefined : attachedFrame?.imageId, capture ? [] : selectedMessageIds)
     if (sent && !capture) { setAttachedFrame(null); setSelectedMessageIds([]) }
     if (!sent && sessionIdRef.current === sendingSessionId) setDraft(question)
   }
@@ -128,7 +127,7 @@ export function ChatPanel({ records, sessionId, referencedIds, workingContext = 
     setContextPreviewError('')
     const identity = previewIdentity
     try {
-      const result = await onPreviewContext(draft.trim(), attachedFrame?.imageId, explore && !attachedFrame && referencedRecords.length > 0, selectedMessageIds)
+      const result = await onPreviewContext(draft.trim(), attachedFrame?.imageId, selectedMessageIds)
       if (previewIdentityRef.current !== identity) return
       setContextPreview(result)
       setContextPreviewOpen(true)
@@ -202,7 +201,6 @@ export function ChatPanel({ records, sessionId, referencedIds, workingContext = 
         </li>)}</ul>
         <small className="message-reference-note">仅引用所选消息的文字。Agent 回答会标明来源于对话，不代表已核实的外部事实。</small></div>}
       </details>}
-      {referencedRecords.length > 0 && !attachedFrame && <label className="explore-option"><input type="checkbox" checked={explore} disabled={sending} onChange={event => { setExplore(event.target.checked); setContextPreview(null); setContextPreviewOpen(false) }} /><span>资料探索</span><small>允许模型在本轮已选资料中搜索、读取原文；最多 6 次只读调用。上下文预览不包含调用后追加的片段。</small></label>}
       {contextPreviewError && <p className="chat-error" role="alert">{contextPreviewError}</p>}
       {contextPreviewOpen && contextPreview && <div className="context-inspector" aria-label="本轮上下文预览">
         <div className="context-inspector-head"><strong>本轮上下文 / 发送前预览</strong><span>{contextPreview.textChars.toLocaleString()} / {contextPreview.limitChars.toLocaleString()} 字符{contextPreview.reservedChars > 0 ? ` · 预留 ${contextPreview.reservedChars.toLocaleString()}` : ''}</span></div>

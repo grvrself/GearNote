@@ -41,14 +41,14 @@ export default function MiniApp() {
     return () => { disposed = true; stop?.() }
   }, [desktop])
 
-  const sendQuestion = async (question: string, frameId?: string, explore = false, messageIds: string[] = []) => {
+  const sendQuestion = async (question: string, frameId?: string, messageIds: string[] = []) => {
     if (sendingRef.current) return false
     sendingRef.current = true
     setSending(true)
     setStreaming({ question, answer: '' })
     setError('')
     try {
-      await askAgent(question, referencedIds, delta => setStreaming(current => current && { ...current, answer: current.answer + delta }), frameId, explore,
+      await askAgent(question, referencedIds, delta => setStreaming(current => current && { ...current, answer: current.answer + delta }), frameId,
         activity => setStreaming(current => current && { ...current, activity }), messageIds)
       const chat = await getChatState()
       setActiveSessionId(chat.activeId)

@@ -127,11 +127,6 @@
 .reference-review-remove:disabled { cursor:not-allowed; }
 .reference-review button:focus-visible { outline:var(--edge) solid var(--accent); outline-offset:var(--focus-offset); }
 .message-reference-note { display:block; margin-top:var(--space-2); color:var(--muted); font-size:var(--fs-11); line-height:var(--chat-line-height); }
-.explore-option { display:flex; flex-wrap:wrap; align-items:center; gap:var(--space-2); min-height:var(--control-height); color:var(--paper); font-size:var(--fs-12); cursor:pointer; }
-.explore-option input { width:16px; height:16px; margin:0; accent-color:var(--accent); }
-.explore-option input:focus-visible { outline:var(--edge) solid var(--accent); outline-offset:var(--focus-offset); }
-.explore-option input:disabled { cursor:not-allowed; }
-.explore-option small { color:var(--muted); font-size:var(--fs-11); line-height:var(--chat-line-height); }
 .composer-frame { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); padding: var(--space-2); border: var(--edge) solid var(--accent); color: var(--paper); font-size: var(--fs-11); }
 .composer-frame > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .composer-frame button { flex: none; border: 0; color: var(--accent); background: transparent; font: var(--fs-11) var(--font-body); }

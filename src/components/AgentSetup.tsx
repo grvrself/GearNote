@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { isTauri } from '@tauri-apps/api/core'
-import { getAgentStatus, saveAgentConfig, testAgentTools, type AgentStatus, type ToolProbe } from '../agent'
+import { getAgentStatus, saveAgentConfig, saveExploreReferences, testAgentTools, type AgentStatus, type ToolProbe } from '../agent'
 import { ChamferCard } from './ChamferCard'
 import { HudButton } from './HudButton'
 import './agent-setup.css'
@@ -14,6 +14,9 @@ export function AgentSetup({ onStatusChange }: Props) {
   const [hasKey, setHasKey] = useState(false)
   const [keyPersistent, setKeyPersistent] = useState(false)
   const [keyWarning, setKeyWarning] = useState<string | null>(null)
+  const [exploreEnabled, setExploreEnabled] = useState(true)
+  const [savingExplore, setSavingExplore] = useState(false)
+  const [exploreMessage, setExploreMessage] = useState('')
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
   const [savedConfig, setSavedConfig] = useState({ baseUrl: '', model: '' })
@@ -30,6 +33,7 @@ export function AgentSetup({ onStatusChange }: Props) {
       setHasKey(status.hasKey)
       setKeyPersistent(status.keyPersistent)
       setKeyWarning(status.keyWarning)
+      setExploreEnabled(status.exploreReferences)
       onStatusChange(status)
     }).catch(() => setMessage('模型配置读取失败'))
   }, [onStatusChange])
@@ -42,6 +46,7 @@ export function AgentSetup({ onStatusChange }: Props) {
       setHasKey(status.hasKey)
       setKeyPersistent(status.keyPersistent)
       setKeyWarning(status.keyWarning)
+      setExploreEnabled(status.exploreReferences)
       setBaseUrl(status.baseUrl)
       setModel(status.model)
       setSavedConfig({ baseUrl: status.baseUrl, model: status.model })
@@ -66,6 +71,18 @@ export function AgentSetup({ onStatusChange }: Props) {
     finally { setTesting(false) }
   }
 
+  const changeExplore = async (enabled: boolean) => {
+    setSavingExplore(true)
+    setExploreMessage('')
+    try {
+      const status = await saveExploreReferences(enabled)
+      setExploreEnabled(status.exploreReferences)
+      onStatusChange(status)
+      setExploreMessage('已保存')
+    } catch (error) { setExploreMessage(String(error)) }
+    finally { setSavingExplore(false) }
+  }
+
   return <ChamferCard className="agent-setup-card"><section className="agent-setup" id="agt-01" aria-labelledby="agt-01-title">
     <div className="agent-setup-head"><span>AGT-01 / MODEL SERVICE</span><h3 id="agt-01-title">Agent 服务</h3></div>
     <p>填写支持 Chat Completions 的 API 地址与模型名称。提问时，所选资料的相关片段会发送到该服务。</p>
@@ -76,6 +93,11 @@ export function AgentSetup({ onStatusChange }: Props) {
     <p className="agent-setup-note">{keyPersistent ? '密钥由当前 Windows 账户加密保存在本机，重启后自动读取；输入框不会显示原文。' : '当前平台的密钥只在本次运行期间保留。'}</p>
     {keyWarning && <p className="agent-setup-note" role="alert">{keyWarning}</p>}
     <div className="agent-setup-actions"><HudButton type="button" variant="primary" disabled={!isTauri() || saving || !baseUrl.trim() || !model.trim()} onClick={() => { void save() }}>{saving ? '保存中' : '保存配置'}</HudButton><span role="status">{message || (hasKey ? '密钥已设置' : '密钥未设置')}</span></div>
+    <div className="agent-explore-config">
+      <label><input type="checkbox" checked={exploreEnabled} disabled={!isTauri() || saving || savingExplore} onChange={event => { void changeExplore(event.target.checked) }} /><span>默认开启资料探索</span></label>
+      <p>有本轮参考资料的文字提问会允许模型搜索、读取其中的原文，最多 6 次只读调用；可能增加等待时间和 API 用量。图片提问与指定时间截帧不使用资料探索。</p>
+      {exploreMessage && <span role="status">{exploreMessage}</span>}
+    </div>
     <div className="agent-tool-probe">
       <div><strong>资料探索兼容性</strong><HudButton type="button" disabled={!isTauri() || saving || testing || !hasKey || !savedConfig.model || baseUrl !== savedConfig.baseUrl || model !== savedConfig.model} onClick={() => { void testTools() }}>{testing ? '测试中' : '测试已保存配置'}</HudButton></div>
       <p>点击后会向已保存的模型服务发送一段虚构测试资料，可能产生少量 API 用量；不会读取真实资料或写入会话。修改配置后请先保存。</p>

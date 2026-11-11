@@ -136,10 +136,12 @@ fn load_chat_store(path: &PathBuf, legacy_path: &PathBuf) -> Result<ChatStore, B
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct AgentConfig { base_url: String, model: String }
+struct AgentConfig { base_url: String, model: String, #[serde(default = "default_explore_references")] explore_references: bool }
+
+fn default_explore_references() -> bool { true }
 
 impl Default for AgentConfig {
-    fn default() -> Self { Self { base_url: "https://api.openai.com/v1".into(), model: String::new() } }
+    fn default() -> Self { Self { base_url: "https://api.openai.com/v1".into(), model: String::new(), explore_references: true } }
 }
 
 pub struct AgentState {
@@ -254,14 +256,14 @@ fn persist_chat_store(path: &PathBuf, store: &ChatStore) -> Result<(), String> {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct AgentStatus { base_url: String, model: String, has_key: bool, key_persistent: bool, key_warning: Option<String> }
+pub struct AgentStatus { base_url: String, model: String, explore_references: bool, has_key: bool, key_persistent: bool, key_warning: Option<String> }
 
 #[tauri::command]
 pub fn get_agent_status(state: State<'_, AgentState>) -> Result<AgentStatus, String> {
     let config = state.config.lock().map_err(|_| "模型配置暂不可用")?.clone();
     let has_key = state.key.lock().map_err(|_| "模型密钥暂不可用")?.is_some();
     let key_warning = state.key_warning.lock().map_err(|_| "密钥状态暂不可用")?.clone();
-    Ok(AgentStatus { base_url: config.base_url, model: config.model, has_key, key_persistent: cfg!(windows), key_warning })
+    Ok(AgentStatus { base_url: config.base_url, model: config.model, explore_references: config.explore_references, has_key, key_persistent: cfg!(windows), key_warning })
 }
 
 #[tauri::command]
@@ -279,17 +281,31 @@ pub fn save_agent_config(state: State<'_, AgentState>, base_url: String, model: 
     if let Some(ref key) = api_key {
         if !key.is_empty() && (key.trim() != key || key.len() > 4096 || key.chars().any(char::is_control)) { return Err("API 密钥格式无效".into()); }
     }
-    let config = AgentConfig { base_url: url.as_str().trim_end_matches('/').into(), model: model.into() };
+    let mut saved_config = state.config.lock().map_err(|_| "模型配置暂不可用")?;
+    let config = AgentConfig { base_url: url.as_str().trim_end_matches('/').into(), model: model.into(), explore_references: saved_config.explore_references };
     let data = serde_json::to_vec_pretty(&config).map_err(|_| "模型配置无法编码")?;
     if let Some(ref key) = api_key {
         crate::secret::save(&state.key_path, key)?;
     }
     fs::write(&state.config_path, data).map_err(|_| "模型配置保存失败")?;
-    *state.config.lock().map_err(|_| "模型配置暂不可用")? = config;
+    *saved_config = config;
+    drop(saved_config);
     if let Some(key) = api_key {
         *state.key.lock().map_err(|_| "模型密钥暂不可用")? = if key.is_empty() { None } else { Some(key) };
         *state.key_warning.lock().map_err(|_| "密钥状态暂不可用")? = None;
     }
+    get_agent_status(state)
+}
+
+#[tauri::command]
+pub fn save_explore_references(state: State<'_, AgentState>, enabled: bool) -> Result<AgentStatus, String> {
+    let mut saved_config = state.config.lock().map_err(|_| "模型配置暂不可用")?;
+    let mut next = saved_config.clone();
+    next.explore_references = enabled;
+    let data = serde_json::to_vec_pretty(&next).map_err(|_| "资料探索设置无法编码")?;
+    fs::write(&state.config_path, data).map_err(|error| format!("资料探索设置保存失败：{error}"))?;
+    *saved_config = next;
+    drop(saved_config);
     get_agent_status(state)
 }
 
@@ -845,11 +861,12 @@ pub async fn compact_chat_context(app: AppHandle, state: State<'_, AgentState>) 
 }
 
 #[tauri::command]
-pub fn preview_agent_context(app: AppHandle, agent: State<'_, AgentState>, storage: State<'_, AppState>, question: String, referenced_ids: Vec<String>, frame_id: Option<String>, explore: Option<bool>, message_ids: Vec<String>) -> Result<ContextPreview, String> {
+pub fn preview_agent_context(app: AppHandle, agent: State<'_, AgentState>, storage: State<'_, AppState>, question: String, referenced_ids: Vec<String>, frame_id: Option<String>, message_ids: Vec<String>) -> Result<ContextPreview, String> {
     let question = question.trim();
     if question.is_empty() || question.chars().count() > 2000 { return Err("请先输入不超过 2000 字的问题".into()); }
     if referenced_ids.len() > 20 { return Err("每次最多引用 20 条资料".into()); }
     let persona = agent.persona.lock().map_err(|_| "人格文件暂不可用")?.clone();
+    let explore = agent.config.lock().map_err(|_| "模型配置暂不可用")?.explore_references;
     let (messages, selected, image_frame, project_memory, working, summary) = {
         let store = agent.sessions.lock().map_err(|_| "会话暂不可用")?;
         let session = store.sessions.iter().find(|item| item.id == store.active_id).ok_or("当前会话不存在")?;
@@ -871,14 +888,14 @@ pub fn preview_agent_context(app: AppHandle, agent: State<'_, AgentState>, stora
             .map(|record| record.title.as_str()).unwrap_or("视频截图");
         Some(SourceChunk::image(frame.record_id, title.into(), frame.at_seconds))
     } else { None };
-    let reserve = if explore.unwrap_or(false) && image.is_none() && !referenced_ids.is_empty() { context::TOOL_RESERVE_CHARS } else { 0 };
+    let reserve = if explore && image.is_none() && !referenced_ids.is_empty() { context::TOOL_RESERVE_CHARS } else { 0 };
     let prepared = context::build_with_message_refs(&persona, question, &messages, &selected, &records, &referenced_ids, image, &project_memory, &working, &summary, reserve);
     if prepared.sources.is_empty() && project_memory.is_empty() && summary.is_empty() && working.goal.is_empty() && working.completed.is_empty() && working.next_step.is_empty() { return Err("请先添加资料，或保存项目记忆或工作状态".into()); }
     Ok(prepared.preview)
 }
 
 #[tauri::command]
-pub async fn ask_agent(app: AppHandle, agent: State<'_, AgentState>, storage: State<'_, AppState>, question: String, referenced_ids: Vec<String>, request_id: String, frame_id: Option<String>, explore: Option<bool>, message_ids: Vec<String>) -> Result<ChatMessage, String> {
+pub async fn ask_agent(app: AppHandle, agent: State<'_, AgentState>, storage: State<'_, AppState>, question: String, referenced_ids: Vec<String>, request_id: String, frame_id: Option<String>, message_ids: Vec<String>) -> Result<ChatMessage, String> {
     let question = question.trim();
     if question.is_empty() || question.chars().count() > 2000 { return Err("问题不能为空或超过 2000 字".into()); }
     if referenced_ids.len() > 20 { return Err("每次最多引用 20 条资料".into()); }
@@ -972,11 +989,11 @@ pub async fn ask_agent(app: AppHandle, agent: State<'_, AgentState>, storage: St
     } else { None };
     let records = storage.records.lock().map_err(|_| "资料库暂不可用")?.iter()
         .filter(|record| referenced_ids.contains(&record.id)).cloned().collect::<Vec<_>>();
-    let reserve = if explore.unwrap_or(false) && image_source.is_none() && !referenced_ids.is_empty() { context::TOOL_RESERVE_CHARS } else { 0 };
+    let reserve = if config.explore_references && image_source.is_none() && !referenced_ids.is_empty() { context::TOOL_RESERVE_CHARS } else { 0 };
     let prepared = context::build_with_message_refs(&persona, question, &recent_messages, &selected, &records, &referenced_ids, image_source, &project_memory, &working, &summary, reserve);
     if prepared.sources.is_empty() && project_memory.is_empty() && summary.is_empty() && working.goal.is_empty() && working.completed.is_empty() && working.next_step.is_empty() { return Err("请先添加资料，或保存项目记忆或工作状态".into()); }
     let client = reqwest::Client::builder().connect_timeout(Duration::from_secs(15)).timeout(Duration::from_secs(180)).build().map_err(|_| "无法初始化网络客户端")?;
-    let exploration = if explore.unwrap_or(false) && attachment.is_none() && !referenced_ids.is_empty() {
+    let exploration = if config.explore_references && attachment.is_none() && !referenced_ids.is_empty() {
         let index = ReadIndex::new(&records, &referenced_ids);
         explore_references(|message| {
             let _ = app.emit("knowflow:agent-tool", ToolActivity { request_id: request_id.clone(), message: message.into() });
@@ -1241,7 +1258,7 @@ mod tests {
         })).unwrap();
         let prepared = context::build("人格", "所有权是什么？", &[], &[record.clone()], &["rec-selected".into()], None, &[], &WorkingContext::default(), "");
         let index = ReadIndex::new(&[record], &["rec-selected".into()]);
-        let config = AgentConfig { base_url: format!("http://127.0.0.1:{port}/v1"), model: "mock".into() };
+        let config = AgentConfig { base_url: format!("http://127.0.0.1:{port}/v1"), model: "mock".into(), ..AgentConfig::default() };
         let client = reqwest::Client::new();
         let exploration = tauri::async_runtime::block_on(explore_references(|_| {}, &client, &config, "test", &prepared, &index)).unwrap().unwrap();
         let requests = server.join().unwrap();
@@ -1292,7 +1309,7 @@ mod tests {
             "savedAt":"2026-11-11T00:00:00Z","status":"ready","sourceUrl":"https://example.com","contentText":"Rust 的所有权规则","excerpt":[]})).unwrap();
         let prepared = context::build("人格", "所有权是什么？", &[], &[record.clone()], &[record.id.clone()], None, &[], &WorkingContext::default(), "");
         let index = ReadIndex::new(&[record], &["rec-selected".into()]);
-        let config = AgentConfig { base_url: format!("http://127.0.0.1:{port}/v1"), model: "mock".into() };
+        let config = AgentConfig { base_url: format!("http://127.0.0.1:{port}/v1"), model: "mock".into(), ..AgentConfig::default() };
         let exploration = tauri::async_runtime::block_on(explore_references(|_| {}, &reqwest::Client::new(), &config, "test", &prepared, &index)).unwrap().unwrap();
         assert_eq!(server.join().unwrap(), ["required", "auto", "auto"]);
         assert_eq!(exploration.steps.len(), 1);
@@ -1318,7 +1335,7 @@ mod tests {
         })).unwrap();
         let prepared = context::build("人格", "问题", &[], &[record.clone()], &["rec-selected".into()], None, &[], &WorkingContext::default(), "");
         let index = ReadIndex::new(&[record], &["rec-selected".into()]);
-        let config = AgentConfig { base_url: format!("http://127.0.0.1:{port}/v1"), model: "mock".into() };
+        let config = AgentConfig { base_url: format!("http://127.0.0.1:{port}/v1"), model: "mock".into(), ..AgentConfig::default() };
         let result = tauri::async_runtime::block_on(explore_references(|_| {}, &reqwest::Client::new(), &config, "test", &prepared, &index)).unwrap();
         server.join().unwrap();
         assert!(result.is_none());
@@ -1332,9 +1349,23 @@ mod tests {
             r#"{"error":{"message":"Unknown model: example"}}"#, "https://api.example.com/v1", "example");
         assert!(generic.contains("Unknown model: example"));
     }
+
+    #[test]
+    fn exploration_defaults_on_for_existing_config_and_saves_off() {
+        let old = r#"{"baseUrl":"https://api.example.com/v1","model":"mock"}"#;
+        let config: AgentConfig = serde_json::from_str(old).unwrap();
+        assert!(config.explore_references);
+
+        let mut disabled = config.clone();
+        disabled.explore_references = false;
+        let saved = serde_json::to_string(&disabled).unwrap();
+        let restored: AgentConfig = serde_json::from_str(&saved).unwrap();
+        assert!(!restored.explore_references);
+    }
+
     #[test]
     fn deepseek_tool_requests_explicitly_disable_thinking() {
-        let deepseek = AgentConfig { base_url: "https://api.deepseek.com".into(), model: "deepseek-flash".into() };
+        let deepseek = AgentConfig { base_url: "https://api.deepseek.com".into(), model: "deepseek-flash".into(), ..AgentConfig::default() };
         let first = exploration_payload(&deepseek, &[], "required");
         assert_eq!(first["tool_choice"], "required");
         assert_eq!(first["thinking"]["type"], "disabled");
