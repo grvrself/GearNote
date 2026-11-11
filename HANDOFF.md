@@ -90,7 +90,7 @@ KnowFlow 是一款 Windows 优先的 Tauri 2 桌面知识工作台。Chrome/Edge
 
 第六阶段前的笔记文件夹增量：旧笔记保持未分类，新笔记可指定一级文件夹；删除文件夹把笔记移回未分类且保留正文、来源。隔离数据库测试覆盖旧笔记读取、分类保存、重命名、重复名称与系统分类名称拒绝、删除时的事务一致性，以及模型修改笔记时保留分类。Rust **48 项测试通过**，`npm run build` 与 `npm run tauri -- build --no-bundle` 通过；桌面窗口的实际点击和旧数据库外观仍需核对。
 
-资料探索设置调整：提问区开关已移除；「设置 → Agent 服务」中默认开启，关掉后立即持久化。旧模型配置缺少该字段时按开启读取；再次保存模型配置不会覆盖此前的开关值。主窗口、小窗的提问和上下文预览由后端统一读取该设置。Rust **49 项测试通过**，`npm run build` 通过。原 `knowflow.exe` 无法覆盖，另行编译成功 `src-tauri/target/release/knowflow-settings-preview.exe`；桌面窗口点击仍需核对。
+资料探索设置调整：提问区开关已移除；「设置 → Agent 服务」中默认开启，关掉后立即持久化。旧模型配置缺少该字段时按开启读取；再次保存模型配置不会覆盖此前的开关值。主窗口、小窗的提问和上下文预览由后端统一读取该设置。Rust **49 项测试通过**，`npm run build` 通过。原 `knowflow.exe` 无法覆盖，改用 Tauri 正式构建流程生成 `src-tauri/target/release/knowflow-settings-preview.exe`；已实际启动，页面来自 `tauri.localhost`，设置页显示资料探索已勾选。最初用普通 `cargo build --release` 编译的同名 exe 指向开发服务器，现已被正确版本覆盖。
 
 ## 可复制给新聊天的开场
 

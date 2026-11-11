@@ -100,7 +100,7 @@ npm run tauri dev
 
 首次运行可能编译 Rust 依赖。只看前端时运行 `npm run dev`，浏览器访问 `http://127.0.0.1:1420/`。浏览器预览没有原生窗口控制；请使用 Tauri 程序检查标题栏按钮。
 
-本轮 Windows 预览程序位于 `src-tauri/target/release/knowflow-settings-preview.exe`。原 `knowflow.exe` 在构建时无法覆盖，仍是旧版本；源码可继续通过 `npm run tauri dev` 验证。当前预览程序不是完整安装包；单独复制 exe 不能保证分镜引擎、Node、FFmpeg 和 yt-dlp 等资源可用。旧整合预览包 `../KnowFlow-preview-storyboard/KnowFlow-vision.exe` 保留为历史产物。打开新版前请先关闭旧版；两个版本同时运行会占用相同的本机扩展连接端口。浏览器扩展有源码改动时，需在扩展管理页重新加载。
+本轮 Windows 预览程序位于 `src-tauri/target/release/knowflow-settings-preview.exe`，已经用 Tauri 正式构建流程生成并在桌面启动验证。原 `knowflow.exe` 在构建时无法覆盖，仍是旧版本；源码可继续通过 `npm run tauri dev` 验证。独立运行的 exe 必须通过 Tauri 构建流程生成，普通 `cargo build --release` 会保留开发服务器地址，双击时出现 `127.0.0.1` 拒绝连接。当前预览程序不是完整安装包；单独复制 exe 不能保证分镜引擎、Node、FFmpeg 和 yt-dlp 等资源可用。旧整合预览包 `../KnowFlow-preview-storyboard/KnowFlow-vision.exe` 保留为历史产物。打开新版前请先关闭旧版；两个版本同时运行会占用相同的本机扩展连接端口。浏览器扩展有源码改动时，需在扩展管理页重新加载。
 
 ## 目前可操作的部分
 
