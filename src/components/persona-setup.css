@@ -1,0 +1,15 @@
+.persona-setup-card { max-width:var(--setup-max-width); margin-top:var(--space-6); }
+.persona-setup-card .chamfer-content { background:var(--panel-2); }
+.persona-setup { display:grid; gap:var(--space-4); padding:var(--space-5); }
+.persona-setup-head > span { color:var(--accent); font:600 var(--fs-11) var(--font-label); letter-spacing:var(--ls-label); }
+.persona-setup-head h3 { margin:var(--space-2) 0 0; font:900 var(--fs-20) var(--font-body); letter-spacing:var(--ls-title); }
+.persona-setup p { margin:0; color:var(--muted); font-size:var(--fs-13); line-height:var(--chat-line-height); }
+.persona-setup label { display:flex; justify-content:space-between; gap:var(--space-3); color:var(--paper); font-size:var(--fs-13); }
+.persona-setup label span { color:var(--muted); font:var(--fs-12) var(--font-mono); }
+.persona-setup textarea { width:100%; min-height:var(--persona-editor-height); padding:var(--space-3); resize:vertical; border:var(--edge) solid var(--line); border-radius:var(--r); color:var(--paper); background:var(--panel); font:var(--fs-13) var(--font-body); line-height:var(--chat-line-height); }
+.persona-setup textarea:disabled { color:var(--muted); }
+.persona-setup .persona-file-note { padding-top:var(--space-3); border-top:var(--edge) solid var(--line); overflow-wrap:anywhere; }
+.persona-file-note code { color:var(--paper); font:var(--fs-12) var(--font-mono); }
+.persona-setup-actions { display:flex; flex-wrap:wrap; gap:var(--space-2); }
+.persona-setup .persona-setup-error { color:var(--fault); }
+.persona-setup .persona-setup-message { color:var(--accent); }

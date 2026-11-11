@@ -1,0 +1,17 @@
+.storyboard-section { margin-top: var(--space-4); }
+.storyboard-note { margin: 0 0 var(--space-2); color: var(--muted); font-size: var(--fs-11); }
+.storyboard-section .hud-button { margin-bottom: var(--space-3); }
+.storyboard-error { margin: var(--space-2) 0; color: var(--fault); font-size: var(--fs-12); overflow-wrap: anywhere; }
+.storyboard-image { display: grid; gap: var(--space-2); margin: var(--space-3) 0; }
+.storyboard-image span { color: var(--muted); font: var(--fs-11) var(--font-mono); }
+.storyboard-image img { width: 100%; height: auto; border: var(--edge) solid var(--line); background: var(--panel); }
+.storyboard-times { display: flex; flex-wrap: wrap; gap: var(--space-1); max-height: var(--transcript-height); overflow-y: auto; }
+.storyboard-times button { padding: var(--space-1) var(--space-2); border: var(--edge) solid var(--line); color: var(--paper); background: var(--panel); cursor: pointer; font: var(--fs-11) var(--font-mono); }
+.storyboard-times button:hover { border-color: var(--accent); color: var(--accent); }
+.storyboard-times button:focus-visible { outline: var(--edge) solid var(--accent); outline-offset: var(--focus-offset); }
+.storyboard-times button span { color: var(--accent); }
+.storyboard-auth { display: grid; gap: var(--space-2); padding: var(--space-3); border: var(--edge) solid var(--line); background: var(--panel); }
+.storyboard-auth p { margin: 0; color: var(--muted); font-size: var(--fs-11); line-height: 1.5; }
+.storyboard-auth label { display: grid; gap: var(--space-1); color: var(--paper); font-size: var(--fs-12); }
+.storyboard-auth input { max-width: 100%; color: var(--paper); font: var(--fs-11) var(--font-body); }
+.storyboard-auth input:focus-visible { outline: var(--edge) solid var(--accent); outline-offset: var(--focus-offset); }

@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>KnowFlow 扩展配对</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <main>
+    <div class="serial">KF-001 / EXT-01</div>
+    <h1>连接 KnowFlow</h1>
+    <p>在 KnowFlow 桌面程序的「设置」页复制配对码，粘贴到下面。配对只连接本机程序。</p>
+    <form id="pair-form">
+      <label for="pair-code">PAIR CODE / 配对码</label>
+      <input id="pair-code" type="text" autocomplete="off" spellcheck="false" placeholder="32 位配对码" required>
+      <button type="submit">连接本机程序 →</button>
+    </form>
+    <p id="result" role="status" aria-live="polite"></p>
+    <div class="hint">连接后，打开网页文章或带字幕的视频，点击浏览器工具栏的 KnowFlow 扩展图标即可保存。</div>
+  </main>
+  <script src="options.js"></script>
+</body>
+</html>

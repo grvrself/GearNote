@@ -1,0 +1,27 @@
+node_modules/
+*.log
+
+# CLI 默认输出（别把生成物提交进仓库）
+storyboard*.png
+*-1.png
+*-2.png
+*-3.png
+*-4.png
+manifest*.json
+
+# 本地临时/调试产物
+.tmp/
+_probe/
+
+# 凭证与本地配置：永远不要进仓库
+.secrets/
+cookies.txt
+* cookies*.txt
+video.json
+asr.json
+
+# npm 凭据（临时发布用，绝不提交）
+.npmrc
+
+# 盲测/打包演示的产物（26MB 视频与图，不能进仓库）
+out-packed/

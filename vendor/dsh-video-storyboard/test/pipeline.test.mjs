@@ -1,0 +1,749 @@
+/**
+ * pipeline.test.mjs — 端到端：真 ffmpeg 现造片子 → runStoryboard → 断言产物。
+ * 顺带验证 apply() 的接线（注册一次、名字正确），不依赖真实 DSH 宿主。
+ */
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { homedir, tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { promisify } from 'node:util';
+
+import {
+  runStoryboard, formatManifest, formatPlanPreview, saveStoryboards,
+} from '../src/storyboard/pipeline.js';
+import { imageTokens } from '../src/storyboard/tiers.js';
+import { lookupCell } from '../src/storyboard/cells.js';
+import { DEFAULT_FFMPEG } from '../src/storyboard/probe.js';
+
+const run = promisify(execFile);
+let hasFfmpeg = false;
+try { await run(DEFAULT_FFMPEG, ['-version']); hasFfmpeg = true; } catch { /* 无 */ }
+
+/** 6 个镜头各 1s，其中一个带 0.5s 的模糊（测 sharp 取帧） */
+async function makeFixture(dir) {
+  const out = join(dir, 'f.mp4');
+  const colors = ['0xff0000', '0x00ff00', '0x0000ff', '0xffff00', '0xff00ff', '0x00ffff'];
+  const args = ['-hide_banner', '-v', 'error', '-y'];
+  for (const c of colors) args.push('-f', 'lavfi', '-i', `color=c=${c}:s=320x180:r=25:d=1`);
+  args.push(
+    '-filter_complex', `${colors.map((_, i) => `[${i}]`).join('')}concat=n=6:v=1:a=0[v]`,
+    '-map', '[v]', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', out,
+  );
+  await run(DEFAULT_FFMPEG, args);
+  return out;
+}
+
+test('e2e: runStoryboard 出一张图 + 完整清单', async (t) => {
+  if (!hasFfmpeg) return t.skip('ffmpeg not on PATH');
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-pipe-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const file = await makeFixture(dir);
+
+  const r = await runStoryboard({ input: file, maxFrames: 4, pick: 'sharp', sourceHash: true });
+  assert.equal(r.sheets.length, 1);
+  const sheet = r.sheets[0];
+  assert.equal(sheet.buffer.length, sheet.width * sheet.height * 3);
+  assert.equal(sheet.cells.length, 4);
+  assert.ok(sheet.width * sheet.height <= 640_000, '不该超像素预算');
+
+  // 时间码单调、首尾相接、落在窗口内
+  for (let i = 1; i < sheet.cells.length; i++) {
+    assert.equal(sheet.cells[i].t_start, sheet.cells[i - 1].t_end);
+    assert.ok(sheet.cells[i].t_frame > sheet.cells[i - 1].t_frame);
+    assert.ok(sheet.cells[i].tier >= 1 && sheet.cells[i].tier <= 8, '每格都要有档位');
+  }
+  assert.equal(sheet.cells[0].t_start, 0);
+  assert.ok(Math.abs(r.window.to - 6) < 0.2);
+
+  const text = formatManifest(r);
+  // 清单报的是**最小格**（模型看到的最糊那张），不是平均值
+  assert.match(text, new RegExp(`cell>=${sheet.cellW}x${sheet.cellH}`));
+  // token 必须按**实际像素**算（像素÷1650，地板 544²，封顶 1024），不是一个常数。
+  // 这里不写死数字：图高会随"顶部时间抬头"这类装饰带变化，写死了每次都得起改。
+  const expectTokens = imageTokens(sheet.width, sheet.height);
+  assert.ok(expectTokens > 0 && expectTokens <= 1024);
+  assert.match(text, new RegExp(`tokens="${expectTokens}"`),
+    `一张图要按 ${sheet.width}x${sheet.height} 的实际像素报，实得 ${expectTokens}`);
+  assert.match(text, /ffmpeg="[^"]+"/);
+  assert.match(text, /sha256="[0-9a-f]{64}"/);
+  assert.match(text, /plan: strategy=compact/);
+  assert.match(text, /tiers /, '档位分布要写进清单');
+});
+
+test('e2e: 交给附件的必须是真 PNG（裸 RGB 会被判 malformed）', async (t) => {
+  if (!hasFfmpeg) return t.skip('ffmpeg not on PATH');
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-pipe-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const file = await makeFixture(dir);
+
+  const r = await runStoryboard({ input: file, maxFrames: 4 });
+  const { png, buffer, width, height } = r.sheets[0];
+  assert.ok(png && png.length > 0, '必须带 PNG 字节');
+  assert.equal(png.subarray(0, 8).toString('hex'), '89504e470d0a1a0a', 'PNG 魔数');
+  assert.equal(png.readUInt32BE(16), width, 'IHDR 宽度应与画布一致');
+  assert.equal(png.readUInt32BE(20), height, 'IHDR 高度应与画布一致');
+  assert.ok(png.length < buffer.length, 'PNG 应比裸 RGB 小（说明真的编码过）');
+});
+
+test('e2e: encode=false 时不产生 PNG（CLI 自己落盘）', async (t) => {
+  if (!hasFfmpeg) return t.skip('ffmpeg not on PATH');
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-pipe-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const file = await makeFixture(dir);
+  const r = await runStoryboard({ input: file, maxFrames: 4, encode: false });
+  assert.equal(r.sheets[0].png, undefined);
+});
+
+test('e2e: 时间窗只覆盖窗口内，清单首行写明 window', async (t) => {
+  if (!hasFfmpeg) return t.skip('ffmpeg not on PATH');
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-pipe-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const file = await makeFixture(dir);
+
+  const r = await runStoryboard({ input: file, from: 2, to: 4, maxFrames: 4 });
+  assert.ok(r.window.from >= 1.99 && r.window.from <= 2.01);
+  for (const c of r.sheets[0].cells) {
+    assert.ok(c.t_frame >= 1.9 && c.t_frame <= 4.1, `帧 ${c.t_frame} 跑出窗口`);
+  }
+  const text = formatManifest(r);
+  assert.match(text, /window="2\.00-4\.00"/);
+  // 单图时不再写 "image 1"（纯冗余），多图时才带
+  assert.match(text, /cell 1 = /);
+  assert.match(text, /k=\d/);
+  assert.match(text, /unlabeled cells are padding/);
+});
+
+test('e2e: saveStoryboards 落盘（多张时带序号）', async (t) => {
+  if (!hasFfmpeg) return t.skip('ffmpeg not on PATH');
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-pipe-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const file = await makeFixture(dir);
+
+  // 张数不再由参数决定，是排布器算出来的；这里只验证"落盘数量 = 张数"
+  const r = await runStoryboard({ input: file, maxFrames: 30, strategy: 'full' });
+  assert.ok(r.sheets.length >= 1);
+  const paths = await saveStoryboards(r, join(dir, 'out.png'));
+  assert.equal(paths.length, r.sheets.length);
+  if (paths.length > 1) assert.ok(paths[1].endsWith('out-2.png'));
+  else assert.ok(paths[0].endsWith('out.png'));
+});
+
+test('e2e: 第二次调用命中缓存（切点不重扫）', async (t) => {
+  if (!hasFfmpeg) return t.skip('ffmpeg not on PATH');
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-pipe-'));
+  const cacheDir = await mkdtemp(join(tmpdir(), 'dsh-cache-'));
+  const prev = process.env.DSH_VIDEO_CACHE_DIR;
+  process.env.DSH_VIDEO_CACHE_DIR = cacheDir;
+  t.after(async () => {
+    if (prev === undefined) delete process.env.DSH_VIDEO_CACHE_DIR;
+    else process.env.DSH_VIDEO_CACHE_DIR = prev;
+    await rm(dir, { recursive: true, force: true });
+    await rm(cacheDir, { recursive: true, force: true });
+  });
+  const file = await makeFixture(dir);
+
+  const first = await runStoryboard({ input: file, maxFrames: 4, encode: false });
+  const second = await runStoryboard({ input: file, maxFrames: 4, encode: false });
+  assert.equal(first.cached, false);
+  assert.equal(second.cached, true, '第二次应命中缓存');
+  assert.deepEqual(first.cuts.map((c) => c.t), second.cuts.map((c) => c.t), '两次切点必须一致');
+});
+
+test('e2e: cache=false 时不读写缓存', async (t) => {
+  if (!hasFfmpeg) return t.skip('ffmpeg not on PATH');
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-pipe-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const file = await makeFixture(dir);
+  const r1 = await runStoryboard({ input: file, maxFrames: 4, encode: false, cache: false });
+  const r2 = await runStoryboard({ input: file, maxFrames: 4, encode: false, cache: false });
+  assert.equal(r1.cached, false);
+  assert.equal(r2.cached, false);
+});
+
+test('e2e: 非法 pick 立刻抛错（不跑 ffmpeg）', async () => {
+  await assert.rejects(() => runStoryboard({ input: 'x.mp4', pick: 'blurry' }), RangeError);
+});
+
+test('插件接线: apply() 注册一个叫 video_storyboard 的工具', async (t) => {
+  const host = join(homedir(), '.dsh/profiles/node_modules/@deepseek-ai/dsh-tools/lib/index.js');
+  // CI 上没有 DSH 宿主包，apply() 会抛 "cannot resolve" —— 那是有意为之，跳过即可
+  if (!existsSync(host)) return t.skip('no local DSH install (@deepseek-ai/dsh-tools)');
+  if (!process.env.DSH_TOOLS_PATH) process.env.DSH_TOOLS_PATH = host;
+  const { apply, name: pluginName, inject } = await import('../src/index.js');
+  assert.equal(pluginName, 'dsh-video-storyboard');
+  // **不能声明 attachments**：cordis 的 inject 是硬依赖，服务缺失时 apply 永不被调用，
+  // 插件就永远停在"加载中"（用户侧表现：装完插件 DSH 卡死）。见 src/index.js。
+  assert.deepEqual(inject, ['tools']);
+
+  const registered = [];
+  let disposed = 0;
+  const saved = [];
+  const ctx = {
+    tools: { register: (tool) => { registered.push(tool); return () => { disposed += 1; }; } },
+    attachments: {
+      saveImage: async (input) => {
+        saved.push(input);
+        return { attachmentId: 'stub', mediaType: input.mediaType, bytes: input.data.length };
+      },
+    },
+  };
+  try {
+    const disposer = await apply(ctx);
+    assert.deepEqual(registered.map((t) => t.name).sort(),
+      ['video_help', 'video_locate', 'video_probe', 'video_storyboard', 'video_subtitles', 'video_zoom']);
+    assert.equal(typeof disposer, 'function', 'apply 必须返回 disposer');
+    disposer();
+    assert.equal(disposed, 6, '六个工具都应被释放');
+    // help 不碰视频也不出图：它是"常驻文案瘦身"的那一半，一调必须立刻有字
+    const help = registered.find((t) => t.name === 'video_help');
+    const h1 = await help.execute({});
+    assert.match(h1.text, /VIDEO TOOLS MANUAL/);
+    assert.match(h1.text, /## tiers/, '整本手册要含档位那一节');
+    const h2 = await help.execute({ topic: 'cost' });
+    assert.match(h2.text, /## cost/);
+    assert.doesNotMatch(h2.text, /## tiers/, '给了 topic 就只回那一节');
+    assert.equal(saved.length, 0, 'help 绝不能提交图片');
+    // 真跑一次 execute，确保交给附件的是真 PNG（这一条能抓住线上那个 malformed 事故）
+    const dir2 = await mkdtemp(join(tmpdir(), 'dsh-exec-'));
+    t.after(() => rm(dir2, { recursive: true, force: true }));
+    const fixture = await makeFixture(dir2);
+    const storyboard = registered.find((t) => t.name === 'video_storyboard');
+    const value = await storyboard.execute({ input: fixture, maxFrames: 4 });
+    assert.equal(saved.length, 1, '应提交一张图');
+    assert.equal(saved[0].mediaType, 'image/png');
+    assert.equal(saved[0].data.subarray(0, 8).toString('hex'), '89504e470d0a1a0a', '必须是 PNG 魔数');
+    assert.match(value.text, /<storyboard[\s\S]*cell 1/);
+    assert.equal(value.images.length, 1);
+
+    // locate 也要真跑一次：这条测试就是 issue 里那个 ReferenceError 的回归守卫
+    // （0.4.1 漏了 `import ... from './locate.js'`，工具一调就崩，而测试当时没覆盖到）
+    const locate = registered.find((t) => t.name === 'video_locate');
+    const lv = await locate.execute({ input: fixture, query: '测试' });
+    assert.equal(typeof lv.text, 'string');
+    assert.ok(lv.text.length > 10, 'locate 必须返回一段可读文本');
+
+    // zoom 也要真跑一次：窗口收窄、单图、格数默认 6
+    saved.length = 0;
+    const zoom = registered.find((t) => t.name === 'video_zoom');
+    const z = await zoom.execute({ input: fixture, from: 1, to: 3 });
+    assert.equal(saved.length, 1);
+    assert.equal(saved[0].data.subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
+    assert.match(z.text, /window="1\.00-3\.00"/);
+
+    // probe 也真跑一次：不取帧、不花钱，只读容器头
+    const probe = registered.find((t) => t.name === 'video_probe');
+    const p = await probe.execute({ input: fixture });
+    assert.match(p.text, /<video[^>]*duration="6\.0/);
+    // 这个 fixture 只有视频流，正好覆盖"没音轨"的分支
+    assert.match(p.text, /audio="no"/);
+    assert.match(p.text, /no audio track/);
+  } catch (error) {
+    if (/Cannot find package|Cannot find module/.test(String(error))) {
+      return t.skip('host @deepseek-ai/dsh-tools not resolvable here');
+    }
+    throw error;
+  }
+});
+
+/* ---------------------------------------------------------------- 批量复用扫描 */
+
+test('e2e: 传入 precomputed 时不再自己扫描', async (t) => {
+  if (!hasFfmpeg) return t.skip('ffmpeg not on PATH');
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-pipe-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const file = await makeFixture(dir);          // 这段测试片本身有切点
+
+  const own = await runStoryboard({ input: file, maxFrames: 4, encode: false });
+  assert.ok(own.cuts.length > 0, '正常扫描应找到切点');
+
+  // 注入一份"窗口外的切点"：如果管线自己又扫了一遍，就会找到真实切点，测试失败
+  const injected = await runStoryboard({
+    input: file, maxFrames: 4, encode: false,
+    precomputed: { cuts: [{ t: 99 }], summary: { frames: 0, p90: 0 }, threshold: 12 },
+  });
+  assert.equal(injected.cuts.length, 0, '应完全采用注入的切点（且已按窗口过滤）');
+});
+
+test('formatProbe: 长片给两种读法并标明剧透，短片不啰嗦', async () => {
+  const { formatProbe } = await import('../src/storyboard/pipeline.js');
+  const base = {
+    width: 1920, height: 1080, fps: 24, aspect: 16 / 9, rotation: 0,
+    videoCodec: 'h264', container: 'mp4', hasAudio: true, audioCodec: 'aac',
+    hasSubtitle: true, path: 'a.mp4',
+  };
+  const long = await formatProbe({ ...base, duration: 9300 });
+  assert.match(long, /STRUCTURE \(spoils the ending\)/);
+  assert.match(long, /SEQUENCE \(no spoilers/);
+
+  const short = await formatProbe({ ...base, duration: 30 });
+  assert.match(short, /one call is enough/);
+  assert.ok(!/STRUCTURE/.test(short), '短片不该出现长片模板');
+  assert.ok(short.split('\n').length <= 3, `短片文本应很短，实得 ${short.split('\n').length} 行`);
+});
+
+test('formatProbe: 有字幕轨时不提 ASR（字幕轨免费又最准）', async () => {
+  const { formatProbe } = await import('../src/storyboard/pipeline.js');
+  const text = await formatProbe({
+    width: 1920, height: 1080, fps: 24, aspect: 16 / 9, rotation: 0,
+    videoCodec: 'h264', container: 'mp4', hasAudio: true, audioCodec: 'aac',
+    hasSubtitle: true, path: 'a.mp4', duration: 300,
+  });
+  assert.ok(!/transcription is OFF/.test(text), '有字幕轨就不该抱怨 ASR');
+});
+
+/**
+ * 没配 key 时的 probe 必须**提前说清楚转写不会发生**，否则模型会照 "must come from ASR"
+ * 那句话推断"台词马上就来了"，最后拿到一个静默的空清单 —— 中间没有任何一步告诉它原因。
+ */
+test('formatProbe: 没有字幕轨又没配 key 时必须直说"转写不会发生"', async () => {
+  const { formatProbe } = await import('../src/storyboard/pipeline.js');
+  const prevKey = process.env.DSH_ASR_KEY;
+  const prevBase = process.env.DSH_ASR_BASE_URL;
+  const prevHome = process.env.DSH_HOME;
+  delete process.env.DSH_ASR_KEY;
+  delete process.env.DSH_ASR_BASE_URL;
+  // **隔离本机配置**：开发机上 ~/.dsh/asr.json 常常指向本机 ASR，读它会让这条用例失去意义
+  const emptyHome = await mkdtemp(join(tmpdir(), 'dsh-home-'));
+  process.env.DSH_HOME = emptyHome;
+  try {
+    const text = await formatProbe({
+      width: 1920, height: 1080, fps: 24, aspect: 16 / 9, rotation: 0,
+      videoCodec: 'h264', container: 'mp4', hasAudio: true, audioCodec: 'aac',
+      hasSubtitle: false, path: 'a.mp4', duration: 300,
+    });
+    assert.match(text, /transcription is OFF/);
+    assert.match(text, /NOT attempted/);
+  } finally {
+    if (prevKey !== undefined) process.env.DSH_ASR_KEY = prevKey;
+    if (prevBase !== undefined) process.env.DSH_ASR_BASE_URL = prevBase;
+    if (prevHome === undefined) delete process.env.DSH_HOME; else process.env.DSH_HOME = prevHome;
+    await rm(emptyHome, { recursive: true, force: true }).catch(() => {});
+  }
+});
+
+test('manifest: 没配 ASR key 时报"没跑"，而不是"没有台词"', { skip: !hasFfmpeg }, async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'tr-nokey-'));
+  try {
+    // 带音轨、无字幕轨的素材：有声音，但云端没配 key —— 旧逻辑会写 "ASR ran and found no speech"
+    const out = join(dir, 'a.mp4');
+    await run(DEFAULT_FFMPEG, ['-hide_banner', '-v', 'error', '-y',
+      '-f', 'lavfi', '-i', 'color=c=0x203040:s=320x180:r=25:d=3',
+      '-f', 'lavfi', '-i', 'sine=frequency=440:duration=3',
+      '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
+      '-c:a', 'aac', '-shortest', out]);
+
+    const prevKey = process.env.DSH_ASR_KEY;
+    const prevBase = process.env.DSH_ASR_BASE_URL;
+    const prevHome = process.env.DSH_HOME;
+    delete process.env.DSH_ASR_KEY;
+    delete process.env.DSH_ASR_BASE_URL;
+    // 同样要隔离本机 asr.json：本机服务不需要 key，不隔离的话这里会真的去转写
+    const emptyHome2 = await mkdtemp(join(tmpdir(), 'dsh-home2-'));
+    process.env.DSH_HOME = emptyHome2;
+    let r;
+    try {
+      r = await runStoryboard({ input: out, maxFrames: 2, cache: false, asrKey: null });
+    } finally {
+      if (prevKey !== undefined) process.env.DSH_ASR_KEY = prevKey;
+      if (prevBase !== undefined) process.env.DSH_ASR_BASE_URL = prevBase;
+      if (prevHome === undefined) delete process.env.DSH_HOME; else process.env.DSH_HOME = prevHome;
+      await rm(emptyHome2, { recursive: true, force: true }).catch(() => {});
+    }
+
+    assert.equal(r.transcript.source, 'no-key');
+    const text = formatManifest(r);
+    assert.match(text, /NOT attempted/);
+    assert.ok(!/ASR ran and found no speech/.test(text), '没跑就不能说"跑了没听到话"');
+    assert.ok(!/may be misheard/.test(text), '没跑就不该出现"可能听错"');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+/* ---------------------------------------------------------------- 外挂转写 */
+
+test('transcriptFile: 给了转写就不跑 ASR，没有音轨也能用', { skip: !hasFfmpeg }, async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'tf-pipe-'));
+  try {
+    const file = await makeFixture(dir);
+    const srt = join(dir, 'a.srt');
+    await writeFile(srt, '1\n00:00:00,500 --> 00:00:02,000\n来自文件的第一句\n\n' +
+      '2\n00:00:02,000 --> 00:00:04,000\n第二句\n', 'utf8');
+    const r = await runStoryboard({ input: file, maxFrames: 4, transcriptFile: srt, cache: false });
+    assert.equal(r.transcript.source, 'file');
+    assert.equal(r.transcript.segments, 2);
+    assert.equal(r.transcript.chars, 11);
+    assert.equal(r.transcript.model, 'file:srt');
+    // 关键：fixture 没有音轨，旧逻辑会走 no-audio；显式文件必须压过它
+    assert.match(formatManifest(r), /来自文件的第一句/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('transcriptFile: 窗口统计只算窗口内的台词，不把整片字数除以窗口', { skip: !hasFfmpeg }, async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'tf-window-'));
+  try {
+    const file = await makeFixture(dir);
+    const srt = join(dir, 'long.srt');
+    await writeFile(srt, '1\n00:00:00,000 --> 00:00:02,000\n' + '甲'.repeat(60) + '\n\n' +
+      '2\n00:00:02,000 --> 00:00:04,000\n甲乙丙丁\n', 'utf8');
+    const r = await runStoryboard({
+      input: file, from: 2, to: 4, maxFrames: 4, transcriptFile: srt, cache: false,
+    });
+    assert.equal(r.transcript.segments, 1, '窗口内只应剩第二段');
+    assert.equal(r.transcript.chars, 4, '不能把窗口外的 60 字算进来');
+    assert.equal(r.transcript.charsPerSec, 2, '4 字 / 2 秒');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('transcriptFile: 文件不存在时标 file-failed，不让整次调用失败', { skip: !hasFfmpeg }, async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'tf-pipe2-'));
+  try {
+    const file = await makeFixture(dir);
+    const r = await runStoryboard({
+      input: file, maxFrames: 4, transcriptFile: join(dir, 'nope.srt'), cache: false,
+    });
+    assert.equal(r.transcript.source, 'file-failed');
+    assert.match(r.transcript.error, /ENOENT|no such file/i);
+    assert.ok(r.sheets.length > 0, '台词失败不该影响出图');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('formatRemoteProbe: 说明"什么还没下载"和下一步', async () => {
+  const { formatRemoteProbe } = await import('../src/storyboard/pipeline.js');
+  const text = formatRemoteProbe({
+    url: 'https://www.bilibili.com/video/BV1xx', title: '示例', duration: 90,
+    heights: [360, 480, 720, 1080], maxHeight: 1080, auth: 'cookies',
+  });
+  assert.match(text, /available: 360p, 480p, 720p, 1080p \(max 1080p\)/);
+  assert.match(text, /nothing was downloaded yet/);
+  assert.match(text, /video_zoom then reads the original stream at 1080p/);
+});
+
+test('formatRemoteProbe: 匿名时明确警告分辨率不保证', async () => {
+  const { formatRemoteProbe } = await import('../src/storyboard/pipeline.js');
+  const text = formatRemoteProbe({
+    url: 'https://x/y', title: null, duration: 10, heights: [360], maxHeight: 360, auth: 'anonymous',
+  });
+  assert.match(text, /auth: anonymous \(resolution not guaranteed\)/);
+});
+
+/* ---------------------------------------------------------------- 逐窗口重判 */
+
+const fps25 = 25;
+// 每 4 帧一刀（25fps 下 6.25 刀/秒）—— 这是快闪的常见密度；每 2 帧一刀会稠到
+// 和运镜无法区分（degraded 会判 motion），那不是这个测试要验证的东西。
+const gapFrames = (n, score, from = 0) => Array.from({ length: n }, (_, i) => ({
+  t: from + i / fps25, score: i % 4 === 3 ? score : 3,
+}));
+const smooth = (n, score, from = 0) => Array.from({ length: n }, (_, i) => ({
+  t: from + i / fps25, score,
+}));
+
+test('refineCutsByWindow: 快闪窗口被细判，运镜窗口保持粗判', async () => {
+  const { refineCutsByWindow } = await import('../src/storyboard/pipeline.js');
+  // 0-2s：每两帧一刀、分数 70（真剪辑）；2-4s：每帧都在变但只有 15 分（运镜）
+  const stats = [...gapFrames(50, 70, 0), ...smooth(50, 15, 2)];
+  const coarse = [{ t: 0.5, score: 70 }, { t: 4.9, score: 15 }];
+  const r = refineCutsByWindow({ stats, fps: fps25, coarseCuts: coarse, winStart: 0, winDur: 4, winSec: 2 });
+  const inFlash = r.cuts.filter((c) => c.t < 2).length;
+  const inPan = r.cuts.filter((c) => c.t >= 2).length;
+  assert.ok(inFlash >= 10, `快闪窗口应细判出很多刀，实得 ${inFlash}`);
+  assert.ok(inPan <= 2, `运镜窗口不该被细判，实得 ${inPan}`);
+  assert.equal(r.refined.length, 1);
+  assert.equal(r.refined[0].from, 0);
+});
+
+test('refineCutsByWindow: 采纳门槛保持绝对值（相对基线会把一拍二当剪辑）', async () => {
+  const { refineCutsByWindow } = await import('../src/storyboard/pipeline.js');
+  // 20 分、窗内常态 3 分：相对判据会采纳（6.7 倍落差），但它正是概念 PV 上翻车的那类窗口 ——
+  // 一刀 20 分的"落差"在动画里多半是换张画。宁可少报：25 分的硬门槛。
+  const quiet = gapFrames(50, 20, 0);
+  const r1 = refineCutsByWindow({
+    stats: quiet, fps: fps25, coarseCuts: [{ t: 0.5, score: 20 }], winStart: 0, winDur: 2, winSec: 2,
+  });
+  assert.equal(r1.refined.length, 0, '20 分不够狠，不该采纳');
+  assert.equal(r1.cuts.length, 1, '应保留粗判结果');
+
+  // 真正的大跳变（70 分）照样采纳
+  const loud = gapFrames(50, 70, 0);
+  const r2 = refineCutsByWindow({
+    stats: loud, fps: fps25, coarseCuts: [{ t: 0.5, score: 70 }], winStart: 0, winDur: 2, winSec: 2,
+  });
+  assert.equal(r2.refined.length, 1, '70 分应该采纳');
+  assert.ok(r2.cuts.length >= 10, `应细判出多刀，实得 ${r2.cuts.length}`);
+});
+
+test('e2e: cells:1 就真的给一帧 —— 不摊 2×2，清单也不说谎', async (t) => {
+  if (!hasFfmpeg) return t.skip('ffmpeg not on PATH');
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-pipe-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const file = await makeFixture(dir);
+  const cuts = Array.from({ length: 9 }, (_, i) => ({ t: 0.2 + i * 0.2, score: 50 }));
+  const r = await runStoryboard({
+    input: file, from: 0, to: 2, maxFrames: 1, encode: false,
+    precomputed: { cuts, summary: { p90: 50 }, threshold: 5 },
+  });
+  assert.equal(r.sheets[0].cells.length, 1, 'maxFrames:1 就只出 1 帧');
+  const cell = r.sheets[0].cells[0];
+  assert.equal(cell.sub, undefined, '新架构没有格内摊开，永远一格一帧');
+  assert.ok(Number.isFinite(cell.t_frame), '单帧必须给 frame@');
+  const text = formatManifest(r);
+  assert.match(text, /grid="1 frames on 1 image\(s\)"/);
+});
+
+
+/**
+ * 极静素材的回归守卫。
+ *
+ * 这条测试是"函数写了但没接线"这类错误的护栏：spikeCuts 在 9adba94 就写好了、单测也绿，
+ * 但 pipeline 从来没调用它 —— 于是纯 PPT 视频一条切点都找不到（用户实测）。
+ * 这里造一段"几乎不动、只在第 2 秒出现一个小方块"的素材：绝对阈值看不见，相对基线能看见。
+ */
+test('e2e: 极静素材（PPT 型）也能找到那一刀', async (t) => {
+  if (!hasFfmpeg) return t.skip('ffmpeg not on PATH');
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-static-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const out = join(dir, 'static.mp4');
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  await promisify(execFile)('ffmpeg', [
+    '-hide_banner', '-v', 'error', '-y',
+    '-f', 'lavfi', '-i', 'color=c=0x101010:s=320x180:r=25:d=6',
+    // 第 2 秒出现一块约 8% 的画面（相当于 PPT 上换了一段字）。
+    // 实测这一档峰值只有 ~12 分，绝对阈值 12~15 会漏；相对基线能看见。
+    '-vf', "drawbox=x=160:y=80:w=90:h=50:color=0xffee66:t=fill:enable='gte(t,2)'",
+    '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', out,
+  ]);
+  const r = await runStoryboard({ input: out, maxFrames: 2, encode: false, transcript: 'off', cache: false });
+  assert.ok(r.cuts.length >= 1, `极静素材上的小改动应该被抓到，实得 ${r.cuts.length} 刀`);
+  assert.ok(r.cuts.some((c) => Math.abs(c.t - 2) < 0.6), `切点应落在 2 秒附近，实得 ${r.cuts.map((c) => c.t.toFixed(2))}`);
+});
+
+test('e2e 不变量: 清单里的画面数 == planner 报的帧数', async (t) => {
+  if (!hasFfmpeg) return t.skip('ffmpeg not on PATH');
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-pipe-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const file = await makeFixture(dir);
+
+  for (const cells of [0, 4, 9, 16]) {
+    const r = await runStoryboard({ input: file, cells, pick: 'sharp' });
+    const drawn = r.sheets.flatMap((s) => s.cells)
+      .reduce((n, c) => n + (c.sub ? c.sub * c.sub : 1), 0);
+    assert.equal(r.plan.frames, drawn,
+      `cells=${cells}: planner 说 ${r.plan.frames} 帧，实际画了 ${drawn} 帧`);
+  }
+});
+
+test('e2e 不变量: 切张后时间覆盖与顺序原样不变', async (t) => {
+  if (!hasFfmpeg) return t.skip('ffmpeg not on PATH');
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-pipe-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const file = await makeFixture(dir);
+
+  const r = await runStoryboard({ input: file, maxFrames: 0, pick: 'sharp' });
+  const cells = r.sheets.flatMap((s) => s.cells);
+  // 顺序：起始时间严格递增
+  for (let i = 1; i < cells.length; i++) {
+    assert.ok(cells[i].t_start >= cells[i - 1].t_start, `第 ${i} 格时间倒退了`);
+  }
+  // 覆盖：首格从窗口起点开始，末格到窗口末尾结束
+  assert.equal(cells[0].t_start, r.window.from);
+  assert.ok(Math.abs(cells[cells.length - 1].t_end - r.window.to) < 0.05,
+    '末尾没覆盖到窗口结束');
+  // 不重叠、不留缝
+  for (let i = 1; i < cells.length; i++) {
+    assert.ok(Math.abs(cells[i].t_start - cells[i - 1].t_end) < 1e-6, `第 ${i} 格与前一格不连续`);
+  }
+});
+
+test('e2e: 只传 from + segment 就自动推窗，并在结果里回显进度', async (t) => {
+  if (!hasFfmpeg) return t.skip('ffmpeg not on PATH');
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-pipe-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const file = await makeFixture(dir);
+  const r = await runStoryboard({
+    input: file, from: 1, segment: 4, maxFrames: 4, encode: false,
+  });
+  assert.equal(r.window.from, 1);
+  assert.ok(r.window.to <= 5.01, `segment 4 应该在第 5 秒结束，实得 ${r.window.to}`);
+  assert.equal(r.segment.sec, 4);
+  assert.equal(r.segment.index, 1);
+  assert.equal(r.segment.total, 2);
+  const text = formatManifest(r);
+  assert.match(text, /segment 1\/2 · \d+% watched/);
+  assert.match(text, /next: from=5/);
+});
+
+
+test('e2e: from>0 时 cell 表存绝对时间，不重复加窗口起点（issue #37）', async (t) => {
+  if (!hasFfmpeg) return t.skip('ffmpeg not on PATH');
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-pipe-'));
+  const prev = process.env.DSH_VIDEO_CACHE_DIR;
+  process.env.DSH_VIDEO_CACHE_DIR = dir;
+  t.after(async () => {
+    if (prev === undefined) delete process.env.DSH_VIDEO_CACHE_DIR;
+    else process.env.DSH_VIDEO_CACHE_DIR = prev;
+    await rm(dir, { recursive: true, force: true });
+  });
+  const file = await makeFixture(dir);
+  const r = await runStoryboard({ input: file, from: 2, to: 4, maxFrames: 2, encode: false });
+  const cell = r.sheets[0].cells[0];
+  assert.ok(cell.t_start >= 1.9 && cell.t_start < 2.2,
+    `t_start 应该是绝对的 2s，实得 ${cell.t_start}（说明窗口起点被加了两次）`);
+  const hit = await lookupCell(file, 1);
+  assert.ok(hit, 'cell 表应已写入');
+  assert.equal(hit.from, cell.t_start, 'cell 表的值必须等于 t_start，不能再加一次 from');
+});
+
+test('refineCutsByWindow: 逐帧动画（一拍二）的周期性帧差不算剪辑点', async () => {
+  const { refineCutsByWindow } = await import('../src/storyboard/pipeline.js');
+  // 复刻记管概念 PV 实测：整窗大部分静止（均值 5–8），但每 2 帧换一张画 —— 8 秒里 20 个"峰"，
+  // 而抽样看画面是同一个镜头里硬币在动。真人剪辑不会 2 帧一剪，所以不采纳。
+  const stats = [];
+  for (let i = 0; i < 8 * fps25; i++) stats.push({ t: i / fps25, score: i % 2 ? 46 : 1.2 });
+  const r = refineCutsByWindow({
+    stats, fps: fps25, coarseCuts: [{ t: 1, score: 46 }], winStart: 0, winDur: 8, winSec: 8,
+  });
+  assert.equal(r.refined.length, 0, '一拍二不是剪辑');
+  assert.equal(r.cuts.length, 1, '保留粗判结果');
+
+  // 同样的密度，但间隔 4 帧（0.16s）—— 这是真的快剪，应当采纳
+  const real = [];
+  for (let i = 0; i < 8 * fps25; i++) real.push({ t: i / fps25, score: i % 4 === 0 ? 46 : 1.2 });
+  const r2 = refineCutsByWindow({
+    stats: real, fps: fps25, coarseCuts: [{ t: 1, score: 46 }], winStart: 0, winDur: 8, winSec: 8,
+  });
+  assert.ok(r2.cuts.length >= 20, `4 帧一剪应该数出来，实得 ${r2.cuts.length}`);
+});
+
+test('插件接线: 宿主没有 attachments 服务时，apply 仍然成功、工具照样注册', async (t) => {
+  const host = join(homedir(), '.dsh/profiles/node_modules/@deepseek-ai/dsh-tools/lib/index.js');
+  if (!existsSync(host)) return t.skip('no local DSH install (@deepseek-ai/dsh-tools)');
+  if (!process.env.DSH_TOOLS_PATH) process.env.DSH_TOOLS_PATH = host;
+  const { apply } = await import('../src/index.js');
+
+  const registered = [];
+  // 故意不给 attachments —— 这是"宿主版本偏旧 / 该 bundle 没启用"时的真实形状。
+  // 以前这里会永远卡在 cordis 的依赖等待里，现在必须照常注册、只是图片走降级。
+  const ctx = {
+    tools: { register: (tool) => { registered.push(tool); return () => {}; } },
+  };
+  const dispose = await apply(ctx);
+  assert.equal(typeof dispose, 'function');
+  assert.ok(registered.length >= 5, `应该注册 5 个工具，实得 ${registered.length}`);
+  assert.ok(registered.some((t) => t.name === 'video_storyboard'));
+});
+
+test('e2e: planOnly（dryRun）只扫描+排布，不出图、不转写，回报各档代价', async (t) => {
+  if (!hasFfmpeg) return t.skip('ffmpeg not on PATH');
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-pipe-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const file = await makeFixture(dir);
+
+  const r = await runStoryboard({ input: file, planOnly: true });
+  assert.equal(r.planOnly, true);
+  assert.deepEqual(r.sheets, [], '预演一张图都不许出');
+  assert.equal(r.variants.length, 4, 'compact/standard/full + skim');
+  const names = r.variants.map((v) => v.name);
+  assert.deepEqual(names, ['compact', 'standard', 'full', 'skim']);
+  for (const v of r.variants) {
+    assert.ok(v.bins >= 1 && v.minW > 0 && v.minH > 0, `${v.name} 的代价没算出来`);
+    assert.ok(v.readability, `${v.name} 缺可读性`);
+  }
+  // 档位越大格子越大：full 的最小格不小于 compact 的
+  const full = r.variants.find((v) => v.name === 'full');
+  const compact = r.variants.find((v) => v.name === 'compact');
+  assert.ok(full.minW >= compact.minW);
+
+  const text = formatPlanPreview(r);
+  assert.match(text, /image="none \(dry run\)"/);
+  assert.match(text, /cuts="\d+ \(avg /, '要有切点数——这是模型选档的依据');
+  assert.match(text, /recommended: \*\*(compact|standard|full)\*\*/);
+  assert.match(text, /duration budget/, '张数预算要说明白');
+  assert.ok(!/tokens="\d+ \(\d+\/img/.test(text), '预演不该报会花掉的图 token');
+});
+
+test('e2e: strategy=auto 按时长压张数，并把三档代价写进清单', async (t) => {
+  if (!hasFfmpeg) return t.skip('ffmpeg not on PATH');
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-pipe-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const file = await makeFixture(dir);
+
+  const r = await runStoryboard({ input: file, strategy: 'auto' });
+  assert.ok(r.plan.auto, 'auto 必须回报"选了什么、别的要几张"');
+  assert.ok(['compact', 'standard', 'full'].includes(r.plan.strategy), `选中的档位不合法：${r.plan.strategy}`);
+  assert.equal(r.plan.auto.options.length, 3);
+  assert.equal(r.plan.auto.chosen, r.plan.strategy);
+  // 6 秒的片段预算 = 1 张（autoSheetCap(6) = 1）
+  assert.equal(r.plan.auto.targetCap, 1);
+  assert.ok(r.sheets.length <= 1, `预算 1 张，实得 ${r.sheets.length} 张`);
+
+  const text = formatManifest(r);
+  assert.match(text, /size policy: auto chose/);
+  // 标签从 "same window under the other policies" 压成了 "other policies"（每轮重发，省字）；
+  // 但**三档代价 + full 最贵这句警告**必须留着，否则模型下一轮还是只能猜。
+  assert.match(text, /^other policies: /m);
+  assert.match(text, /full=/, '三档代价都要列出来，否则模型下一轮还是只能猜');
+  assert.match(text, /"full" is the expensive one/, 'full 的价码警告不能跟着散文一起删');
+});
+
+test('auto: 不给 maxSheets 时压张数仍然执行（capSheets 兜底是 Infinity，别用 >0 判）', async (t) => {
+  // 踩过的坑：`capSheets` 在"调用方没给"时兜底 `Infinity`，判据却写成 `capSheets > 0` ——
+  // `Infinity > 0` 是 true，于是 limit=Infinity、整段压张数被跳过，"按时长定张数"从未生效。
+  if (!hasFfmpeg) return t.skip('ffmpeg not on PATH');
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-pipe-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const file = await makeFixture(dir);
+
+  const r = await runStoryboard({ input: file, strategy: 'auto' });
+  const a = r.plan.auto;
+  assert.ok(a, 'auto 必须回报计划');
+  // 只有"确实超了预算"时才有压的动作：要么压进去（capSheets>0），要么可读性让步（relaxed）
+  if (r.plan.sheets > a.targetCap) {
+    assert.ok(a.capSheets > 0 || a.relaxed,
+      `超了预算 ${a.targetCap} 张（实得 ${r.plan.sheets}）却没有压的痕迹：capSheets=${a.capSheets}`);
+  }
+  // relaxed 时必须给出 skim 的价码，否则"问一句看不看"就没问
+  if (a.relaxed) {
+    assert.ok(Number.isFinite(a.relaxed.skimBins) && a.relaxed.skimBins > 0,
+      'relaxed 时要报 skim 的张数');
+    assert.match(formatManifest(r), /strategy:"skim" is ≤\d+ image/);
+  }
+});
+
+test('formatPlanPreview: 预算被可读性顶回去时，不许再说"→ 1 image"', async () => {
+  // 短窗（<90s）的默认文案是"→ 1 image"；一旦 auto 因为格子太小退回多张，
+  // 那句话就成了假话（56 刀的 25 秒快剪曾报 1 张、实际出 4 张）。
+  const variants = [
+    { name: 'compact', bins: 1, minW: 100, minH: 54, readability: 'composition' },
+    { name: 'standard', bins: 3, minW: 114, minH: 54, readability: 'composition' },
+    { name: 'full', bins: 4, minW: 133, minH: 75, readability: 'composition' },
+  ];
+  const base = { info: { path: 'C:/x/short.mp4', duration: 25 }, window: { duration: 25, from: 0, to: 25 }, variants };
+  const relaxedPlan = {
+    sheets: 4, frames: 63, cells: 16, produced: 63, canvas: { width: 800, height: 450 },
+    auto: {
+      chosen: 'full', targetCap: 1, capSheets: 0, options: [],
+      relaxed: { targetCap: 1, triedBins: 2, keptBins: 4, cuts: 56 },
+    },
+  };
+  const text = formatPlanPreview({ ...base, plan: relaxedPlan });
+  assert.ok(!/→ \*\*1 image\*\*/.test(text), '退回多张时不能再写"1 image"');
+  assert.match(text, /kept \*\*4\*\*/, '要说明实际给了几张');
+
+  // 没有 relaxed 的短窗仍然说 1 张（这条文案本身是对的）
+  const okPlan = {
+    sheets: 1, frames: 9, cells: 9, produced: 9, canvas: { width: 800, height: 450 },
+    auto: { chosen: 'compact', targetCap: 1, capSheets: 0, options: [] },
+  };
+  assert.match(formatPlanPreview({ ...base, plan: okPlan }), /→ \*\*1 image\*\*/);
+});

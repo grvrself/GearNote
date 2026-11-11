@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "KnowFlow 内容捕获",
+  "version": "0.2.2",
+  "description": "点击扩展图标，将网页文章或现有视频字幕保存到本机 KnowFlow。",
+  "permissions": ["activeTab", "scripting", "storage", "alarms"],
+  "host_permissions": ["http://127.0.0.1/*", "https://*.hdslb.com/*"],
+  "background": { "service_worker": "background.js", "type": "module" },
+  "action": { "default_title": "保存当前网页或视频字幕到 KnowFlow" },
+  "options_page": "options.html"
+}

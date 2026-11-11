@@ -1,0 +1,89 @@
+@font-face {
+  font-family: 'Chakra Petch';
+  src: url('./assets/fonts/chakra-petch-latin-600.woff2') format('woff2');
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'IBM Plex Mono';
+  src: url('./assets/fonts/ibm-plex-mono-latin-400.woff2') format('woff2');
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
+:root {
+  --bg: #0B0C0E;
+  --panel: #121417;
+  --panel-2: #191C21;
+  --paper: #EDEEE9;
+  --muted: #8A8F98;
+  --line: rgba(237,238,233,.16);
+  --accent: #FFD400;
+  --accent-ink: #0B0C0E;
+  --fault: #D64541;
+  --r: 0px;
+
+  --chamfer: 10px;
+  --shadow-hard: 3px 3px 0 0 #000;
+  --dur: 120ms;
+  --ease: cubic-bezier(.2,0,0,1);
+  --stripe: repeating-linear-gradient(-45deg,var(--accent) 0 8px,var(--bg) 8px 16px);
+  --fs-11: 11px;
+  --fs-12: 12px;
+  --fs-13: 13px;
+  --fs-15: 15px;
+  --fs-20: 20px;
+  --fs-28: 28px;
+  --ls-label: .12em;
+  --ls-title: .06em;
+  --font-label: 'Chakra Petch', sans-serif;
+  --font-mono: 'IBM Plex Mono', monospace;
+  --font-body: 'PingFang SC','Microsoft YaHei','Noto Sans SC',sans-serif;
+  --edge: 1px;
+  --focus-offset: 2px;
+  --scroll-width: 4px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --control-height: 34px;
+  --titlebar-height: 36px;
+  --commandbar-height: 58px;
+  --window-control-width: 46px;
+  --window-glyph-size: 16px;
+  --browser-select-width: 88px;
+  --context-height: 58px;
+  --context-item-max: 220px;
+  --message-max-width: 76%;
+  --message-narrow-max-width: 86%;
+  --message-mobile-max-width: 94%;
+  --chat-line-height: 1.65;
+  --composer-input-height: 44px;
+  --sidebar-row-height: 42px;
+  --sidebar-command-height: 38px;
+  --sidebar-icon-size: 16px;
+  --sidebar-rail-width: 54px;
+  --session-popover-width: 260px;
+  --session-popover-height: 70vh;
+  --mini-controls-width: 96px;
+  --mini-context-item-max: 180px;
+  --mini-composer-height: 44px;
+  --scan-width: 26%;
+  --stripe-width: 7px;
+  --hover-shift: -1px;
+  --scan-cycle: 1440ms;
+  --scan-steps: 12;
+  --transcript-height: 160px;
+  --frame-preview-height: 480px;
+  --mini-frame-preview-height: 240px;
+  --article-read-height: 240px;
+  --setup-max-width: 720px;
+  --persona-editor-height: 260px;
+  --memory-editor-height: 260px;
+}
