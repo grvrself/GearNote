@@ -27,8 +27,8 @@ type Props = {
   sending?: boolean
   streaming?: { question: string; answer: string; activity?: string } | null
   error?: string
-  onSend?: (question: string, frameId?: string, explore?: boolean) => Promise<boolean>
-  onPreviewContext?: (question: string, frameId?: string, explore?: boolean) => Promise<ContextPreview>
+  onSend?: (question: string, frameId?: string, explore?: boolean, messageIds?: string[]) => Promise<boolean>
+  onPreviewContext?: (question: string, frameId?: string, explore?: boolean, messageIds?: string[]) => Promise<ContextPreview>
   onOpenAgentSetup?: () => void
   onSummarize?: () => void
   onRemoveReference: (id: string) => void
@@ -55,6 +55,7 @@ export function ChatPanel({ records, sessionId, referencedIds, workingContext = 
   const [draft, setDraft] = useState('')
   const [explore, setExplore] = useState(false)
   const [attachedFrame, setAttachedFrame] = useState<ChatFrame | null>(null)
+  const [selectedMessageIds, setSelectedMessageIds] = useState<string[]>([])
   const [dismissedNotes, setDismissedNotes] = useState<string[]>([])
   const [contextPreview, setContextPreview] = useState<ContextPreview | null>(null)
   const [contextPreviewOpen, setContextPreviewOpen] = useState(false)
@@ -73,16 +74,17 @@ export function ChatPanel({ records, sessionId, referencedIds, workingContext = 
   const sessionIdRef = useRef(sessionId)
   sessionIdRef.current = sessionId
   const flowRef = useRef<HTMLOListElement>(null)
-  const previewIdentity = `${sessionId ?? ''}\u0000${draft.trim()}\u0000${referencedIds.join('|')}\u0000${attachedFrame?.imageId ?? ''}\u0000${explore}\u0000${workingContext.updatedAt}\u0000${projectMemory.map(item => item.id).join('|')}\u0000${compactedCount}`
+  const previewIdentity = `${sessionId ?? ''}\u0000${draft.trim()}\u0000${referencedIds.join('|')}\u0000${selectedMessageIds.join('|')}\u0000${attachedFrame?.imageId ?? ''}\u0000${explore}\u0000${workingContext.updatedAt}\u0000${projectMemory.map(item => item.id).join('|')}\u0000${compactedCount}`
   const previewIdentityRef = useRef(previewIdentity)
   previewIdentityRef.current = previewIdentity
   const referencedRecords = referencedIds.map(id => records.find(record => record.id === id)).filter((record): record is KnowledgeRecord => Boolean(record))
+  const selectedMessages = selectedMessageIds.map(id => messages.find(message => message.id === id)).filter((message): message is ChatMessage => Boolean(message))
   const usableMemory = projectMemory.filter(item => !item.expiresAt || Number(item.expiresAt) > Date.now())
   const hasBackground = usableMemory.length > 0 || Boolean(compactedSummary || workingContext.goal || workingContext.completed || workingContext.nextStep)
-  const hasReference = referencedRecords.length > 0 || Boolean(attachedFrame) || hasBackground
+  const hasReference = referencedRecords.length > 0 || selectedMessages.length > 0 || Boolean(attachedFrame) || hasBackground
   const canSend = agentAvailable || isCaptureCommand(draft)
 
-  useEffect(() => { setDraft(''); setExplore(false); setAttachedFrame(null); setDismissedNotes([]); setContextPreview(null); setContextPreviewOpen(false); setSuggestion(null) }, [sessionId])
+  useEffect(() => { setDraft(''); setExplore(false); setAttachedFrame(null); setSelectedMessageIds([]); setDismissedNotes([]); setContextPreview(null); setContextPreviewOpen(false); setSuggestion(null) }, [sessionId])
   useEffect(() => { setContextPreview(null); setContextPreviewOpen(false) }, [referencedIds.join('|')])
   useEffect(() => { setContextPreview(null); setContextPreviewOpen(false) }, [workingContext, projectMemory, compactedSummary])
   useEffect(() => { setGoal(workingContext.goal); setCompleted(workingContext.completed); setNextStep(workingContext.nextStep) }, [sessionId, workingContext])
@@ -90,6 +92,13 @@ export function ChatPanel({ records, sessionId, referencedIds, workingContext = 
   useEffect(() => {
     if (flowRef.current) flowRef.current.scrollTop = flowRef.current.scrollHeight
   }, [messages, streaming?.answer])
+
+  const toggleMessageReference = (id: string) => {
+    if (sending) return
+    setSelectedMessageIds(current => current.includes(id) ? current.filter(value => value !== id) : current.length < 4 ? [...current, id] : current)
+    setContextPreview(null)
+    setContextPreviewOpen(false)
+  }
 
   const send = async () => {
     const sendingSessionId = sessionId
@@ -99,8 +108,8 @@ export function ChatPanel({ records, sessionId, referencedIds, workingContext = 
     setDraft('')
     setContextPreview(null)
     setContextPreviewOpen(false)
-    const sent = await onSend(question, capture ? undefined : attachedFrame?.imageId, explore && !capture && !attachedFrame && referencedRecords.length > 0)
-    if (sent && !capture) setAttachedFrame(null)
+    const sent = await onSend(question, capture ? undefined : attachedFrame?.imageId, explore && !capture && !attachedFrame && referencedRecords.length > 0, capture ? [] : selectedMessageIds)
+    if (sent && !capture) { setAttachedFrame(null); setSelectedMessageIds([]) }
     if (!sent && sessionIdRef.current === sendingSessionId) setDraft(question)
   }
 
@@ -112,7 +121,7 @@ export function ChatPanel({ records, sessionId, referencedIds, workingContext = 
     setContextPreviewError('')
     const identity = previewIdentity
     try {
-      const result = await onPreviewContext(draft.trim(), attachedFrame?.imageId, explore && !attachedFrame && referencedRecords.length > 0)
+      const result = await onPreviewContext(draft.trim(), attachedFrame?.imageId, explore && !attachedFrame && referencedRecords.length > 0, selectedMessageIds)
       if (previewIdentityRef.current !== identity) return
       setContextPreview(result)
       setContextPreviewOpen(true)
@@ -135,12 +144,17 @@ export function ChatPanel({ records, sessionId, referencedIds, workingContext = 
     <ol className="message-flow" id="dlg-01" ref={flowRef} aria-label="对话消息">
       {messages.length === 0 && <li className="chat-empty">从右侧选择已保存的文章或字幕，添加到本轮参考，然后在下方提问。</li>}
       {messages.map(message => <li className="message-row" data-role={message.role} key={message.id}>
-        <ChamferCard className="message-card" id={message.id}>
+        <ChamferCard className={`message-card${selectedMessageIds.includes(message.id) ? ' message-card-referenced' : ''}`} id={message.id}>
           <div className="message-meta"><span>{message.role === 'agent' ? 'KnowFlow' : '你'}</span><time dateTime={/^\d+$/.test(message.createdAt) ? new Date(Number(message.createdAt)).toISOString() : message.createdAt}>{timeFormatter.format(new Date(/^\d+$/.test(message.createdAt) ? Number(message.createdAt) : message.createdAt))}</time></div>
+          <div className="message-reference-control"><button type="button" aria-pressed={selectedMessageIds.includes(message.id)} disabled={sending || (!selectedMessageIds.includes(message.id) && selectedMessageIds.length >= 4)} title={selectedMessageIds.includes(message.id) ? '移出本轮参考' : '将这条消息加入本轮参考'} onClick={() => toggleMessageReference(message.id)}>{selectedMessageIds.includes(message.id) ? '✓ 已选为参考 · 移除' : '＋ 选此消息为参考'}</button></div>
           <div className="message-body">{message.paragraphs.map((paragraph, index) => <p key={index}>{paragraph}</p>)}{message.points && <ol>{message.points.map(point => <li key={point}>{point}</li>)}</ol>}{message.frame && <CapturedFrame frame={message.frame} title={records.find(record => record.id === message.frame?.recordId)?.title ?? '视频'} selected={attachedFrame?.imageId === message.frame.imageId} onAttach={() => { setAttachedFrame(message.frame ?? null); setContextPreview(null); setContextPreviewOpen(false); draftRef.current?.focus() }} />}</div>
           {Boolean(message.toolSteps?.length) && <details className="tool-steps"><summary>资料探索 · {message.toolSteps?.length} 步</summary><ol>{message.toolSteps?.map((step, index) => <li key={index}>{step}</li>)}</ol></details>}
           {message.citations && <div className="message-citations"><span>引用</span><div>{message.citations.map((citation, index) => {
             const record = records.find(item => item.id === citation.recordId)
+            if (citation.kind === 'chat' || citation.recordId.startsWith('chat:')) {
+              const cited = messages.find(item => item.id === citation.recordId.slice(5))
+              return cited && <button type="button" key={`${citation.recordId}-${citation.sourceIndex ?? index}`} title={`定位${cited.role === 'agent' ? 'Agent 回答' : '用户消息'}`} onClick={() => document.getElementById(cited.id)?.scrollIntoView({ behavior: 'smooth', block: 'center' })}><span aria-hidden="true">{citation.sourceIndex ? `[${citation.sourceIndex}]` : '↗'}</span>{cited.role === 'agent' ? 'Agent 回答' : '用户消息'}</button>
+            }
             if (!record) return null
             return <button type="button" key={`${citation.recordId}-${citation.sourceIndex ?? index}`} title={`查看 ${record.title}`} onClick={() => onRevealRecord(citation.recordId, citation.atSeconds)}><span aria-hidden="true">{citation.sourceIndex ? `[${citation.sourceIndex}]` : '↗'}</span>{citation.atSeconds == null ? record.site : `${formatElapsed(citation.atSeconds)} ${citation.kind === 'image' ? '画面' : '字幕'}`}</button>
           })}</div></div>}
@@ -171,11 +185,19 @@ export function ChatPanel({ records, sessionId, referencedIds, workingContext = 
           <button className="reference-review-remove" type="button" disabled={sending} aria-label={`移出本轮参考：${record.title}`} onClick={() => onRemoveReference(record.id)}>移除</button>
         </li>)}</ul>
       </div>}
+      {selectedMessages.length > 0 && <div className="reference-review" aria-label="本轮已选对话消息">
+        <div className="reference-review-head"><strong>本轮已选对话消息</strong><span aria-live="polite">{selectedMessages.length} / 4 条</span></div>
+        <ul>{selectedMessages.map(message => <li key={message.id}>
+          <button className="reference-review-open" type="button" title="定位这条消息" onClick={() => document.getElementById(message.id)?.scrollIntoView({ behavior: 'smooth', block: 'center' })}><span aria-hidden="true">◇</span><span><b>{message.role === 'agent' ? 'Agent 回答' : '你'}</b> · {message.paragraphs.join(' ').slice(0, 140)}{message.paragraphs.join(' ').length > 140 ? '…' : ''}</span></button>
+          <button className="reference-review-remove" type="button" disabled={sending} aria-label="移出本轮参考" onClick={() => toggleMessageReference(message.id)}>移除</button>
+        </li>)}</ul>
+        <small className="message-reference-note">仅引用所选消息的文字。Agent 回答会标明来源于对话，不代表已核实的外部事实。</small>
+      </div>}
       {referencedRecords.length > 0 && !attachedFrame && <label className="explore-option"><input type="checkbox" checked={explore} disabled={sending} onChange={event => { setExplore(event.target.checked); setContextPreview(null); setContextPreviewOpen(false) }} /><span>资料探索</span><small>允许模型在本轮已选资料中搜索、读取原文；最多 6 次只读调用。上下文预览不包含调用后追加的片段。</small></label>}
       {contextPreviewError && <p className="chat-error" role="alert">{contextPreviewError}</p>}
       {contextPreviewOpen && contextPreview && <div className="context-inspector" aria-label="本轮上下文预览">
         <div className="context-inspector-head"><strong>本轮上下文 / 发送前预览</strong><span>{contextPreview.textChars.toLocaleString()} / {contextPreview.limitChars.toLocaleString()} 字符{contextPreview.reservedChars > 0 ? ` · 预留 ${contextPreview.reservedChars.toLocaleString()}` : ''}</span></div>
-        <p>参考资料 {contextPreview.referencedRecordCount} 条 · 实际片段 {contextPreview.sources.length} / 候选 {contextPreview.candidateChunkCount}{contextPreview.imageAttached ? ' · 附带图片' : ''}</p>
+        <p>参考资料 {contextPreview.referencedRecordCount} 条 · 对话消息 {contextPreview.referencedMessageCount} 条 · 实际片段 {contextPreview.sources.length} / 候选 {contextPreview.candidateChunkCount}{contextPreview.imageAttached ? ' · 附带图片' : ''}</p>
         {(contextPreview.omittedHistoryCount > 0 || contextPreview.shortenedHistoryCount > 0 || contextPreview.shortenedSourceCount > 0) && <p>较早消息未纳入 {contextPreview.omittedHistoryCount} 条 · 缩短历史 {contextPreview.shortenedHistoryCount} 条 · 缩短片段 {contextPreview.shortenedSourceCount} 条</p>}
         <p>字符上限用于控制文本长度，不等于模型的 token 数；图片另计。</p>
         <details><summary>人格与回答规则</summary><pre>{contextPreview.systemText}</pre></details>
@@ -186,7 +208,7 @@ export function ChatPanel({ records, sessionId, referencedIds, workingContext = 
         <details open><summary>资料片段 · {contextPreview.sources.length} 条</summary>{contextPreview.sources.map(source => <div className="context-preview-source" key={source.index}><strong>[{source.index}] {source.title}{source.atSeconds == null ? '' : ` / ${formatElapsed(source.atSeconds)}`}{source.visual ? ' · 图片' : ''}</strong><small>捕获时间：{source.capturedAt || '未知'} · 来源：{source.sourceUrl || '未记录'}</small><pre>{source.text}</pre></div>)}</details>
       </div>}
       {error && <p className="chat-error" role="alert">{error}</p>}
-      <div className="composer-foot"><span>{attachedFrame ? '图片已加入本次提问' : referencedRecords.length === 0 ? hasBackground ? '可依据记忆和工作状态提问' : '请先添加资料或记忆' : `${referencedRecords.length} 条资料已选中`}</span><div><HudButton type="button" onClick={onShowHistory}>＋ 添加参考</HudButton>{onSummarize && <HudButton type="button" disabled={!agentAvailable || sending || referencedRecords.length === 0} onClick={onSummarize}>总结</HudButton>}{!agentAvailable && onOpenAgentSetup && <HudButton type="button" onClick={onOpenAgentSetup}>配置 Agent</HudButton>}<HudButton type="button" variant="primary" disabled={!canSend || sending || !draft.trim() || !hasReference || (isCaptureCommand(draft) && referencedRecords.length === 0)} onClick={() => { void send() }}>{sending ? isCaptureCommand(draft) ? '截取中' : '生成中' : '发送 →'}</HudButton></div></div>
+      <div className="composer-foot"><span>{attachedFrame ? '图片已加入本次提问' : selectedMessages.length > 0 ? `${selectedMessages.length} 条对话消息已选中` : referencedRecords.length === 0 ? hasBackground ? '可依据记忆和工作状态提问' : '请先添加资料或选择消息' : `${referencedRecords.length} 条资料已选中`}</span><div><HudButton type="button" onClick={onShowHistory}>＋ 添加参考</HudButton>{onSummarize && <HudButton type="button" disabled={!agentAvailable || sending || referencedRecords.length === 0} onClick={onSummarize}>总结</HudButton>}{!agentAvailable && onOpenAgentSetup && <HudButton type="button" onClick={onOpenAgentSetup}>配置 Agent</HudButton>}<HudButton type="button" variant="primary" disabled={!canSend || sending || !draft.trim() || !hasReference || (isCaptureCommand(draft) && referencedRecords.length === 0)} onClick={() => { void send() }}>{sending ? isCaptureCommand(draft) ? '截取中' : '生成中' : '发送 →'}</HudButton></div></div>
     </div>
   </section>
 }

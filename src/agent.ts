@@ -18,6 +18,7 @@ export type ContextPreview = {
   compactedSummary: string
   sources: { index: number; recordId: string; title: string; sourceUrl: string; capturedAt: string; atSeconds?: number; text: string; visual: boolean }[]
   referencedRecordCount: number
+  referencedMessageCount: number
   candidateChunkCount: number
   omittedHistoryCount: number
   shortenedHistoryCount: number
@@ -47,9 +48,9 @@ export const revokeProjectMemory = (id: string) => invoke<ChatState>('revoke_pro
 export const compactChatContext = () => invoke<ChatState>('compact_chat_context')
 export const suggestWorkingContext = () => invoke<WorkingSuggestion>('suggest_working_context')
 export const applyWorkingSuggestion = (suggestion: WorkingSuggestion) => invoke<ChatState>('apply_working_suggestion', { suggestion })
-export const previewAgentContext = (question: string, referencedIds: string[], frameId?: string, explore = false) =>
-  invoke<ContextPreview>('preview_agent_context', { question, referencedIds, frameId: frameId ?? null, explore })
-export async function askAgent(question: string, referencedIds: string[], onDelta: (delta: string) => void, frameId?: string, explore = false, onActivity?: (message: string) => void) {
+export const previewAgentContext = (question: string, referencedIds: string[], frameId?: string, explore = false, messageIds: string[] = []) =>
+  invoke<ContextPreview>('preview_agent_context', { question, referencedIds, frameId: frameId ?? null, explore, messageIds })
+export async function askAgent(question: string, referencedIds: string[], onDelta: (delta: string) => void, frameId?: string, explore = false, onActivity?: (message: string) => void, messageIds: string[] = []) {
   const requestId = crypto.randomUUID()
   const stop = await listen<StreamDelta>('knowflow:agent-stream', event => {
     if (event.payload.requestId === requestId) onDelta(event.payload.delta)
@@ -64,7 +65,7 @@ export async function askAgent(question: string, referencedIds: string[], onDelt
     throw error
   }
   try {
-    return await invoke<ChatMessage>('ask_agent', { question, referencedIds, requestId, frameId: frameId ?? null, explore })
+    return await invoke<ChatMessage>('ask_agent', { question, referencedIds, requestId, frameId: frameId ?? null, explore, messageIds })
   } finally {
     stop()
     stopActivity()

@@ -2,7 +2,7 @@ export type ChatCitation = {
   recordId: string
   atSeconds?: number
   sourceIndex?: number
-  kind?: 'image'
+  kind?: 'image' | 'chat'
 }
 
 export type ChatFrame = { imageId: string; recordId: string; atSeconds: number }

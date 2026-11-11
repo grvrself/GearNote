@@ -496,10 +496,20 @@ fn citations_from_answer(answer: &str, sources: &[SourceChunk]) -> Vec<ChatCitat
     let mut result = Vec::new();
     for (index, source) in sources.iter().enumerate() {
         if answer.contains(&format!("[{}]", index + 1)) {
-            result.push(ChatCitation { record_id: source.record_id.clone(), at_seconds: source.at_seconds, source_index: Some(index + 1), kind: source.visual.then(|| "image".into()) });
+            result.push(ChatCitation { record_id: source.record_id.clone(), at_seconds: source.at_seconds, source_index: Some(index + 1), kind: if source.record_id.starts_with("chat:") { Some("chat".into()) } else { source.visual.then(|| "image".into()) } });
         }
     }
     result
+}
+
+fn selected_messages(session: &ChatSession, ids: &[String]) -> Result<Vec<ChatMessage>, String> {
+    if ids.len() > 4 { return Err("每次最多选择 4 条对话消息".into()); }
+    let mut seen = HashSet::new();
+    ids.iter().map(|id| {
+        if !seen.insert(id) { return Err("请勿重复选择对话消息".into()); }
+        session.messages.iter().find(|message| &message.id == id && !message.paragraphs.join(" ").trim().is_empty())
+            .cloned().ok_or_else(|| "所选消息不在当前会话中，请重新选择".into())
+    }).collect()
 }
 
 #[derive(Clone, Serialize)]
@@ -771,12 +781,12 @@ pub fn apply_working_suggestion(app: AppHandle, state: State<'_, AgentState>, su
 }
 
 #[tauri::command]
-pub fn preview_agent_context(app: AppHandle, agent: State<'_, AgentState>, storage: State<'_, AppState>, question: String, referenced_ids: Vec<String>, frame_id: Option<String>, explore: Option<bool>) -> Result<ContextPreview, String> {
+pub fn preview_agent_context(app: AppHandle, agent: State<'_, AgentState>, storage: State<'_, AppState>, question: String, referenced_ids: Vec<String>, frame_id: Option<String>, explore: Option<bool>, message_ids: Vec<String>) -> Result<ContextPreview, String> {
     let question = question.trim();
     if question.is_empty() || question.chars().count() > 2000 { return Err("请先输入不超过 2000 字的问题".into()); }
     if referenced_ids.len() > 20 { return Err("每次最多引用 20 条资料".into()); }
     let persona = agent.persona.lock().map_err(|_| "人格文件暂不可用")?.clone();
-    let (messages, image_frame, project_memory, working, summary) = {
+    let (messages, selected, image_frame, project_memory, working, summary) = {
         let store = agent.sessions.lock().map_err(|_| "会话暂不可用")?;
         let session = store.sessions.iter().find(|item| item.id == store.active_id).ok_or("当前会话不存在")?;
         let frame = if let Some(image_id) = frame_id {
@@ -784,7 +794,7 @@ pub fn preview_agent_context(app: AppHandle, agent: State<'_, AgentState>, stora
             Some(session.messages.iter().find_map(|message| message.frame.as_ref().filter(|frame| frame.image_id == image_id).cloned())
                 .ok_or("当前会话没有这张截图")?)
         } else { None };
-        (session.messages[session.compacted_count.min(session.messages.len())..].to_vec(), frame, store.project_memory.iter().filter(|entry| memory_is_current(entry)).cloned().collect::<Vec<_>>(), session.working_context.clone(), session.compacted_summary.clone())
+        (session.messages[session.compacted_count.min(session.messages.len())..].to_vec(), selected_messages(session, &message_ids)?, frame, store.project_memory.iter().filter(|entry| memory_is_current(entry)).cloned().collect::<Vec<_>>(), session.working_context.clone(), session.compacted_summary.clone())
     };
     let records = storage.records.lock().map_err(|_| "资料库暂不可用")?.clone();
     let image = if let Some(frame) = image_frame {
@@ -796,17 +806,13 @@ pub fn preview_agent_context(app: AppHandle, agent: State<'_, AgentState>, stora
         Some(SourceChunk::image(frame.record_id, title.into(), frame.at_seconds))
     } else { None };
     let reserve = if explore.unwrap_or(false) && image.is_none() && !referenced_ids.is_empty() { context::TOOL_RESERVE_CHARS } else { 0 };
-    let prepared = if reserve == 0 {
-        context::build(&persona, question, &messages, &records, &referenced_ids, image, &project_memory, &working, &summary)
-    } else {
-        context::build_with_reserve(&persona, question, &messages, &records, &referenced_ids, image, &project_memory, &working, &summary, reserve)
-    };
+    let prepared = context::build_with_message_refs(&persona, question, &messages, &selected, &records, &referenced_ids, image, &project_memory, &working, &summary, reserve);
     if prepared.sources.is_empty() && project_memory.is_empty() && summary.is_empty() && working.goal.is_empty() && working.completed.is_empty() && working.next_step.is_empty() { return Err("请先添加资料，或保存项目记忆或工作状态".into()); }
     Ok(prepared.preview)
 }
 
 #[tauri::command]
-pub async fn ask_agent(app: AppHandle, agent: State<'_, AgentState>, storage: State<'_, AppState>, question: String, referenced_ids: Vec<String>, request_id: String, frame_id: Option<String>, explore: Option<bool>) -> Result<ChatMessage, String> {
+pub async fn ask_agent(app: AppHandle, agent: State<'_, AgentState>, storage: State<'_, AppState>, question: String, referenced_ids: Vec<String>, request_id: String, frame_id: Option<String>, explore: Option<bool>, message_ids: Vec<String>) -> Result<ChatMessage, String> {
     let question = question.trim();
     if question.is_empty() || question.chars().count() > 2000 { return Err("问题不能为空或超过 2000 字".into()); }
     if referenced_ids.len() > 20 { return Err("每次最多引用 20 条资料".into()); }
@@ -868,10 +874,10 @@ pub async fn ask_agent(app: AppHandle, agent: State<'_, AgentState>, storage: St
     let config = agent.config.lock().map_err(|_| "模型配置暂不可用")?.clone();
     let key = agent.key.lock().map_err(|_| "请先在设置页填写 API 密钥")?.clone().ok_or("请先在设置页填写 API 密钥")?;
     let persona = agent.persona.lock().map_err(|_| "人格文件暂不可用")?.clone();
-    let (recent_messages, project_memory, working, summary) = {
+    let (recent_messages, selected, project_memory, working, summary) = {
         let store = agent.sessions.lock().map_err(|_| "会话暂不可用")?;
         let session = store.sessions.iter().find(|item| item.id == request_session_id).ok_or("发起提问的会话不存在")?;
-        (session.messages[session.compacted_count.min(session.messages.len())..].to_vec(), store.project_memory.iter().filter(|entry| memory_is_current(entry)).cloned().collect::<Vec<_>>(), session.working_context.clone(), session.compacted_summary.clone())
+        (session.messages[session.compacted_count.min(session.messages.len())..].to_vec(), selected_messages(session, &message_ids)?, store.project_memory.iter().filter(|entry| memory_is_current(entry)).cloned().collect::<Vec<_>>(), session.working_context.clone(), session.compacted_summary.clone())
     };
     if config.model.is_empty() { return Err("请先在设置页填写模型名称".into()); }
     let records = storage.records.lock().map_err(|_| "资料库暂不可用")?.clone();
@@ -899,11 +905,7 @@ pub async fn ask_agent(app: AppHandle, agent: State<'_, AgentState>, storage: St
         Some((frame, format!("data:image/jpeg;base64,{}", crate::storyboard::base64(&bytes))))
     } else { None };
     let reserve = if explore.unwrap_or(false) && image_source.is_none() && !referenced_ids.is_empty() { context::TOOL_RESERVE_CHARS } else { 0 };
-    let prepared = if reserve == 0 {
-        context::build(&persona, question, &recent_messages, &records, &referenced_ids, image_source, &project_memory, &working, &summary)
-    } else {
-        context::build_with_reserve(&persona, question, &recent_messages, &records, &referenced_ids, image_source, &project_memory, &working, &summary, reserve)
-    };
+    let prepared = context::build_with_message_refs(&persona, question, &recent_messages, &selected, &records, &referenced_ids, image_source, &project_memory, &working, &summary, reserve);
     if prepared.sources.is_empty() && project_memory.is_empty() && summary.is_empty() && working.goal.is_empty() && working.completed.is_empty() && working.next_step.is_empty() { return Err("请先添加资料，或保存项目记忆或工作状态".into()); }
     let client = reqwest::Client::builder().connect_timeout(Duration::from_secs(15)).timeout(Duration::from_secs(180)).build().map_err(|_| "无法初始化网络客户端")?;
     let exploration = if explore.unwrap_or(false) && attachment.is_none() && !referenced_ids.is_empty() {
@@ -979,6 +981,20 @@ pub async fn ask_agent(app: AppHandle, agent: State<'_, AgentState>, storage: St
 mod tests {
     use super::*;
     use crate::{storage::KnowledgeRecord, ProcessStatus};
+    #[test]
+    fn selected_messages_are_scoped_to_current_session() {
+        let mut session = new_session().unwrap();
+        session.messages.push(ChatMessage { id: "msg-1".into(), role: "user".into(), created_at: "1".into(), paragraphs: vec!["原话".into()], tool_steps: vec![], citations: vec![], frame: None });
+        assert_eq!(selected_messages(&session, &["msg-1".into()]).unwrap().len(), 1);
+        assert!(selected_messages(&session, &["msg-other-session".into()]).is_err());
+        assert!(selected_messages(&session, &["msg-1".into(), "msg-1".into()]).is_err());
+    }
+    #[test]
+    fn chat_source_citation_keeps_message_kind() {
+        let source = SourceChunk { record_id: "chat:msg-1".into(), title: "对话摘录 / 用户消息".into(), source_url: String::new(), captured_at: String::new(), at_seconds: None, text: "原话".into(), score: 0, visual: false };
+        let found = citations_from_answer("先前的要求 [1]", &[source]);
+        assert_eq!(found[0].kind.as_deref(), Some("chat"));
+    }
     #[test]
     fn request_uses_image_part_only_when_selected() {
         assert_eq!(request_user_content("问题".into(), None), serde_json::json!("问题"));

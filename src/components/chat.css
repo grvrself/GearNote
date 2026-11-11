@@ -20,6 +20,8 @@
 .message-row[data-streaming='true'][data-role='agent'] .chamfer-border { background:var(--accent); }
 .message-card { width: fit-content; max-width: var(--message-max-width); }
 .message-row[data-role='user'] .chamfer-border { background: var(--accent); }
+.message-card-referenced .chamfer-border { background: var(--accent); }
+.message-card-referenced .chamfer-content { box-shadow: inset 3px 0 var(--accent); }
 .message-row[data-role='user'] .chamfer-content { background: var(--panel-2); }
 .message-card .chamfer-content { padding: var(--space-3); }
 .message-meta { display: flex; justify-content: space-between; align-items: baseline; gap: var(--space-5); color: var(--accent); font: 600 var(--fs-11) var(--font-body); }
@@ -30,6 +32,11 @@
 .message-body li { padding-left: var(--space-1); }
 .message-body li + li { margin-top: var(--space-1); }
 .message-body li::marker { color: var(--accent); font-family: var(--font-mono); }
+.message-reference-control { display:flex; justify-content:flex-end; margin-top:var(--space-2); }
+.message-reference-control button { min-height:var(--space-6); padding:var(--space-1) var(--space-2); border:var(--edge) solid var(--line); color:var(--muted); background:var(--bg); font-size:var(--fs-11); }
+.message-reference-control button:hover:not(:disabled), .message-reference-control button[aria-pressed='true'] { border-color:var(--accent); color:var(--accent); }
+.message-reference-control button:focus-visible { outline:var(--edge) solid var(--accent); outline-offset:var(--focus-offset); }
+.message-reference-control button:disabled { cursor:not-allowed; opacity:.55; }
 .tool-steps { margin-top:var(--space-3); padding-top:var(--space-2); border-top:var(--edge) solid var(--line); color:var(--muted); font-size:var(--fs-11); }
 .tool-steps summary { cursor:pointer; color:var(--paper); }
 .tool-steps summary:focus-visible { outline:var(--edge) solid var(--accent); outline-offset:var(--focus-offset); }
@@ -100,6 +107,7 @@
 .reference-review-open:hover, .reference-review-remove:hover:not(:disabled) { color:var(--accent); }
 .reference-review-remove:disabled { cursor:not-allowed; }
 .reference-review button:focus-visible { outline:var(--edge) solid var(--accent); outline-offset:var(--focus-offset); }
+.message-reference-note { display:block; margin-top:var(--space-2); color:var(--muted); font-size:var(--fs-11); line-height:var(--chat-line-height); }
 .explore-option { display:flex; flex-wrap:wrap; align-items:center; gap:var(--space-2); min-height:var(--control-height); color:var(--paper); font-size:var(--fs-12); cursor:pointer; }
 .explore-option input { width:16px; height:16px; margin:0; accent-color:var(--accent); }
 .explore-option input:focus-visible { outline:var(--edge) solid var(--accent); outline-offset:var(--focus-offset); }
