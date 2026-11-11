@@ -130,11 +130,11 @@ impl AppState {
             fs::rename(&backup_path, &records_path)?;
         }
         let db_path = data_dir.join(crate::db::FILE_NAME);
-        let mut records: Vec<KnowledgeRecord> = if let Some(saved) = crate::db::read(&db_path, "records").map_err(std::io::Error::other)? {
+        let mut records: Vec<KnowledgeRecord> = if let Some(saved) = crate::db::read_records(&db_path).map_err(std::io::Error::other)? {
             saved
         } else {
             let legacy = if records_path.exists() { serde_json::from_slice(&fs::read(&records_path)?)? } else { Vec::new() };
-            crate::db::write(&db_path, "records", &legacy).map_err(std::io::Error::other)?;
+            crate::db::write_records(&db_path, &legacy).map_err(std::io::Error::other)?;
             legacy
         };
         if invalidate_unverified_bilibili(&mut records) {
@@ -450,7 +450,7 @@ mod tests {
 }
 
 pub(crate) fn persist_records(path: &PathBuf, records: &[KnowledgeRecord]) -> Result<(), String> {
-    if path.extension().is_some_and(|value| value == "db") { return crate::db::write(path, "records", &records); }
+    if path.extension().is_some_and(|value| value == "db") { return crate::db::write_records(path, records); }
     let serialized = serde_json::to_vec_pretty(records).map_err(|_| "资料无法编码".to_owned())?;
     let temp_path = path.with_extension("json.tmp");
     let backup_path = path.with_extension("json.bak");
