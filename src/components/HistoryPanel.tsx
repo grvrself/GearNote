@@ -129,9 +129,9 @@ function RecordCard({ record, expanded, referenced, activeMoment, onToggle, onMo
       setSourceMessage('复制失败，请稍后重试')
     }
   }
-  return <ChamferCard className={`record-card ${expanded ? 'is-expanded' : ''}`} id={record.id}>
+  return <ChamferCard className={`record-card ${expanded ? 'is-expanded' : ''} ${referenced ? 'is-referenced' : ''}`} id={record.id}>
     <button className="record-summary" type="button" aria-expanded={expanded} aria-controls={`${record.id}-details`} onClick={onToggle}>
-      <span className="record-topline"><span className="record-kind">{record.type === 'video' ? '■ VIDEO' : '◆ ARTICLE'}</span>{record.demo && <span className="record-demo">DEMO</span>}{record.durationSeconds != null && <time className="record-duration" dateTime={`PT${record.durationSeconds}S`}>{formatElapsed(record.durationSeconds)}</time>}<span className="record-expand" aria-hidden="true">{expanded ? '−' : '+'}</span></span>
+      <span className="record-topline"><span className="record-kind">{record.type === 'video' ? '■ VIDEO' : '◆ ARTICLE'}</span>{record.demo && <span className="record-demo">DEMO</span>}{record.durationSeconds != null && <time className="record-duration" dateTime={`PT${record.durationSeconds}S`}>{formatElapsed(record.durationSeconds)}</time>}{referenced && <span className="record-reference-flag">本轮参考</span>}<span className="record-expand" aria-hidden="true">{expanded ? '−' : '+'}</span></span>
       <strong className="record-title">{expanded && <span aria-hidden="true">⌜</span>}{record.title}</strong>
       <span className="record-origin"><span>{record.site}</span><time dateTime={record.savedAt}>{savedAtFormatter.format(new Date(record.savedAt))}</time></span>
       {record.captionLanguage && <span className="record-caption-language">SUBTITLE / {record.captionLanguage}</span>}
@@ -145,7 +145,7 @@ function RecordCard({ record, expanded, referenced, activeMoment, onToggle, onMo
       {record.type === 'video' && !record.demo && <StoryboardSection record={record} onChanged={onRecordsChanged} />}
       {record.status === 'extracting' && <p className="record-process-note">字幕提取进行中，摘录完成后显示。</p>}
       <div className="record-actions">
-        <HudButton variant={record.status === 'ready' ? 'primary' : 'default'} type="button" disabled={record.status !== 'ready'} onClick={onReference}>{referenced ? '已加入参考' : '加入参考'}</HudButton>
+        <HudButton variant={record.status === 'ready' && !referenced ? 'primary' : 'default'} type="button" aria-pressed={referenced} disabled={record.status !== 'ready'} onClick={onReference}>{referenced ? '移出本轮参考' : '加入本轮参考'}</HudButton>
         <HudButton type="button" disabled={!record.sourceUrl} onClick={() => { void copySource() }}>{record.type === 'video' ? '复制视频链接' : '复制原文链接'}</HudButton>
         {record.status === 'fault' && <HudButton type="button" disabled title="请返回原页面再次点击浏览器扩展图标">重试</HudButton>}
       </div>

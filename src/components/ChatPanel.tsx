@@ -164,6 +164,13 @@ export function ChatPanel({ records, sessionId, referencedIds, workingContext = 
       </div>}
       {memoryError && <p className="chat-error" role="alert">{memoryError}</p>}
       <textarea id="agent-draft" ref={draftRef} value={draft} readOnly={sending} onChange={event => { setDraft(event.target.value); setContextPreview(null); setContextPreviewOpen(false) }} onKeyDown={event => { if (event.ctrlKey && event.key === 'Enter') { event.preventDefault(); void send() } }} placeholder="提问，或输入「截取 01:20 的画面」" />
+      {referencedRecords.length > 0 && <div className="reference-review" aria-label="本轮已选资料">
+        <div className="reference-review-head"><strong>本轮已选资料</strong><span aria-live="polite">{referencedRecords.length} 条</span></div>
+        <ul>{referencedRecords.map(record => <li key={record.id}>
+          <button className="reference-review-open" type="button" title={`定位资料：${record.title}`} onClick={() => onRevealRecord(record.id)}><span aria-hidden="true">{record.type === 'video' ? '■' : '◆'}</span><span>{record.title}{record.status !== 'ready' && <small> · 当前不可用于问答</small>}</span></button>
+          <button className="reference-review-remove" type="button" disabled={sending} aria-label={`移出本轮参考：${record.title}`} onClick={() => onRemoveReference(record.id)}>移除</button>
+        </li>)}</ul>
+      </div>}
       {referencedRecords.length > 0 && !attachedFrame && <label className="explore-option"><input type="checkbox" checked={explore} disabled={sending} onChange={event => { setExplore(event.target.checked); setContextPreview(null); setContextPreviewOpen(false) }} /><span>资料探索</span><small>允许模型在本轮已选资料中搜索、读取原文；最多 6 次只读调用。上下文预览不包含调用后追加的片段。</small></label>}
       {contextPreviewError && <p className="chat-error" role="alert">{contextPreviewError}</p>}
       {contextPreviewOpen && contextPreview && <div className="context-inspector" aria-label="本轮上下文预览">

@@ -86,6 +86,20 @@
 .working-suggestion pre { flex-basis:100%; }
 .memory-controls :focus-visible { outline:var(--edge) solid var(--accent); outline-offset:var(--focus-offset); }
 .chat-composer textarea { width: 100%; min-height: var(--composer-input-height); resize: vertical; border: 0; color: var(--paper); background: transparent; font-size: var(--fs-13); line-height: var(--chat-line-height); }
+.reference-review { min-width:0; padding:var(--space-2); border:var(--edge) solid var(--line); background:var(--panel); }
+.reference-review-head { display:flex; justify-content:space-between; gap:var(--space-2); color:var(--accent); font-size:var(--fs-11); }
+.reference-review-head strong { font-weight:600; }
+.reference-review-head span { font-family:var(--font-mono); }
+.reference-review ul { display:grid; max-height:120px; gap:var(--space-1); margin:var(--space-2) 0 0; padding:0; overflow-y:auto; list-style:none; }
+.reference-review li { display:flex; align-items:flex-start; min-width:0; gap:var(--space-2); border-top:var(--edge) solid var(--line); }
+.reference-review-open { display:flex; flex:1; min-width:0; align-items:baseline; gap:var(--space-2); padding:var(--space-2) 0; border:0; color:var(--paper); background:transparent; text-align:left; font-size:var(--fs-12); line-height:1.45; }
+.reference-review-open > span:first-child { flex:none; color:var(--accent); font-family:var(--font-mono); }
+.reference-review-open > span:last-child { min-width:0; overflow-wrap:anywhere; }
+.reference-review-open small { color:var(--fault); font-size:var(--fs-11); }
+.reference-review-remove { flex:none; min-height:var(--control-height); padding:0 var(--space-2); border:0; color:var(--muted); background:transparent; font-size:var(--fs-11); }
+.reference-review-open:hover, .reference-review-remove:hover:not(:disabled) { color:var(--accent); }
+.reference-review-remove:disabled { cursor:not-allowed; }
+.reference-review button:focus-visible { outline:var(--edge) solid var(--accent); outline-offset:var(--focus-offset); }
 .explore-option { display:flex; flex-wrap:wrap; align-items:center; gap:var(--space-2); min-height:var(--control-height); color:var(--paper); font-size:var(--fs-12); cursor:pointer; }
 .explore-option input { width:16px; height:16px; margin:0; accent-color:var(--accent); }
 .explore-option input:focus-visible { outline:var(--edge) solid var(--accent); outline-offset:var(--focus-offset); }
