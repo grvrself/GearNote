@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { isTauri } from '@tauri-apps/api/core'
-import { getAgentStatus, saveAgentConfig, type AgentStatus } from '../agent'
+import { getAgentStatus, saveAgentConfig, testAgentTools, type AgentStatus, type ToolProbe } from '../agent'
 import { ChamferCard } from './ChamferCard'
 import { HudButton } from './HudButton'
 import './agent-setup.css'
@@ -16,12 +16,17 @@ export function AgentSetup({ onStatusChange }: Props) {
   const [keyWarning, setKeyWarning] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
+  const [savedConfig, setSavedConfig] = useState({ baseUrl: '', model: '' })
+  const [testing, setTesting] = useState(false)
+  const [probe, setProbe] = useState<ToolProbe | null>(null)
+  const [probeError, setProbeError] = useState('')
 
   useEffect(() => {
     if (!isTauri()) return
     void getAgentStatus().then(status => {
       setBaseUrl(status.baseUrl)
       setModel(status.model)
+      setSavedConfig({ baseUrl: status.baseUrl, model: status.model })
       setHasKey(status.hasKey)
       setKeyPersistent(status.keyPersistent)
       setKeyWarning(status.keyWarning)
@@ -37,6 +42,11 @@ export function AgentSetup({ onStatusChange }: Props) {
       setHasKey(status.hasKey)
       setKeyPersistent(status.keyPersistent)
       setKeyWarning(status.keyWarning)
+      setBaseUrl(status.baseUrl)
+      setModel(status.model)
+      setSavedConfig({ baseUrl: status.baseUrl, model: status.model })
+      setProbe(null)
+      setProbeError('')
       setApiKey('')
       onStatusChange(status)
       setMessage('配置已保存，可以返回对话区提问')
@@ -45,6 +55,15 @@ export function AgentSetup({ onStatusChange }: Props) {
     } finally {
       setSaving(false)
     }
+  }
+
+  const testTools = async () => {
+    setTesting(true)
+    setProbe(null)
+    setProbeError('')
+    try { setProbe(await testAgentTools()) }
+    catch (error) { setProbeError(String(error)) }
+    finally { setTesting(false) }
   }
 
   return <ChamferCard className="agent-setup-card"><section className="agent-setup" id="agt-01" aria-labelledby="agt-01-title">
@@ -57,5 +76,11 @@ export function AgentSetup({ onStatusChange }: Props) {
     <p className="agent-setup-note">{keyPersistent ? '密钥由当前 Windows 账户加密保存在本机，重启后自动读取；输入框不会显示原文。' : '当前平台的密钥只在本次运行期间保留。'}</p>
     {keyWarning && <p className="agent-setup-note" role="alert">{keyWarning}</p>}
     <div className="agent-setup-actions"><HudButton type="button" variant="primary" disabled={!isTauri() || saving || !baseUrl.trim() || !model.trim()} onClick={() => { void save() }}>{saving ? '保存中' : '保存配置'}</HudButton><span role="status">{message || (hasKey ? '密钥已设置' : '密钥未设置')}</span></div>
+    <div className="agent-tool-probe">
+      <div><strong>资料探索兼容性</strong><HudButton type="button" disabled={!isTauri() || saving || testing || !hasKey || !savedConfig.model || baseUrl !== savedConfig.baseUrl || model !== savedConfig.model} onClick={() => { void testTools() }}>{testing ? '测试中' : '测试已保存配置'}</HudButton></div>
+      <p>点击后会向已保存的模型服务发送一段虚构测试资料，可能产生少量 API 用量；不会读取真实资料或写入会话。修改配置后请先保存。</p>
+      {probe && <div className="agent-tool-probe-result" role="status"><strong>{probe.searched && probe.read ? '搜索与读取均通过' : probe.supported ? '只确认了部分工具调用' : '未检测到工具调用'}</strong><span>耗时 {(probe.elapsedMs / 1000).toFixed(1)} 秒</span>{probe.steps.length > 0 && <ol>{probe.steps.map((step, index) => <li key={index}>{step}</li>)}</ol>}</div>}
+      {probeError && <p role="alert">{probeError}</p>}
+    </div>
   </section></ChamferCard>
 }

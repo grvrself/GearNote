@@ -1,6 +1,6 @@
 use crate::{context::{self, ContextPreview, PreparedContext, SourceChunk}, read_tools::ReadIndex, storage::AppState};
 use serde::{Deserialize, Serialize};
-use std::{collections::HashSet, fs, io::Write, path::PathBuf, sync::Mutex, time::Duration};
+use std::{collections::HashSet, fs, io::Write, path::PathBuf, sync::Mutex, time::{Duration, Instant}};
 use tauri::{AppHandle, Emitter, Manager, State};
 use url::Url;
 use uuid::Uuid;
@@ -502,6 +502,35 @@ fn citations_from_answer(answer: &str, sources: &[SourceChunk]) -> Vec<ChatCitat
     result
 }
 
+fn invalid_citation_numbers(answer: &str, source_count: usize) -> Vec<usize> {
+    let bytes = answer.as_bytes();
+    let mut invalid = Vec::new();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] != b'[' || (index > 0 && (bytes[index - 1].is_ascii_alphanumeric() || bytes[index - 1] == b'`')) {
+            index += 1;
+            continue;
+        }
+        let mut end = index + 1;
+        while end < bytes.len() && bytes[end].is_ascii_digit() && end - index <= 6 { end += 1; }
+        if end > index + 1 && end < bytes.len() && bytes[end] == b']' {
+            if let Ok(number) = answer[index + 1..end].parse::<usize>() {
+                if (number == 0 || number > source_count) && !invalid.contains(&number) { invalid.push(number); }
+            }
+            index = end + 1;
+        } else { index += 1; }
+    }
+    invalid
+}
+
+fn validate_citation_numbers(answer: &str, source_count: usize) -> Result<(), String> {
+    if source_count == 0 { return Ok(()); }
+    let invalid = invalid_citation_numbers(answer, source_count);
+    if invalid.is_empty() { Ok(()) } else {
+        Err(format!("模型使用了未提供的资料编号 {}，本轮回答未保存；请重试或缩小参考范围", invalid.iter().map(|number| format!("[{number}]")).collect::<Vec<_>>().join("、")))
+    }
+}
+
 fn selected_messages(session: &ChatSession, ids: &[String]) -> Result<Vec<ChatMessage>, String> {
     if ids.len() > 4 { return Err("每次最多选择 4 条对话消息".into()); }
     let mut seen = HashSet::new();
@@ -612,6 +641,23 @@ fn execute_reference_tool(index: &ReadIndex, sources: &mut Vec<SourceChunk>, nam
     }
 }
 
+fn tool_step_label(name: &str, args: &serde_json::Value, result: &serde_json::Value) -> String {
+    let clean = |text: &str| text.chars().filter(|ch| !ch.is_control()).take(70).collect::<String>();
+    let error = result.get("error").and_then(serde_json::Value::as_str);
+    match name {
+        "search_references" => {
+            let query = clean(args.get("query").and_then(serde_json::Value::as_str).unwrap_or_default());
+            if let Some(error) = error { format!("搜索“{query}”失败：{}", clean(error)) }
+            else { format!("搜索“{query}” · 命中 {} 个片段", result.get("matches").and_then(serde_json::Value::as_array).map(Vec::len).unwrap_or(0)) }
+        }
+        "read_reference" => {
+            if let Some(error) = error { format!("读取资料失败：{}", clean(error)) }
+            else { format!("读取《{}》 · 来源 [{}]", clean(result.get("title").and_then(serde_json::Value::as_str).unwrap_or("资料")), result.get("source_index").and_then(serde_json::Value::as_u64).unwrap_or(0)) }
+        }
+        _ => "拒绝未知工具调用".into(),
+    }
+}
+
 async fn explore_references<F: Fn(&str)>(
     activity: F, client: &reqwest::Client, config: &AgentConfig, key: &str,
     prepared: &PreparedContext, index: &ReadIndex,
@@ -669,11 +715,8 @@ async fn explore_references<F: Fn(&str)>(
                 steps.push("工具输出已达到本轮上限".into());
             } else {
                 output_chars += content.chars().count();
-                let step = match name {
-                    "search_references" => format!("搜索：{}", args.get("query").and_then(serde_json::Value::as_str).unwrap_or_default().chars().take(80).collect::<String>()),
-                    "read_reference" => format!("读取片段：{}", args.get("chunk_id").and_then(serde_json::Value::as_str).unwrap_or_default().chars().take(80).collect::<String>()),
-                    _ => "拒绝未知工具调用".into(),
-                };
+                let step = tool_step_label(name, &args, &result);
+                activity(&step);
                 steps.push(step);
             }
             messages.push(serde_json::json!({"role":"tool","tool_call_id":id,"content":content}));
@@ -686,6 +729,38 @@ async fn explore_references<F: Fn(&str)>(
     messages.push(serde_json::json!({"role":"user","content":"请根据本轮已提供的资料和工具结果回答原问题，重要事实标注有效的 [编号]。若资料不足，请直接说明。"}));
     activity("资料读取完成，正在生成回答…");
     Ok(Some(Exploration { messages, sources, steps }))
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolProbe { supported: bool, searched: bool, read: bool, elapsed_ms: u128, steps: Vec<String> }
+
+#[tauri::command]
+pub async fn test_agent_tools(state: State<'_, AgentState>) -> Result<ToolProbe, String> {
+    {
+        let mut busy = state.busy.lock().map_err(|_| "Agent 暂不可用")?;
+        if *busy { return Err("上一条提问仍在处理，请稍候再测试".into()); }
+        *busy = true;
+    }
+    let _guard = BusyGuard(&state.busy);
+    let config = state.config.lock().map_err(|_| "模型配置暂不可用")?.clone();
+    let key = state.key.lock().map_err(|_| "模型密钥暂不可用")?.clone().ok_or("请先保存 API 密钥")?;
+    if config.model.is_empty() { return Err("请先保存模型名称".into()); }
+    let record: crate::storage::KnowledgeRecord = serde_json::from_value(serde_json::json!({
+        "id":"probe-record", "type":"article", "title":"KnowFlow 虚构测试资料", "site":"local-probe",
+        "savedAt":"2026-01-01T00:00:00Z", "status":"ready", "sourceUrl":"https://example.invalid/knowflow-probe",
+        "contentText":"验证标记 ALPHA-27 仅用于确认模型能搜索并读取虚构资料。", "excerpt":[]
+    })).map_err(|_| "测试资料生成失败")?;
+    let ids = vec![record.id.clone()];
+    let question = "请先调用 search_references 搜索验证标记 ALPHA-27，再用 read_reference 读取匹配片段。";
+    let prepared = context::build_with_message_refs("你正在执行只读工具兼容性测试。", question, &[], &[], &[record.clone()], &ids, None, &[], &WorkingContext::default(), "", context::TOOL_RESERVE_CHARS);
+    let index = ReadIndex::new(&[record], &ids);
+    let client = reqwest::Client::builder().connect_timeout(Duration::from_secs(15)).timeout(Duration::from_secs(60)).build().map_err(|_| "无法初始化测试连接")?;
+    let start = Instant::now();
+    let result = explore_references(|_| {}, &client, &config, &key, &prepared, &index).await?;
+    let steps = result.map(|item| item.steps).unwrap_or_default();
+    Ok(ToolProbe { supported: !steps.is_empty(), searched: steps.iter().any(|step| step.starts_with("搜索“") && step.contains("命中")),
+        read: steps.iter().any(|step| step.starts_with("读取《") && step.contains("来源 [")), elapsed_ms: start.elapsed().as_millis(), steps })
 }
 
 async fn auxiliary_completion(state: &AgentState, system: &str, user: String) -> Result<String, String> {
@@ -949,6 +1024,7 @@ pub async fn ask_agent(app: AppHandle, agent: State<'_, AgentState>, storage: St
     let answer = answer.trim();
     if answer.is_empty() { return Err("模型返回了空回答".into()); }
     if answer.chars().count() > 20_000 { return Err("模型回答过长，未保存".into()); }
+    validate_citation_numbers(answer, sources.len())?;
     let mut citations = citations_from_answer(answer, &sources);
     if citations.is_empty() {
         if let Some((frame, _)) = &attachment {
@@ -1085,6 +1161,9 @@ mod tests {
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].record_id, "rec-real");
         assert_eq!(found[0].at_seconds, Some(42));
+        assert!(validate_citation_numbers("结论 [1]", sources.len()).is_ok());
+        assert!(validate_citation_numbers("结论 [1]，伪造 [2]", sources.len()).unwrap_err().contains("[2]"));
+        assert_eq!(invalid_citation_numbers("数组 item[2] 与引用 [0]、[9]、[9]", 1), vec![0, 9]);
     }
 
     #[test]
@@ -1118,6 +1197,12 @@ mod tests {
         assert!(execute_reference_tool(&index, &mut sources, "read_reference", &serde_json::json!({"chunk_id":"rec-other:0"})).get("error").is_some());
         assert_eq!(sources.len(), 1);
         assert_eq!(citations_from_answer("规则见 [1]，伪造的 [2]", &sources).len(), 1);
+        let read_step = tool_step_label("read_reference", &read(), &execute_reference_tool(&index, &mut sources, "read_reference", &read()));
+        assert!(read_step.contains("Rust"));
+        assert!(read_step.contains("[1]"));
+        assert!(!read_step.contains("rec-selected:0"));
+        let search_step = tool_step_label("search_references", &serde_json::json!({"query":"所有权"}), &index.search("所有权"));
+        assert!(search_step.contains("命中 1 个片段"));
     }
 
     #[test]

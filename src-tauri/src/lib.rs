@@ -23,7 +23,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![storage::list_records, storage::get_bridge_status,
             storyboard::analyze_video_storyboard, storyboard::get_storyboard_image, storyboard::open_video_at,
-            agent::get_agent_status, agent::save_agent_config, agent::list_chat_messages, agent::get_chat_state,
+            agent::get_agent_status, agent::save_agent_config, agent::test_agent_tools, agent::list_chat_messages, agent::get_chat_state,
             agent::create_chat_session, agent::switch_chat_session, agent::rename_chat_session,
             agent::delete_chat_session, agent::set_chat_references, agent::save_working_context, agent::confirm_project_memory, agent::revoke_project_memory, agent::compact_chat_context, agent::suggest_working_context, agent::apply_working_suggestion, agent::preview_agent_context, agent::ask_agent,
             agent::get_persona, agent::save_persona, agent::get_default_persona, agent::reload_persona,
