@@ -1,8 +1,8 @@
-use crate::{agent::{self, AgentState}, db, notes::{Note, NotesState}};
+use crate::{agent::{self, AgentState, ChatSession, ChatState, ChatStore, WorkingContext}, db, notes::{Note, NotesState}};
 use rusqlite::{params, OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
 use std::{path::Path, time::{SystemTime, UNIX_EPOCH}};
-use tauri::State;
+use tauri::{AppHandle, Emitter, State};
 use uuid::Uuid;
 
 const MAX_NOTE_FOR_MODEL: usize = 12_000;
@@ -252,6 +252,242 @@ fn list_note_workflow_events_inner(path: &Path, note_id: &str) -> Result<Vec<Not
     rows.map(|row| row.map_err(|error| format!("操作记录读取失败：{error}"))).collect()
 }
 
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkingProposal {
+    pub id: String,
+    pub session_id: String,
+    pub before: WorkingContext,
+    pub after: WorkingContext,
+    pub status: String,
+    pub created_at: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkingWorkflowEvent {
+    id: String,
+    proposal_id: String,
+    action: String,
+    at: String,
+    detail: String,
+    undoable: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ModelWorking { goal: String, completed: String, next_step: String }
+
+fn working_json(working: &WorkingContext) -> Result<String, String> {
+    serde_json::to_string(working).map_err(|error| format!("工作状态编码失败：{error}"))
+}
+
+fn parse_working_proposal(answer: &str, session_id: &str, before: &WorkingContext) -> Result<WorkingProposal, String> {
+    let start = answer.find('{').ok_or("模型未返回工作状态 JSON")?;
+    let end = answer.rfind('}').ok_or("模型未返回完整工作状态 JSON")?;
+    let parsed: ModelWorking = serde_json::from_str(&answer[start..=end]).map_err(|_| "工作状态建议格式无效")?;
+    let values = [parsed.goal.trim(), parsed.completed.trim(), parsed.next_step.trim()];
+    if values.iter().any(|value| value.chars().count() > 1200 || value.contains('\0')) {
+        return Err("工作状态每项最多 1200 字且不能包含无效字符".into());
+    }
+    let after = WorkingContext { goal: values[0].into(), completed: values[1].into(), next_step: values[2].into(), updated_at: before.updated_at.clone() };
+    if working_json(before)? == working_json(&after)? { return Err("模型未提出有效的工作状态修改".into()); }
+    Ok(WorkingProposal { id: format!("proposal-{}", Uuid::new_v4()), session_id: session_id.into(),
+        before: before.clone(), after, status: "pending".into(), created_at: now_millis()?.to_string() })
+}
+
+fn log_work_event(transaction: &Transaction<'_>, proposal: &WorkingProposal, action: &str, detail: &str) -> Result<(), String> {
+    transaction.execute("INSERT INTO workflow_events(id,proposal_id,action,target_id,at,detail) VALUES (?1,?2,?3,?4,?5,?6)",
+        params![format!("event-{}", Uuid::new_v4()), &proposal.id, action, &proposal.session_id,
+            now_millis()?.to_string(), detail]).map_err(|error| format!("工作状态操作记录保存失败：{error}"))?;
+    Ok(())
+}
+
+fn load_working_proposal(transaction: &Transaction<'_>, id: &str) -> Result<WorkingProposal, String> {
+    transaction.query_row("SELECT target_id,before_json,after_json,status,created_at FROM workflow_proposals
+        WHERE id=?1 AND kind='working_context'", [id], |row| {
+        let before_json: String = row.get(1)?;
+        let after_json: String = row.get(2)?;
+        Ok((row.get::<_, String>(0)?, before_json, after_json, row.get::<_, String>(3)?, row.get::<_, String>(4)?))
+    }).optional().map_err(|error| format!("工作状态建议读取失败：{error}"))?
+        .ok_or("工作状态建议不存在".to_owned())
+        .and_then(|(session_id, before_json, after_json, status, created_at)| Ok(WorkingProposal {
+            id: id.into(), session_id,
+            before: serde_json::from_str(&before_json).map_err(|_| "建议的原工作状态无效")?,
+            after: serde_json::from_str(&after_json).map_err(|_| "建议的新工作状态无效")?,
+            status, created_at,
+        }))
+}
+
+fn store_working_proposal(path: &Path, proposal: &WorkingProposal) -> Result<(), String> {
+    let mut connection = db::open(path)?;
+    let transaction = connection.transaction().map_err(|error| format!("工作状态建议事务启动失败：{error}"))?;
+    let session_json: String = transaction.query_row("SELECT json FROM session_rows WHERE id=?1", [&proposal.session_id], |row| row.get(0))
+        .optional().map_err(|error| format!("会话读取失败：{error}"))?.ok_or("会话不存在")?;
+    let session: ChatSession = serde_json::from_str(&session_json).map_err(|_| "会话记录无效")?;
+    if working_json(&session.working_context)? != working_json(&proposal.before)? {
+        return Err("工作状态在建议生成期间已变化，请重新生成".into());
+    }
+    let pending: i64 = transaction.query_row("SELECT count(*) FROM workflow_proposals WHERE kind='working_context' AND target_id=?1 AND status='pending'",
+        [&proposal.session_id], |row| row.get(0)).map_err(|error| format!("待确认建议检查失败：{error}"))?;
+    if pending > 0 { return Err("请先处理当前待确认的工作状态建议".into()); }
+    transaction.execute("INSERT INTO workflow_proposals(id,kind,target_id,before_json,after_json,mode,before_text,after_text,reason,status,created_at)
+        VALUES (?1,'working_context',?2,?3,?4,'replace','','','工作状态建议','pending',?5)",
+        params![&proposal.id, &proposal.session_id, working_json(&proposal.before)?, working_json(&proposal.after)?, &proposal.created_at])
+        .map_err(|error| format!("工作状态建议保存失败：{error}"))?;
+    log_work_event(&transaction, proposal, "proposed", "已生成待确认的工作状态建议")?;
+    transaction.commit().map_err(|error| format!("工作状态建议提交失败：{error}"))
+}
+
+fn write_working_row(transaction: &Transaction<'_>, session: &ChatSession, after: &WorkingContext) -> Result<(), String> {
+    let mut metadata = session.clone();
+    metadata.messages.clear();
+    let before_json = serde_json::to_string(&metadata).map_err(|_| "会话编码失败")?;
+    metadata.working_context = after.clone();
+    let after_json = serde_json::to_string(&metadata).map_err(|_| "会话编码失败")?;
+    let changed = transaction.execute("UPDATE session_rows SET json=?1 WHERE id=?2 AND json=?3",
+        params![after_json, &session.id, before_json]).map_err(|error| format!("工作状态写入失败：{error}"))?;
+    if changed != 1 { return Err("会话已在其他窗口修改，请刷新后重试".into()); }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn suggest_working_context(state: State<'_, AgentState>) -> Result<WorkingProposal, String> {
+    let (session_id, before, summary, messages, last_message_id) = {
+        let store = state.sessions.lock().map_err(|_| "会话暂不可用")?;
+        let session = store.sessions.iter().find(|item| item.id == store.active_id).ok_or("当前会话不存在")?;
+        if session.messages.is_empty() { return Err("当前会话还没有对话可供分析".into()); }
+        (session.id.clone(), session.working_context.clone(), session.compacted_summary.clone(),
+            session.messages.iter().rev().take(10).cloned().collect::<Vec<_>>(), session.messages.last().map(|item| item.id.clone()))
+    };
+    let history = messages.iter().rev().map(|message| format!("{}（{}）：{}", message.role, message.created_at,
+        message.paragraphs.join(" ").chars().take(700).collect::<String>())).collect::<Vec<_>>().join("\n");
+    let prompt = format!("当前工作状态：\n目标：{}\n已完成：{}\n下一步：{}\n\n较早对话摘要：{}\n\n近期对话：\n{}",
+        before.goal, before.completed, before.next_step, summary, history);
+    let answer = agent::auxiliary_completion(&state,
+        "你只提出工作状态修改建议，不能自行确认或执行。仅输出 JSON 对象，字段为 goal、completed、nextStep，值均为字符串，不得添加其他字段。只有对话明确表明某事实际完成时才能把它写入 completed；不确定的保留在 nextStep。不要添加对话之外的事实。", prompt).await?;
+    let proposal = parse_working_proposal(&answer, &session_id, &before)?;
+    let store = state.sessions.lock().map_err(|_| "会话暂不可用")?;
+    let session = store.sessions.iter().find(|item| item.id == session_id && store.active_id == session_id).ok_or("会话已切换，请重新生成建议")?;
+    if working_json(&session.working_context)? != working_json(&before)? || session.messages.last().map(|item| &item.id) != last_message_id.as_ref() {
+        return Err("对话或工作状态已变化，请重新生成建议".into());
+    }
+    store_working_proposal(&state.sessions_path, &proposal)?;
+    Ok(proposal)
+}
+
+fn apply_working_proposal_inner(path: &Path, store: &mut ChatStore, id: &str) -> Result<ChatState, String> {
+    let mut connection = db::open(path)?;
+    let transaction = connection.transaction().map_err(|error| format!("工作状态事务启动失败：{error}"))?;
+    let mut proposal = load_working_proposal(&transaction, id)?;
+    if proposal.status != "pending" { return Err("这条工作状态建议已处理".into()); }
+    if store.active_id != proposal.session_id { return Err("请先切回建议所属的会话".into()); }
+    let session = store.sessions.iter_mut().find(|item| item.id == proposal.session_id).ok_or("会话不存在")?;
+    if working_json(&session.working_context)? != working_json(&proposal.before)? {
+        transaction.execute("UPDATE workflow_proposals SET status='stale' WHERE id=?1", [id])
+            .map_err(|error| format!("过期建议状态保存失败：{error}"))?;
+        log_work_event(&transaction, &proposal, "stale", "工作状态已变更，未执行建议")?;
+        transaction.commit().map_err(|error| format!("过期建议提交失败：{error}"))?;
+        return Err("工作状态已变化，这条建议未执行".into());
+    }
+    proposal.after.updated_at = now_millis()?.max(proposal.before.updated_at.parse::<u128>().unwrap_or(0).saturating_add(1)).to_string();
+    write_working_row(&transaction, session, &proposal.after)?;
+    transaction.execute("UPDATE workflow_proposals SET status='applied',after_json=?1,applied_at=?2 WHERE id=?3",
+        params![working_json(&proposal.after)?, &proposal.after.updated_at, id]).map_err(|error| format!("建议状态保存失败：{error}"))?;
+    log_work_event(&transaction, &proposal, "applied", "用户确认后已更新工作状态")?;
+    transaction.commit().map_err(|error| format!("工作状态提交失败：{error}"))?;
+    session.working_context = proposal.after;
+    agent::state_view(store)
+}
+
+#[tauri::command]
+pub fn apply_working_suggestion(app: AppHandle, state: State<'_, AgentState>, proposal_id: String) -> Result<ChatState, String> {
+    let busy = state.busy.lock().map_err(|_| "Agent 暂不可用")?;
+    if *busy { return Err("正在生成回答，请稍后确认建议".into()); }
+    let mut store = state.sessions.lock().map_err(|_| "会话暂不可用")?;
+    let result = apply_working_proposal_inner(&state.sessions_path, &mut store, &proposal_id)?;
+    drop(store);
+    drop(busy);
+    let _ = app.emit("knowflow:chat-changed", ());
+    Ok(result)
+}
+
+fn undo_working_proposal_inner(path: &Path, store: &mut ChatStore, id: &str) -> Result<ChatState, String> {
+    let mut connection = db::open(path)?;
+    let transaction = connection.transaction().map_err(|error| format!("撤销事务启动失败：{error}"))?;
+    let proposal = load_working_proposal(&transaction, id)?;
+    if proposal.status != "applied" { return Err("这条建议不能撤销".into()); }
+    if store.active_id != proposal.session_id { return Err("请先切回建议所属的会话".into()); }
+    let session = store.sessions.iter_mut().find(|item| item.id == proposal.session_id).ok_or("会话不存在")?;
+    if working_json(&session.working_context)? != working_json(&proposal.after)? { return Err("工作状态之后又有修改，不能直接撤销旧操作".into()); }
+    let mut restored = proposal.before.clone();
+    restored.updated_at = now_millis()?.max(proposal.after.updated_at.parse::<u128>().unwrap_or(0).saturating_add(1)).to_string();
+    write_working_row(&transaction, session, &restored)?;
+    transaction.execute("UPDATE workflow_proposals SET status='undone' WHERE id=?1", [id])
+        .map_err(|error| format!("撤销状态保存失败：{error}"))?;
+    log_work_event(&transaction, &proposal, "undone", "用户撤销，工作状态已恢复")?;
+    transaction.commit().map_err(|error| format!("撤销提交失败：{error}"))?;
+    session.working_context = restored;
+    agent::state_view(store)
+}
+
+#[tauri::command]
+pub fn undo_working_suggestion(app: AppHandle, state: State<'_, AgentState>, proposal_id: String) -> Result<ChatState, String> {
+    let busy = state.busy.lock().map_err(|_| "Agent 暂不可用")?;
+    if *busy { return Err("正在生成回答，请稍后撤销".into()); }
+    let mut store = state.sessions.lock().map_err(|_| "会话暂不可用")?;
+    let result = undo_working_proposal_inner(&state.sessions_path, &mut store, &proposal_id)?;
+    drop(store);
+    drop(busy);
+    let _ = app.emit("knowflow:chat-changed", ());
+    Ok(result)
+}
+
+#[tauri::command]
+pub fn reject_working_suggestion(state: State<'_, AgentState>, proposal_id: String) -> Result<(), String> {
+    reject_working_proposal_inner(&state.sessions_path, &proposal_id)
+}
+
+fn reject_working_proposal_inner(path: &Path, id: &str) -> Result<(), String> {
+    let mut connection = db::open(path)?;
+    let transaction = connection.transaction().map_err(|error| format!("放弃建议事务启动失败：{error}"))?;
+    let proposal = load_working_proposal(&transaction, id)?;
+    if proposal.status != "pending" { return Err("这条建议已处理".into()); }
+    transaction.execute("UPDATE workflow_proposals SET status='rejected' WHERE id=?1", [id])
+        .map_err(|error| format!("放弃建议失败：{error}"))?;
+    log_work_event(&transaction, &proposal, "rejected", "用户放弃建议，工作状态未修改")?;
+    transaction.commit().map_err(|error| format!("放弃建议提交失败：{error}"))
+}
+
+#[tauri::command]
+pub fn get_pending_working_suggestion(state: State<'_, AgentState>, session_id: String) -> Result<Option<WorkingProposal>, String> {
+    let mut connection = db::open(&state.sessions_path)?;
+    let transaction = connection.transaction().map_err(|error| format!("建议查询事务启动失败：{error}"))?;
+    let id: Option<String> = transaction.query_row("SELECT id FROM workflow_proposals WHERE kind='working_context' AND target_id=?1 AND status='pending' ORDER BY rowid DESC LIMIT 1",
+        [&session_id], |row| row.get(0)).optional().map_err(|error| format!("待确认建议读取失败：{error}"))?;
+    id.map(|id| load_working_proposal(&transaction, &id)).transpose()
+}
+
+#[tauri::command]
+pub fn list_working_workflow_events(state: State<'_, AgentState>, session_id: String) -> Result<Vec<WorkingWorkflowEvent>, String> {
+    let store = state.sessions.lock().map_err(|_| "会话暂不可用")?;
+    let current = store.sessions.iter().find(|item| item.id == session_id).map(|item| working_json(&item.working_context)).transpose()?;
+    let connection = db::open(&state.sessions_path)?;
+    let mut query = connection.prepare("SELECT event.id,event.proposal_id,event.action,event.at,event.detail,proposal.status,proposal.after_json
+        FROM workflow_events AS event JOIN workflow_proposals AS proposal ON proposal.id=event.proposal_id
+        WHERE event.target_id=?1 AND proposal.kind='working_context' ORDER BY event.at DESC,event.rowid DESC LIMIT 20")
+        .map_err(|error| format!("工作状态操作记录读取失败：{error}"))?;
+    let rows = query.query_map([&session_id], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?,
+            row.get::<_, String>(4)?, row.get::<_, String>(5)?, row.get::<_, String>(6)?))
+    }).map_err(|error| format!("工作状态操作记录读取失败：{error}"))?;
+    rows.map(|row| {
+        let (id, proposal_id, action, at, detail, status, after_json) = row.map_err(|error| format!("工作状态操作记录读取失败：{error}"))?;
+        Ok(WorkingWorkflowEvent { id, proposal_id, undoable: action == "applied" && status == "applied" && current.as_deref() == Some(&after_json),
+            action, at, detail })
+    }).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -324,6 +560,93 @@ mod tests {
         reject_note_edit_inner(&path, &rejected.id).unwrap();
         assert!(apply_note_edit_inner(&path, &mut notes, &rejected.id).is_err());
         assert!(db::read_notes(&path).unwrap().unwrap()[0].body.ends_with("人工修改。"));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    fn chat_store() -> ChatStore {
+        ChatStore { active_id: "chat-1".into(), project_memory: vec![], sessions: vec![ChatSession {
+            id: "chat-1".into(), title: "测试会话".into(), created_at: "100".into(), updated_at: "100".into(),
+            project_id: "project-default".into(),
+            working_context: WorkingContext { goal: "完成阶段五".into(), completed: "".into(), next_step: "验证流程".into(), updated_at: "200".into() },
+            compacted_summary: String::new(), compacted_count: 0, compacted_at: String::new(),
+            referenced_ids: vec![], messages: vec![],
+        }] }
+    }
+
+    #[test]
+    fn working_suggestion_requires_exact_fields_and_actual_change() {
+        let before = chat_store().sessions[0].working_context.clone();
+        let proposal = parse_working_proposal(r#"{"goal":"完成阶段五","completed":"笔记流程已完成","nextStep":"验证流程"}"#,
+            "chat-1", &before).unwrap();
+        assert_eq!(proposal.after.completed, "笔记流程已完成");
+        assert!(parse_working_proposal(r#"{"goal":"完成阶段五","completed":"","nextStep":"验证流程","command":"write"}"#,
+            "chat-1", &before).is_err());
+        assert!(parse_working_proposal(r#"{"goal":"完成阶段五","completed":"","nextStep":"验证流程"}"#,
+            "chat-1", &before).is_err());
+    }
+
+    #[test]
+    fn working_proposal_is_atomic_logged_and_undoable() {
+        let dir = std::env::temp_dir().join(format!("knowflow-working-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(db::FILE_NAME);
+        let mut store = chat_store();
+        db::write_chat(&path, &store).unwrap();
+        let proposal = parse_working_proposal(r#"{"goal":"完成阶段五","completed":"笔记流程已完成","nextStep":"验证流程"}"#,
+            "chat-1", &store.sessions[0].working_context).unwrap();
+        store_working_proposal(&path, &proposal).unwrap();
+        assert!(store_working_proposal(&path, &proposal).is_err());
+        assert_eq!(db::read_chat(&path).unwrap().unwrap().sessions[0].working_context.completed, "");
+        apply_working_proposal_inner(&path, &mut store, &proposal.id).unwrap();
+        assert_eq!(store.sessions[0].working_context.completed, "笔记流程已完成");
+        assert_eq!(db::read_chat(&path).unwrap().unwrap().sessions[0].working_context.completed, "笔记流程已完成");
+        assert!(apply_working_proposal_inner(&path, &mut store, &proposal.id).is_err());
+        let mut reopened = db::read_chat(&path).unwrap().unwrap();
+        undo_working_proposal_inner(&path, &mut reopened, &proposal.id).unwrap();
+        assert_eq!(reopened.sessions[0].working_context.completed, "");
+        assert_eq!(db::read_chat(&path).unwrap().unwrap().sessions[0].working_context.completed, "");
+        let connection = db::open(&path).unwrap();
+        let actions: Vec<String> = connection.prepare("SELECT action FROM workflow_events ORDER BY rowid").unwrap()
+            .query_map([], |row| row.get(0)).unwrap().map(Result::unwrap).collect();
+        assert_eq!(actions, vec!["proposed", "applied", "undone"]);
+        drop(connection);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn changed_or_rejected_working_proposal_cannot_write() {
+        let dir = std::env::temp_dir().join(format!("knowflow-working-stale-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(db::FILE_NAME);
+        let mut store = chat_store();
+        db::write_chat(&path, &store).unwrap();
+        let proposal = parse_working_proposal(r#"{"goal":"完成阶段五","completed":"已完成","nextStep":"验证流程"}"#,
+            "chat-1", &store.sessions[0].working_context).unwrap();
+        store_working_proposal(&path, &proposal).unwrap();
+        store.sessions[0].working_context.goal = "新的目标".into();
+        store.sessions[0].working_context.updated_at = "201".into();
+        db::write_chat(&path, &store).unwrap();
+        assert!(apply_working_proposal_inner(&path, &mut store, &proposal.id).is_err());
+        assert_eq!(db::read_chat(&path).unwrap().unwrap().sessions[0].working_context.completed, "");
+        let connection = db::open(&path).unwrap();
+        let status: String = connection.query_row("SELECT status FROM workflow_proposals WHERE id=?1", [&proposal.id], |row| row.get(0)).unwrap();
+        assert_eq!(status, "stale");
+        drop(connection);
+        let rejected = parse_working_proposal(r#"{"goal":"新的目标","completed":"另一项","nextStep":"验证流程"}"#,
+            "chat-1", &store.sessions[0].working_context).unwrap();
+        store_working_proposal(&path, &rejected).unwrap();
+        reject_working_proposal_inner(&path, &rejected.id).unwrap();
+        assert!(apply_working_proposal_inner(&path, &mut store, &rejected.id).is_err());
+        assert_eq!(db::read_chat(&path).unwrap().unwrap().sessions[0].working_context.completed, "");
+        let applied = parse_working_proposal(r#"{"goal":"新的目标","completed":"已核实事项","nextStep":"验证流程"}"#,
+            "chat-1", &store.sessions[0].working_context).unwrap();
+        store_working_proposal(&path, &applied).unwrap();
+        apply_working_proposal_inner(&path, &mut store, &applied.id).unwrap();
+        store.sessions[0].working_context.next_step = "人工重新安排".into();
+        store.sessions[0].working_context.updated_at = now_millis().unwrap().saturating_add(1).to_string();
+        db::write_chat(&path, &store).unwrap();
+        assert!(undo_working_proposal_inner(&path, &mut store, &applied.id).is_err());
+        assert_eq!(db::read_chat(&path).unwrap().unwrap().sessions[0].working_context.next_step, "人工重新安排");
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

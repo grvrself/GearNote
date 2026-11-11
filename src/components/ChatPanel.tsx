@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ChatFrame, ChatMessage } from '../chat-data'
 import type { KnowledgeRecord } from '../data'
-import type { ContextPreview, ProjectMemory, WorkingContext, WorkingSuggestion } from '../agent'
+import type { ContextPreview, ProjectMemory, WorkingContext, WorkingSuggestion, WorkingWorkflowEvent } from '../agent'
 import { isCaptureCommand } from '../capture-command'
 import { CapturedFrame } from './CapturedFrame'
 import { ChamferCard } from './ChamferCard'
 import { HudButton } from './HudButton'
+import { WorkingSuggestionPanel } from './WorkingSuggestionPanel'
 import './chat.css'
 
 type Props = {
@@ -18,7 +19,11 @@ type Props = {
   compactedCount?: number
   onCompactContext?: () => Promise<void>
   onSuggestWorkingContext?: () => Promise<WorkingSuggestion>
-  onApplyWorkingSuggestion?: (suggestion: WorkingSuggestion) => Promise<void>
+  onApplyWorkingSuggestion?: (proposalId: string) => Promise<void>
+  onUndoWorkingSuggestion?: (proposalId: string) => Promise<void>
+  onRejectWorkingSuggestion?: (proposalId: string) => Promise<void>
+  onGetPendingWorkingSuggestion?: (sessionId: string) => Promise<WorkingSuggestion | null>
+  onListWorkingWorkflowEvents?: (sessionId: string) => Promise<WorkingWorkflowEvent[]>
   onSaveWorkingContext?: (goal: string, completed: string, nextStep: string) => Promise<void>
   onConfirmMemory?: (content: string, source: string, expiresAt?: string) => Promise<void>
   onRevokeMemory?: (id: string) => Promise<void>
@@ -51,7 +56,7 @@ function formatElapsed(seconds: number) {
     : `${String(minutes).padStart(2, '0')}:${String(remainder).padStart(2, '0')}`
 }
 
-export function ChatPanel({ records, sessionId, referencedIds, workingContext = { goal: '', completed: '', nextStep: '', updatedAt: '' }, projectMemory = [], compactedSummary = '', compactedCount = 0, onCompactContext, onSuggestWorkingContext, onApplyWorkingSuggestion, onSaveWorkingContext = async () => {}, onConfirmMemory = async () => {}, onRevokeMemory = async () => {}, historyOpen, agentAvailable, sending = false, streaming = null, error = '', onSend, onPreviewContext, onOpenAgentSetup, onSummarize, onRemoveReference, onRevealRecord, onToggleHistory, onShowHistory, onCreateNoteDraft, messages = [], compact = false }: Props) {
+export function ChatPanel({ records, sessionId, referencedIds, workingContext = { goal: '', completed: '', nextStep: '', updatedAt: '' }, projectMemory = [], compactedSummary = '', compactedCount = 0, onCompactContext, onSuggestWorkingContext, onApplyWorkingSuggestion, onUndoWorkingSuggestion, onRejectWorkingSuggestion, onGetPendingWorkingSuggestion, onListWorkingWorkflowEvents, onSaveWorkingContext = async () => {}, onConfirmMemory = async () => {}, onRevokeMemory = async () => {}, historyOpen, agentAvailable, sending = false, streaming = null, error = '', onSend, onPreviewContext, onOpenAgentSetup, onSummarize, onRemoveReference, onRevealRecord, onToggleHistory, onShowHistory, onCreateNoteDraft, messages = [], compact = false }: Props) {
   const [draft, setDraft] = useState('')
   const [explore, setExplore] = useState(false)
   const [attachedFrame, setAttachedFrame] = useState<ChatFrame | null>(null)
@@ -69,7 +74,6 @@ export function ChatPanel({ records, sessionId, referencedIds, workingContext = 
   const [memoryDraft, setMemoryDraft] = useState('')
   const [memorySource, setMemorySource] = useState('')
   const [memoryExpiry, setMemoryExpiry] = useState('')
-  const [suggestion, setSuggestion] = useState<WorkingSuggestion | null>(null)
   const [contextBusy, setContextBusy] = useState(false)
   const draftRef = useRef<HTMLTextAreaElement>(null)
   const sessionIdRef = useRef(sessionId)
@@ -87,7 +91,7 @@ export function ChatPanel({ records, sessionId, referencedIds, workingContext = 
   const hasReference = referencedRecords.length > 0 || selectedMessages.length > 0 || Boolean(attachedFrame) || hasBackground
   const canSend = agentAvailable || isCaptureCommand(draft)
 
-  useEffect(() => { setDraft(''); setExplore(false); setAttachedFrame(null); setSelectedMessageIds([]); setDismissedNotes([]); setContextPreview(null); setContextPreviewOpen(false); setMemoryPanelOpen(false); setSuggestion(null) }, [sessionId])
+  useEffect(() => { setDraft(''); setExplore(false); setAttachedFrame(null); setSelectedMessageIds([]); setDismissedNotes([]); setContextPreview(null); setContextPreviewOpen(false); setMemoryPanelOpen(false) }, [sessionId])
   useEffect(() => { setContextPreview(null); setContextPreviewOpen(false) }, [referencedIds.join('|')])
   useEffect(() => { setContextPreview(null); setContextPreviewOpen(false) }, [workingContext, projectMemory, compactedSummary])
   useEffect(() => { setGoal(workingContext.goal); setCompleted(workingContext.completed); setNextStep(workingContext.nextStep) }, [sessionId, workingContext])
@@ -177,7 +181,7 @@ export function ChatPanel({ records, sessionId, referencedIds, workingContext = 
         <div className="memory-panel-head"><strong>会话管理</strong><button type="button" aria-label="关闭会话管理" onClick={() => setMemoryPanelOpen(false)}>关闭</button></div>
         <div className="memory-controls">
         <details><summary>对话压缩 · 已覆盖 {compactedCount} 条</summary><p>原消息继续保存在会话中。压缩会调用当前配置的模型，并把摘要用于后续追问。</p>{compactedSummary && <pre>{compactedSummary}</pre>}<button type="button" disabled={sending || contextBusy || !agentAvailable || messages.length - compactedCount <= 8 || !onCompactContext} onClick={() => { setMemoryError(''); setContextBusy(true); void onCompactContext?.().catch(cause => setMemoryError(String(cause))).finally(() => setContextBusy(false)) }}>{contextBusy ? '处理中' : '压缩较早对话'}</button></details>
-        <details><summary>工作状态建议</summary><p>模型只提出建议；检查后点击“接受建议”才会保存。</p><button type="button" disabled={sending || contextBusy || !agentAvailable || messages.length === 0 || !onSuggestWorkingContext} onClick={() => { setMemoryError(''); setContextBusy(true); void onSuggestWorkingContext?.().then(setSuggestion).catch(cause => setMemoryError(String(cause))).finally(() => setContextBusy(false)) }}>{contextBusy ? '处理中' : '生成建议'}</button>{suggestion && <div className="working-suggestion"><pre>目标：{suggestion.goal}{'\n'}已完成：{suggestion.completed}{'\n'}下一步：{suggestion.nextStep}</pre><button type="button" disabled={sending || contextBusy} onClick={() => { setMemoryError(''); setContextBusy(true); void onApplyWorkingSuggestion?.(suggestion).then(() => setSuggestion(null)).catch(cause => setMemoryError(String(cause))).finally(() => setContextBusy(false)) }}>接受建议</button><button type="button" onClick={() => setSuggestion(null)}>放弃</button></div>}</details>
+        <WorkingSuggestionPanel sessionId={sessionId} workingContext={workingContext} messageCount={messages.length} agentAvailable={agentAvailable} sending={sending} busy={contextBusy} onBusyChange={setContextBusy} onSuggest={onSuggestWorkingContext} onApply={onApplyWorkingSuggestion} onUndo={onUndoWorkingSuggestion} onReject={onRejectWorkingSuggestion} onGetPending={onGetPendingWorkingSuggestion} onListEvents={onListWorkingWorkflowEvents} />
         <details><summary>当前会话工作状态</summary><label>目标<textarea value={goal} maxLength={1200} onChange={event => setGoal(event.target.value)} /></label><label>已完成<textarea value={completed} maxLength={1200} onChange={event => setCompleted(event.target.value)} /></label><label>下一步<textarea value={nextStep} maxLength={1200} onChange={event => setNextStep(event.target.value)} /></label><button type="button" disabled={sending} onClick={() => { setMemoryError(''); void onSaveWorkingContext(goal, completed, nextStep).catch(cause => setMemoryError(String(cause))) }}>保存工作状态</button></details>
         <details><summary>默认项目记忆 · {projectMemory.length} 条</summary><p>只有点击“确认保存”才会作为已确认记忆供其他会话使用。</p><textarea value={memoryDraft} maxLength={1000} placeholder="例如：KnowFlow 使用 Tauri 2，前端采用 React + TypeScript。" onChange={event => setMemoryDraft(event.target.value)} /><input value={memorySource} maxLength={500} placeholder="来源或说明（可选）" onChange={event => setMemorySource(event.target.value)} /><label>到期日（可选）<input type="date" value={memoryExpiry} onChange={event => setMemoryExpiry(event.target.value)} /></label><button type="button" disabled={!memoryDraft.trim() || sending} onClick={() => { setMemoryError(''); const expiresAt = memoryExpiry ? new Date(`${memoryExpiry}T23:59:59.999`).getTime().toString() : undefined; void onConfirmMemory(memoryDraft, memorySource, expiresAt).then(() => { setMemoryDraft(''); setMemorySource(''); setMemoryExpiry('') }).catch(cause => setMemoryError(String(cause))) }}>确认保存记忆</button>{projectMemory.map(item => <p key={item.id}><span>{item.content} · 用户确认于 {new Date(Number(item.confirmedAt)).toLocaleString('zh-CN')}{item.expiresAt ? ` · 到期 ${new Date(Number(item.expiresAt)).toLocaleDateString('zh-CN')}${Number(item.expiresAt) <= Date.now() ? '（已过期）' : ''}` : ''}</span><button type="button" disabled={sending} onClick={() => { setMemoryError(''); void onRevokeMemory(item.id).catch(cause => setMemoryError(String(cause))) }}>撤销</button></p>)}</details>
         </div>

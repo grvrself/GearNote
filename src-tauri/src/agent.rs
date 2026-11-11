@@ -93,7 +93,7 @@ fn new_session() -> Result<ChatSession, String> {
 
 fn session_title(question: &str) -> String { question.chars().take(28).collect() }
 
-fn state_view(store: &ChatStore) -> Result<ChatState, String> {
+pub(crate) fn state_view(store: &ChatStore) -> Result<ChatState, String> {
     let active = store.sessions.iter().find(|item| item.id == store.active_id).ok_or("当前会话不存在")?;
     let mut sessions = store.sessions.iter().map(|item| ChatSessionSummary {
         id: item.id.clone(), title: item.title.clone(), updated_at: item.updated_at.clone(), message_count: item.messages.len(),
@@ -146,12 +146,12 @@ pub struct AgentState {
     config: Mutex<AgentConfig>,
     key: Mutex<Option<String>>,
     key_warning: Mutex<Option<String>>,
-    sessions: Mutex<ChatStore>,
+    pub(crate) sessions: Mutex<ChatStore>,
     persona: Mutex<String>,
-    busy: Mutex<bool>,
+    pub(crate) busy: Mutex<bool>,
     config_path: PathBuf,
     key_path: PathBuf,
-    sessions_path: PathBuf,
+    pub(crate) sessions_path: PathBuf,
     persona_path: PathBuf,
 }
 
@@ -840,46 +840,6 @@ pub async fn compact_chat_context(app: AppHandle, state: State<'_, AgentState>) 
         session.compacted_summary = summary;
         session.compacted_count = end;
         session.compacted_at = now_millis()?;
-        Ok(true)
-    })
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WorkingSuggestion { pub session_id: String, pub base_updated_at: String, pub goal: String, pub completed: String, pub next_step: String }
-
-#[tauri::command]
-pub async fn suggest_working_context(state: State<'_, AgentState>) -> Result<WorkingSuggestion, String> {
-    let (session_id, working, summary, messages) = {
-        let store = state.sessions.lock().map_err(|_| "会话暂不可用")?;
-        let session = store.sessions.iter().find(|item| item.id == store.active_id).ok_or("当前会话不存在")?;
-        if session.messages.is_empty() { return Err("当前会话还没有对话可供分析".into()); }
-        (session.id.clone(), session.working_context.clone(), session.compacted_summary.clone(), session.messages.iter().rev().take(10).cloned().collect::<Vec<_>>())
-    };
-    let history = messages.iter().rev().map(|message| format!("{}（{}）：{}", message.role, message.created_at, message.paragraphs.join(" ").chars().take(700).collect::<String>())).collect::<Vec<_>>().join("\n");
-    let prompt = format!("当前工作状态：\n目标：{}\n已完成：{}\n下一步：{}\n\n较早对话摘要：{}\n\n近期对话：\n{}", working.goal, working.completed, working.next_step, summary, history);
-    let answer = auxiliary_completion(&state, "你只提出工作状态修改建议，不能自行确认或执行。输出一个 JSON 对象，字段为 goal、completed、nextStep，值均为字符串。只有对话明确表明某事实际完成时才能把它写入 completed；不确定的保留在 nextStep。不要添加对话之外的事实。", prompt).await?;
-    let start = answer.find('{').ok_or("模型未返回 JSON")?;
-    let end = answer.rfind('}').ok_or("模型未返回完整 JSON")?;
-    let parsed: serde_json::Value = serde_json::from_str(&answer[start..=end]).map_err(|_| "工作状态建议格式无效")?;
-    let get = |key| -> Result<String, String> {
-        let value = parsed.get(key).and_then(|value| value.as_str()).ok_or(format!("建议缺少 {key}"))?.trim();
-        if value.chars().count() > 1200 || value.contains('\0') { return Err(format!("建议的 {key} 过长")); }
-        Ok(value.into())
-    };
-    Ok(WorkingSuggestion { session_id, base_updated_at: working.updated_at, goal: get("goal")?, completed: get("completed")?, next_step: get("nextStep")? })
-}
-
-#[tauri::command]
-pub fn apply_working_suggestion(app: AppHandle, state: State<'_, AgentState>, suggestion: WorkingSuggestion) -> Result<ChatState, String> {
-    for value in [&suggestion.goal, &suggestion.completed, &suggestion.next_step] {
-        if value.chars().count() > 1200 || value.contains('\0') { return Err("工作状态每项最多 1200 字".into()); }
-    }
-    mutate_chat(&app, &state, true, true, |store| {
-        if store.active_id != suggestion.session_id { return Err("会话已切换，请重新生成建议".into()); }
-        let session = store.sessions.iter_mut().find(|item| item.id == suggestion.session_id).ok_or("当前会话不存在")?;
-        if session.working_context.updated_at != suggestion.base_updated_at { return Err("工作状态已更新，请重新生成建议".into()); }
-        session.working_context = WorkingContext { goal: suggestion.goal, completed: suggestion.completed, next_step: suggestion.next_step, updated_at: now_millis()? };
         Ok(true)
     })
 }

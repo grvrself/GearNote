@@ -96,6 +96,11 @@
 .memory-controls pre { margin:var(--space-2) 0; padding:var(--space-2); border:var(--edge) solid var(--line); color:var(--paper); background:var(--panel); white-space:pre-wrap; overflow-wrap:anywhere; font:var(--fs-11) var(--font-body); }
 .working-suggestion { display:flex; flex-wrap:wrap; gap:var(--space-2); }
 .working-suggestion pre { flex-basis:100%; }
+.working-diff { flex:1 1 100%; border:var(--edge) solid var(--line); padding:var(--space-2); }
+.working-diff strong, .working-diff small { display:block; }
+.working-diff small { color:var(--muted); margin-top:var(--space-1); }
+.working-history { margin-top:var(--space-2); border-top:var(--edge) solid var(--line); padding-top:var(--space-2); }
+.working-history p { color:var(--muted); }
 .memory-controls :focus-visible { outline:var(--edge) solid var(--accent); outline-offset:var(--focus-offset); }
 .chat-composer textarea { width: 100%; min-height: var(--composer-input-height); resize: vertical; border: 0; color: var(--paper); background: transparent; font-size: var(--fs-13); line-height: var(--chat-line-height); }
 .reference-review { min-width:0; border:var(--edge) solid var(--line); background:var(--panel); }

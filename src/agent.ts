@@ -8,7 +8,8 @@ export type ChatSessionSummary = { id: string; title: string; updatedAt: string;
 export type WorkingContext = { goal: string; completed: string; nextStep: string; updatedAt: string }
 export type ProjectMemory = { id: string; content: string; source: string; createdAt: string; confirmedAt: string; expiresAt?: string | null; active: boolean }
 export type ChatState = { activeId: string; sessions: ChatSessionSummary[]; messages: ChatMessage[]; referencedIds: string[]; workingContext: WorkingContext; projectMemory: ProjectMemory[]; compactedSummary: string; compactedCount: number }
-export type WorkingSuggestion = { sessionId: string; baseUpdatedAt: string; goal: string; completed: string; nextStep: string }
+export type WorkingSuggestion = { id: string; sessionId: string; before: WorkingContext; after: WorkingContext; status: string; createdAt: string }
+export type WorkingWorkflowEvent = { id: string; proposalId: string; action: string; at: string; detail: string; undoable: boolean }
 export type PersonaInfo = { content: string; path: string; isDefault: boolean }
 export type ContextPreview = {
   systemText: string
@@ -49,7 +50,11 @@ export const confirmProjectMemory = (content: string, source = '', expiresAt?: s
 export const revokeProjectMemory = (id: string) => invoke<ChatState>('revoke_project_memory', { id })
 export const compactChatContext = () => invoke<ChatState>('compact_chat_context')
 export const suggestWorkingContext = () => invoke<WorkingSuggestion>('suggest_working_context')
-export const applyWorkingSuggestion = (suggestion: WorkingSuggestion) => invoke<ChatState>('apply_working_suggestion', { suggestion })
+export const applyWorkingSuggestion = (proposalId: string) => invoke<ChatState>('apply_working_suggestion', { proposalId })
+export const undoWorkingSuggestion = (proposalId: string) => invoke<ChatState>('undo_working_suggestion', { proposalId })
+export const rejectWorkingSuggestion = (proposalId: string) => invoke<void>('reject_working_suggestion', { proposalId })
+export const getPendingWorkingSuggestion = (sessionId: string) => invoke<WorkingSuggestion | null>('get_pending_working_suggestion', { sessionId })
+export const listWorkingWorkflowEvents = (sessionId: string) => invoke<WorkingWorkflowEvent[]>('list_working_workflow_events', { sessionId })
 export const previewAgentContext = (question: string, referencedIds: string[], frameId?: string, explore = false, messageIds: string[] = []) =>
   invoke<ContextPreview>('preview_agent_context', { question, referencedIds, frameId: frameId ?? null, explore, messageIds })
 export async function askAgent(question: string, referencedIds: string[], onDelta: (delta: string) => void, frameId?: string, explore = false, onActivity?: (message: string) => void, messageIds: string[] = []) {
