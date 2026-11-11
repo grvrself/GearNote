@@ -1,5 +1,7 @@
-import { useEffect, useMemo, useState, type RefObject } from 'react'
+import { useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { recordFixtures, type KnowledgeRecord, type RecordType } from '../data'
+import { isTauri } from '@tauri-apps/api/core'
+import { queryRecordPage, type RecordPage } from '../records'
 import { ChamferCard } from './ChamferCard'
 import { HudButton } from './HudButton'
 import { PanelHeading } from './PanelHeading'
@@ -8,6 +10,7 @@ import { StoryboardSection } from './StoryboardSection'
 import './history.css'
 
 type Filter = 'all' | RecordType
+const PAGE_SIZE = 20
 
 const savedAtFormatter = new Intl.DateTimeFormat('zh-CN', {
   year: 'numeric', month: '2-digit', day: '2-digit',
@@ -42,20 +45,52 @@ export function HistoryPanel({ records = recordFixtures, selectedId, referencedI
   const [filter, setFilter] = useState<Filter>('all')
   const [query, setQuery] = useState('')
   const [activeMoment, setActiveMoment] = useState<number | null>(null)
+  const [pageOffset, setPageOffset] = useState(0)
+  const [page, setPage] = useState<RecordPage | null>(null)
+  const [pageError, setPageError] = useState('')
+  const handledFocus = useRef<typeof focusRequest>(null)
+  const desktop = isTauri()
 
   useEffect(() => {
-    if (!focusRequest) return
+    if (!focusRequest || handledFocus.current === focusRequest) return
+    const position = records.findIndex(record => record.id === focusRequest.id)
+    if (position < 0) return
+    handledFocus.current = focusRequest
     setFilter('all')
     setQuery('')
+    setPageOffset(Math.floor(position / PAGE_SIZE) * PAGE_SIZE)
     setActiveMoment(focusRequest.atSeconds ?? null)
+  }, [focusRequest, records])
+  useEffect(() => {
+    if (!desktop) return
+    let disposed = false
+    setPage(null)
+    setPageError('')
+    void queryRecordPage(filter, query, pageOffset, PAGE_SIZE).then(result => {
+      if (disposed) return
+      if (result.total > 0 && pageOffset >= result.total) {
+        setPageOffset(Math.floor((result.total - 1) / PAGE_SIZE) * PAGE_SIZE)
+        return
+      }
+      setPage(result)
+    }).catch(error => { if (!disposed) setPageError(String(error)) })
+    return () => { disposed = true }
+  }, [desktop, filter, query, pageOffset, records])
+  useEffect(() => {
+    if (!focusRequest || !page?.items.some(record => record.id === focusRequest.id)) return
     const frame = window.requestAnimationFrame(() => document.getElementById(focusRequest.id)?.scrollIntoView({ block: 'nearest' }))
     return () => window.cancelAnimationFrame(frame)
-  }, [focusRequest])
-  const visibleRecords = useMemo(() => records.filter(record => {
+  }, [focusRequest, page])
+  const filteredFixtures = useMemo(() => records.filter(record => {
     const matchesType = filter === 'all' || record.type === filter
     const matchesQuery = `${record.title} ${record.site}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())
     return matchesType && matchesQuery
   }), [records, filter, query])
+  const visibleRecords = desktop ? page?.items ?? [] : filteredFixtures.slice(pageOffset, pageOffset + PAGE_SIZE)
+  const total = desktop ? page?.total ?? 0 : filteredFixtures.length
+  const loading = desktop && !page && !pageError
+  const pageNumber = Math.floor(pageOffset / PAGE_SIZE) + 1
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
   return <aside className="history-panel" id="rec-02" aria-labelledby="rec-02-title">
     <div className="history-head">
@@ -66,13 +101,13 @@ export function HistoryPanel({ records = recordFixtures, selectedId, referencedI
       <div className="history-filter-row">
         <div className="history-filters" role="group" aria-label="资料类型筛选">
           {([['all', '全部'], ['video', '视频'], ['article', '文章']] as const).map(([id, label]) =>
-            <button key={id} type="button" aria-pressed={filter === id} onClick={() => setFilter(id)}>{filter === id && <span aria-hidden="true">⌜</span>}{label}</button>)}
+            <button key={id} type="button" aria-pressed={filter === id} onClick={() => { setFilter(id); setPageOffset(0) }}>{filter === id && <span aria-hidden="true">⌜</span>}{label}</button>)}
         </div>
         <HudButton type="button" disabled={!miniAvailable} onClick={onOpenMini}>□ 小窗模式</HudButton>
       </div>
       <label className="history-search">
         <span className="history-search-label">搜索</span>
-        <span className="history-search-field"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8" cy="8" r="5"/><path d="m12 12 5 5"/></svg><input ref={searchRef} value={query} onChange={event => setQuery(event.target.value)} placeholder="标题或来源网站" /><kbd>CTRL K</kbd></span>
+        <span className="history-search-field"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8" cy="8" r="5"/><path d="m12 12 5 5"/></svg><input ref={searchRef} value={query} onChange={event => { setQuery(event.target.value); setPageOffset(0) }} placeholder="标题或来源网站" /><kbd>CTRL K</kbd></span>
       </label>
       <div className="status-showcase" aria-label="状态图例与组件样张">
         <span className="history-mini-label">状态示例</span>
@@ -85,7 +120,9 @@ export function HistoryPanel({ records = recordFixtures, selectedId, referencedI
       </div>
     </div>
     <div className="history-list" role="list" aria-label="已保存记录">
-      {visibleRecords.length === 0 && <p className="history-empty">无匹配记录</p>}
+      {loading && <p className="history-empty" role="status">正在读取资料…</p>}
+      {pageError && <p className="history-empty" role="alert">资料读取失败：{pageError}</p>}
+      {!loading && !pageError && visibleRecords.length === 0 && <p className="history-empty">无匹配记录</p>}
       {visibleRecords.map(record => <div role="listitem" key={record.id}>
         <RecordCard
           record={record}
@@ -99,7 +136,7 @@ export function HistoryPanel({ records = recordFixtures, selectedId, referencedI
         />
       </div>)}
     </div>
-    <div className="history-footer"><span>已保存 {records.filter(record => !record.demo).length}</span><span>{String(visibleRecords.length).padStart(2, '0')} / {String(records.length).padStart(2, '0')}</span></div>
+    <div className="history-footer"><span>已保存 {records.filter(record => !record.demo).length} · 匹配 {total}</span><div className="history-page-controls"><button type="button" onClick={() => setPageOffset(Math.max(0, pageOffset - PAGE_SIZE))} disabled={loading || pageOffset === 0} aria-label="上一页">‹</button><span>{pageNumber} / {pageCount}</span><button type="button" onClick={() => setPageOffset(pageOffset + PAGE_SIZE)} disabled={loading || pageOffset + PAGE_SIZE >= total} aria-label="下一页">›</button></div></div>
   </aside>
 }
 

@@ -134,6 +134,10 @@
 .record-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-4); }
 .history-footer { display: flex; justify-content: space-between; gap: var(--space-3); padding: var(--space-2) var(--space-4); border-top: var(--edge) solid var(--line); color: var(--muted); font: var(--fs-11) var(--font-body); }
 .history-footer > span:last-child { font-family: var(--font-mono); }
+.history-page-controls { display: flex; align-items: center; gap: var(--space-2); font-family: var(--font-mono); white-space: nowrap; }
+.history-page-controls button { min-width: 22px; border: var(--edge) solid var(--line); color: var(--paper); background: var(--bg); cursor: pointer; }
+.history-page-controls button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.history-page-controls button:disabled { opacity: .4; cursor: default; }
 
 @media (prefers-reduced-motion: reduce) {
   .history-filters button { transition: none; }

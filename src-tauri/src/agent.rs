@@ -71,7 +71,7 @@ pub fn memory_is_current(entry: &ProjectMemory) -> bool {
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct ChatStore { active_id: String, sessions: Vec<ChatSession>, #[serde(default)] project_memory: Vec<ProjectMemory> }
+pub(crate) struct ChatStore { pub(crate) active_id: String, pub(crate) sessions: Vec<ChatSession>, #[serde(default)] pub(crate) project_memory: Vec<ProjectMemory> }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -104,10 +104,10 @@ fn state_view(store: &ChatStore) -> Result<ChatState, String> {
 
 fn load_chat_store(path: &PathBuf, legacy_path: &PathBuf) -> Result<ChatStore, Box<dyn std::error::Error>> {
     if path.extension().is_some_and(|value| value == "db") {
-        if let Some(store) = crate::db::read(path, "chat").map_err(std::io::Error::other)? { return Ok(store); }
+        if let Some(store) = crate::db::read_chat(path).map_err(std::io::Error::other)? { return Ok(store); }
         let old_path = path.parent().ok_or("数据库路径无效")?.join("chat-sessions.json");
         let store = load_chat_store(&old_path, legacy_path)?;
-        crate::db::write(path, "chat", &store).map_err(std::io::Error::other)?;
+        crate::db::write_chat(path, &store).map_err(std::io::Error::other)?;
         return Ok(store);
     }
     let backup = path.with_extension("json.bak");
@@ -233,7 +233,7 @@ pub fn reload_persona(state: State<'_, AgentState>) -> Result<PersonaInfo, Strin
 }
 
 fn persist_chat_store(path: &PathBuf, store: &ChatStore) -> Result<(), String> {
-    if path.extension().is_some_and(|value| value == "db") { return crate::db::write(path, "chat", store); }
+    if path.extension().is_some_and(|value| value == "db") { return crate::db::write_chat(path, store); }
     let encoded = serde_json::to_vec_pretty(store).map_err(|_| "会话无法编码")?;
     let temp = path.with_extension("json.tmp");
     let backup = path.with_extension("json.bak");

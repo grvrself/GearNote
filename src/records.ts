@@ -3,6 +3,11 @@ import { invoke } from '@tauri-apps/api/core'
 import type { KnowledgeRecord, StoryboardResult } from './data'
 
 export type BridgeStatus = { pairCode: string; connected: boolean; error: string | null }
+export type RecordPage = { items: KnowledgeRecord[]; total: number; offset: number; limit: number }
+
+export function queryRecordPage(recordType: 'all' | 'video' | 'article', search: string, offset: number, limit = 20): Promise<RecordPage> {
+  return invoke<RecordPage>('query_record_page', { recordType, search, offset, limit })
+}
 
 export async function loadSavedRecords(): Promise<KnowledgeRecord[]> {
   if (!isTauri()) return []

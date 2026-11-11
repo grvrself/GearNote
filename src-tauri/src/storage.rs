@@ -482,6 +482,11 @@ pub fn list_records(state: State<'_, AppState>) -> Result<Vec<KnowledgeRecord>, 
     state.records.lock().map(|records| records.clone()).map_err(|_| "资料库暂不可用".into())
 }
 
+#[tauri::command]
+pub fn query_record_page(state: State<'_, AppState>, record_type: String, search: String, offset: u64, limit: u64) -> Result<crate::db::RecordPage, String> {
+    crate::db::query_record_page(&state.records_path, &record_type, &search, offset, limit)
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BridgeStatus {

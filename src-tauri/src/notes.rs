@@ -38,11 +38,11 @@ impl NotesState {
         let backup = legacy_path.with_extension("json.bak");
         if !legacy_path.exists() && backup.exists() { fs::rename(&backup, &legacy_path)?; }
         let path = dir.join(crate::db::FILE_NAME);
-        let notes = if let Some(saved) = crate::db::read(&path, "notes").map_err(std::io::Error::other)? {
+        let notes = if let Some(saved) = crate::db::read_notes(&path).map_err(std::io::Error::other)? {
             saved
         } else {
             let legacy: Vec<Note> = if legacy_path.exists() { serde_json::from_slice(&fs::read(&legacy_path)?)? } else { Vec::new() };
-            crate::db::write(&path, "notes", &legacy).map_err(std::io::Error::other)?;
+            crate::db::write_notes(&path, &legacy).map_err(std::io::Error::other)?;
             legacy
         };
         Ok(Self { path, notes: Mutex::new(notes) })
@@ -55,7 +55,7 @@ fn now() -> Result<u128, String> {
 }
 
 fn persist(path: &PathBuf, notes: &[Note]) -> Result<(), String> {
-    if path.extension().is_some_and(|value| value == "db") { return crate::db::write(path, "notes", &notes); }
+    if path.extension().is_some_and(|value| value == "db") { return crate::db::write_notes(path, notes); }
     let temp = path.with_extension("json.tmp");
     let data = serde_json::to_vec_pretty(notes).map_err(|_| "笔记无法编码")?;
     let mut file = fs::File::create(&temp).map_err(|error| format!("笔记保存失败：{error}"))?;

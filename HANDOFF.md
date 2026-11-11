@@ -27,7 +27,7 @@ KnowFlow 是一款 Windows 优先的 Tauri 2 桌面知识工作台。Chrome/Edge
 | 界面 | React 19 + TypeScript + Vite；`src/main.tsx`、`src/App.tsx`、`src/MiniApp.tsx` | 主窗三栏布局和 compact 小窗。`src/agent.ts`、`src/records.ts`、`src/notes.ts` 封装前端到 Rust 的调用。 |
 | 视觉 | `src/tokens.css`、`src/components/` | 黑、灰、黄、少量故障红的工业 HUD 风格，硬边切角、线性图标；布局为左会话/导航、中 Agent、右历史记录。 |
 | 捕获 | `extension/`（Manifest V3）+ `src-tauri/src/bridge.rs` | 用户点击扩展图标后读取当前标签页，通过带配对码的本机接口传给桌面端。 |
-| 本地数据 | `src-tauri/src/db.rs`、`storage.rs`、`notes.rs`、`agent.rs` | SQLite `knowflow.db` 保存资料、笔记、会话的 JSON 快照；旧 JSON 首次迁移后保留。 |
+| 本地数据 | `src-tauri/src/db.rs`、`storage.rs`、`notes.rs`、`agent.rs` | SQLite `knowflow.db` 的逐条表保存资料、笔记、会话和消息，同时保留过渡期 JSON 快照；旧 JSON 首次迁移后保留。 |
 | Agent | `src-tauri/src/agent.rs`、`context.rs`、`secret.rs`、`default-persona.md` | 配置 API、保存 Windows 加密密钥、组装上下文、流式问答、压缩较早对话、提出工作状态建议。 |
 | 视频画面 | `src-tauri/src/storyboard.rs`、`vendor/dsh-video-storyboard/` | 调用 Node 引擎及 FFmpeg、yt-dlp，下载可访问的视频并生成分镜/指定时间截图。 |
 
@@ -50,7 +50,7 @@ KnowFlow 是一款 Windows 优先的 Tauri 2 桌面知识工作台。Chrome/Edge
 - **尚无通用 Agentic Loop**：模型目前只能调用 `search_references` 和 `read_reference`，不能自主发起文件读取、bash、编辑或写入。默认模式的片段选择仍由 Rust 代码确定。
 - 项目记忆只收录用户确认的内容；工作状态建议只在用户接受后保存。成功操作的“已完成”追加是确定性程序逻辑，并非模型自主更新所有进度。
 - 对话压缩需用户手动触发，依赖当前配置的模型服务。摘要只作为追问背景，不能代替来源证据；历史原消息保留在数据库。当前上下文预算按字符，不按模型实际 token。
-- 第四阶段第一块已为资料建立 `record_rows` 逐条表，以及类型、状态、保存时间索引；旧 `records` 快照仍在同一事务中同步，作为兼容与回退数据。笔记、会话仍是 `snapshots(name, json)`，资料列表也仍一次加载全部记录；分页和其他实体拆表尚待继续。
+- 第四阶段已为资料、笔记、会话和消息建立逐条表。右侧历史栏从 SQLite 分页查询，每页 20 条，支持类型与标题/网站筛选，引用跳转会定位所在页。旧快照仍在同一事务中同步，兼容旧版回写。问答、笔记来源及小窗目前仍加载全部资料；全文与字幕时间段索引、移除过渡快照写入尚待继续。
 - 未接入本地语音识别。没有播放器字幕的内容不能自动生成字幕。截图识别取决于配置的模型是否支持 OpenAI 兼容的图片输入。
 
 ## 数据与安全边界
@@ -77,9 +77,9 @@ KnowFlow 是一款 Windows 优先的 Tauri 2 桌面知识工作台。Chrome/Edge
 
 下一步优先在桌面端用真实模型验证可选的只读工具循环，包括支持工具调用的模型、不支持时的回退、跨多个片段的引用准确性及额外请求的耗时。之后再根据资料量与实际检索效果，逐步把 SQLite 快照拆成记录、消息、笔记等实体表与索引。文件写入、编辑和外部命令仍需另行设计权限与确认机制。
 
-第四阶段已从资料记录拆表开始：首次打开旧数据库时把 `records` 快照迁移到 `record_rows`，后续写入同步两种格式；若旧版程序再次更新快照，新版下次加载时会同步回逐条表。之后应按实际资料量接入分页查询，再拆笔记与会话消息，最后移除过渡期的整块快照写入。
+第四阶段已把 `records`、`notes`、`chat` 快照逐步迁移到 `record_rows`、`note_rows`、`session_rows` 和 `message_rows`；后续写入同步两种格式，旧版程序回写快照后新版下次加载会同步回逐条表。右侧历史栏已接入分页查询。下一步应建立正文/字幕全文与时间段索引，把问答、笔记来源和小窗对全部资料的依赖改为按需读取；在真实数据迁移验证后再移除过渡期的整块快照写入。
 
-本轮资料拆表的迁移、逐条更新、旧版快照回写与事务失败路径均由隔离数据库测试覆盖；Rust **32 项测试通过**，`npm run build` 与 `npm run tauri -- build --no-bundle` 通过。`record_rows` 与 `records` 快照在过渡期会重复保存正文，因此暂不应把本轮变更宣传为数据库体积或写入速度优化。
+本轮资料分页和资料/笔记/会话消息迁移由隔离数据库测试覆盖；Rust **35 项测试通过**，`npm run build` 与 `npm run tauri -- build --no-bundle` 通过。过渡期逐条表与快照会重复保存正文和消息，暂不应把本轮变更宣传为数据库体积或写入速度优化。
 
 ## 可复制给新聊天的开场
 
