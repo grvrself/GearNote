@@ -1,4 +1,4 @@
-use crate::{agent::{ChatMessage, ChatSession, ChatStore}, notes::Note, storage::{KnowledgeRecord, RecordSummary}};
+use crate::{agent::{ChatMessage, ChatSession, ChatStore}, notes::{Note, NoteFolder}, storage::{KnowledgeRecord, RecordSummary}};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
 #[cfg(test)]
@@ -59,6 +59,9 @@ pub(crate) fn open(path: &Path) -> Result<Connection, String> {
         );
         CREATE INDEX IF NOT EXISTS idx_note_rows_updated ON note_rows(updated_at DESC);
         CREATE INDEX IF NOT EXISTS idx_note_rows_ordinal ON note_rows(ordinal);
+        CREATE TABLE IF NOT EXISTS note_folders (
+            id TEXT PRIMARY KEY, name TEXT NOT NULL COLLATE NOCASE UNIQUE, created_at TEXT NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS chat_meta (
             id INTEGER PRIMARY KEY CHECK(id=1), active_id TEXT NOT NULL, project_memory_json TEXT NOT NULL
         );
@@ -500,6 +503,64 @@ pub fn upsert_note(path: &Path, note: &Note, position: usize) -> Result<(), Stri
     transaction.commit().map_err(|error| format!("笔记事务提交失败：{error}"))
 }
 
+pub fn list_note_folders(path: &Path) -> Result<Vec<NoteFolder>, String> {
+    let connection = open(path)?;
+    let mut query = connection.prepare("SELECT id,name,created_at FROM note_folders ORDER BY name COLLATE NOCASE,id")
+        .map_err(|error| format!("文件夹读取失败：{error}"))?;
+    let rows = query.query_map([], |row| Ok(NoteFolder { id: row.get(0)?, name: row.get(1)?, created_at: row.get(2)? }))
+        .map_err(|error| format!("文件夹读取失败：{error}"))?;
+    rows.map(|row| row.map_err(|error| format!("文件夹读取失败：{error}"))).collect()
+}
+
+pub fn note_folder_exists(path: &Path, id: &str) -> Result<bool, String> {
+    let connection = open(path)?;
+    let exists: i64 = connection.query_row("SELECT EXISTS(SELECT 1 FROM note_folders WHERE id=?1)", [id], |row| row.get(0))
+        .map_err(|error| format!("文件夹检查失败：{error}"))?;
+    Ok(exists == 1)
+}
+
+pub fn create_note_folder(path: &Path, folder: &NoteFolder) -> Result<(), String> {
+    let connection = open(path)?;
+    connection.execute("INSERT INTO note_folders(id,name,created_at) VALUES (?1,?2,?3)",
+        params![&folder.id, &folder.name, &folder.created_at]).map_err(|error| format!("文件夹创建失败，名称可能已存在：{error}"))?;
+    Ok(())
+}
+
+pub fn rename_note_folder(path: &Path, id: &str, name: &str) -> Result<(), String> {
+    let connection = open(path)?;
+    let changed = connection.execute("UPDATE note_folders SET name=?1 WHERE id=?2", params![name, id])
+        .map_err(|error| format!("文件夹重命名失败，名称可能已存在：{error}"))?;
+    if changed != 1 { return Err("文件夹不存在".into()); }
+    Ok(())
+}
+
+pub fn delete_note_folder(path: &Path, id: &str, notes: &[Note], timestamp: u128) -> Result<Vec<Note>, String> {
+    let mut connection = open(path)?;
+    let transaction = connection.transaction().map_err(|error| format!("文件夹事务启动失败：{error}"))?;
+    let exists: i64 = transaction.query_row("SELECT EXISTS(SELECT 1 FROM note_folders WHERE id=?1)", [id], |row| row.get(0))
+        .map_err(|error| format!("文件夹检查失败：{error}"))?;
+    if exists != 1 { return Err("文件夹不存在".into()); }
+    let stored_count: i64 = transaction.query_row("SELECT count(*) FROM note_rows WHERE json_extract(json,'$.folderId')=?1", [id], |row| row.get(0))
+        .map_err(|error| format!("文件夹笔记检查失败：{error}"))?;
+    let mut next = notes.to_vec();
+    let mut moved = 0_i64;
+    for note in next.iter_mut().filter(|note| note.folder_id.as_deref() == Some(id)) {
+        let before_json = serde_json::to_string(note).map_err(|error| format!("笔记编码失败：{error}"))?;
+        note.folder_id = None;
+        note.updated_at = timestamp.max(note.updated_at.saturating_add(1));
+        let after_json = serde_json::to_string(note).map_err(|error| format!("笔记编码失败：{error}"))?;
+        let changed = transaction.execute("UPDATE note_rows SET updated_at=?1,json=?2 WHERE id=?3 AND json=?4",
+            params![i64::try_from(note.updated_at).map_err(|_| "笔记时间超限")?, after_json, &note.id, before_json])
+            .map_err(|error| format!("笔记移出文件夹失败：{error}"))?;
+        if changed != 1 { return Err("笔记已变化，请刷新后重试".into()); }
+        moved += 1;
+    }
+    if moved != stored_count { return Err("文件夹笔记数量已变化，请刷新后重试".into()); }
+    transaction.execute("DELETE FROM note_folders WHERE id=?1", [id]).map_err(|error| format!("文件夹删除失败：{error}"))?;
+    transaction.commit().map_err(|error| format!("文件夹删除提交失败：{error}"))?;
+    Ok(next)
+}
+
 fn sync_chat_rows(transaction: &Transaction<'_>, store: &ChatStore) -> Result<(), String> {
     let version: Option<i64> = transaction.query_row("SELECT version FROM entity_meta WHERE name='chat'", [], |row| row.get(0))
         .optional().map_err(|error| format!("会话迁移状态读取失败：{error}"))?;
@@ -871,6 +932,34 @@ mod tests {
         assert_eq!(read_notes(&path).unwrap().unwrap().iter().map(|item| item.title.as_str()).collect::<Vec<_>>(), vec!["已修改", "第二篇"]);
         assert!(upsert_note(&path, &note("first", "错误位置"), 1).is_err());
         assert_eq!(read_notes(&path).unwrap().unwrap()[0].title, "已修改");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn note_folders_classify_legacy_notes_and_keep_notes_on_delete() {
+        let dir = std::env::temp_dir().join(format!("knowflow-note-folders-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(FILE_NAME);
+        let old = note("legacy", "旧笔记");
+        write_notes(&path, &[old.clone()]).unwrap();
+        assert_eq!(read_notes(&path).unwrap().unwrap()[0].folder_id, None);
+        let folder = NoteFolder { id: "folder-1".into(), name: "项目资料".into(), created_at: "300".into() };
+        create_note_folder(&path, &folder).unwrap();
+        assert!(create_note_folder(&path, &NoteFolder { id: "folder-2".into(), name: "项目资料".into(), created_at: "301".into() }).is_err());
+        let mut filed = old.clone();
+        filed.folder_id = Some(folder.id.clone());
+        filed.updated_at = 301;
+        upsert_note(&path, &filed, 0).unwrap();
+        assert_eq!(read_notes(&path).unwrap().unwrap()[0].folder_id.as_deref(), Some("folder-1"));
+        rename_note_folder(&path, &folder.id, "项目笔记").unwrap();
+        assert_eq!(list_note_folders(&path).unwrap()[0].name, "项目笔记");
+        assert!(delete_note_folder(&path, &folder.id, &[old], 302).is_err());
+        assert!(note_folder_exists(&path, &folder.id).unwrap());
+        let unfiled = delete_note_folder(&path, &folder.id, &[filed], 302).unwrap();
+        assert_eq!(unfiled[0].folder_id, None);
+        assert_eq!(read_notes(&path).unwrap().unwrap()[0].title, "旧笔记");
+        assert_eq!(read_notes(&path).unwrap().unwrap()[0].folder_id, None);
+        assert!(list_note_folders(&path).unwrap().is_empty());
         std::fs::remove_dir_all(dir).unwrap();
     }
 

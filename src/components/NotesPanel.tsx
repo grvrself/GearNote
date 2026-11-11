@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react'
 import type { KnowledgeRecord } from '../data'
-import type { Note, NoteDraft, NoteEditProposal, NoteSourceInput, NoteWorkflowEvent } from '../notes'
+import type { Note, NoteDraft, NoteEditProposal, NoteFolder, NoteSourceInput, NoteWorkflowEvent } from '../notes'
 import { HudButton } from './HudButton'
 import { PanelHeading } from './PanelHeading'
 import './notes.css'
 
 type Props = {
   notes: Note[]
+  folders: NoteFolder[]
   records: KnowledgeRecord[]
   incomingDraft: NoteDraft | null
   onDraftConsumed: () => void
@@ -19,9 +20,13 @@ type Props = {
   onRejectEdit: (proposalId: string) => Promise<void>
   onListWorkflowEvents: (noteId: string) => Promise<NoteWorkflowEvent[]>
   onGetPendingEdit: (noteId: string) => Promise<NoteEditProposal | null>
+  onCreateFolder: (name: string) => Promise<NoteFolder>
+  onRenameFolder: (id: string, name: string) => Promise<void>
+  onDeleteFolder: (id: string) => Promise<number>
 }
 
-const emptyDraft = (): NoteDraft => ({ title: '', body: '', sources: [] })
+const emptyDraft = (folderId: string | null = null): NoteDraft => ({ title: '', body: '', sources: [], folderId })
+const folderForFilter = (filter: string) => filter === 'all' || filter === 'uncategorized' ? null : filter
 const keyOf = (source: NoteSourceInput) => `${source.recordId}:${source.atSeconds ?? ''}`
 const mergeSources = (left: NoteSourceInput[], right: NoteSourceInput[]) => {
   const merged = [...left]
@@ -31,9 +36,13 @@ const mergeSources = (left: NoteSourceInput[], right: NoteSourceInput[]) => {
 const timeOf = (seconds: number) => `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`
 const latestUndoable = (events: NoteWorkflowEvent[]) => events.find(event => event.undoable)?.proposalId ?? null
 
-export function NotesPanel({ notes, records, incomingDraft, onDraftConsumed, onSave, onExport, onRevealRecord, onProposeEdit, onApplyEdit, onUndoEdit, onRejectEdit, onListWorkflowEvents, onGetPendingEdit }: Props) {
+export function NotesPanel({ notes, folders, records, incomingDraft, onDraftConsumed, onSave, onExport, onRevealRecord, onProposeEdit, onApplyEdit, onUndoEdit, onRejectEdit, onListWorkflowEvents, onGetPendingEdit, onCreateFolder, onRenameFolder, onDeleteFolder }: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [draft, setDraft] = useState<NoteDraft>(emptyDraft)
+  const [folderFilter, setFolderFilter] = useState('all')
+  const [folderMode, setFolderMode] = useState<'create' | 'rename' | null>(null)
+  const [folderName, setFolderName] = useState('')
+  const [folderError, setFolderError] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
@@ -42,6 +51,49 @@ export function NotesPanel({ notes, records, incomingDraft, onDraftConsumed, onS
   const [proposal, setProposal] = useState<NoteEditProposal | null>(null)
   const [lastAppliedId, setLastAppliedId] = useState<string | null>(null)
   const [workflowEvents, setWorkflowEvents] = useState<NoteWorkflowEvent[]>([])
+  const saved = notes.find(note => note.id === selectedId)
+  const hasUnsavedChanges = Boolean(saved && (saved.title !== draft.title || saved.body !== draft.body ||
+    (saved.folderId ?? null) !== (draft.folderId ?? null) || JSON.stringify(saved.sources.map(keyOf)) !== JSON.stringify(draft.sources.map(keyOf))))
+  const hasNewDraft = !selectedId && Boolean(draft.title.trim() || draft.body.trim() || draft.sources.length)
+  const visibleNotes = notes.filter(note => folderFilter === 'all' ||
+    (folderFilter === 'uncategorized' ? !note.folderId : note.folderId === folderFilter))
+  const selectedFolder = folders.find(folder => folder.id === folderFilter)
+
+  const confirmDiscard = () => !hasUnsavedChanges && !hasNewDraft || window.confirm('当前笔记有未保存的内容，确定放弃并切换吗？')
+  const changeFolderFilter = (filter: string) => {
+    if (filter === folderFilter || !confirmDiscard()) return
+    setFolderFilter(filter)
+    setSelectedId(null)
+    setDraft(emptyDraft(folderForFilter(filter)))
+    setProposal(null); setLastAppliedId(null); setError(''); setNotice(''); setExportPath('')
+    setFolderMode(null); setFolderError('')
+  }
+  const newNote = () => {
+    if (!confirmDiscard()) return
+    setSelectedId(null)
+    setDraft(emptyDraft(folderForFilter(folderFilter)))
+    setError(''); setNotice(''); setExportPath(''); setProposal(null); setLastAppliedId(null)
+  }
+  const submitFolder = async () => {
+    if (!folderMode || !folderName.trim()) return
+    setBusy(true); setFolderError('')
+    try {
+      if (folderMode === 'create') await onCreateFolder(folderName)
+      else if (selectedFolder) await onRenameFolder(selectedFolder.id, folderName)
+      setFolderMode(null); setFolderName('')
+    } catch (cause) { setFolderError(String(cause)) } finally { setBusy(false) }
+  }
+  const removeFolder = async () => {
+    if (!selectedFolder || hasUnsavedChanges || hasNewDraft) return
+    const count = notes.filter(note => note.folderId === selectedFolder.id).length
+    if (!window.confirm(`删除文件夹“${selectedFolder.name}”？其中 ${count} 篇笔记会移到“未分类”，笔记内容不会删除。`)) return
+    setBusy(true); setFolderError('')
+    try {
+      const moved = await onDeleteFolder(selectedFolder.id)
+      setFolderFilter('uncategorized'); setSelectedId(null); setDraft(emptyDraft()); setProposal(null); setLastAppliedId(null)
+      setFolderMode(null); setNotice(`文件夹已删除，${moved} 篇笔记已移到未分类。`)
+    } catch (cause) { setFolderError(String(cause)) } finally { setBusy(false) }
+  }
 
   useEffect(() => {
     if (!selectedId) { setWorkflowEvents([]); return }
@@ -61,7 +113,7 @@ export function NotesPanel({ notes, records, incomingDraft, onDraftConsumed, onS
   useEffect(() => {
     if (!incomingDraft) return
     setSelectedId(null)
-    setDraft(incomingDraft)
+    setDraft({ ...incomingDraft, folderId: incomingDraft.folderId ?? folderForFilter(folderFilter) })
     setError('')
     setNotice('请检查并修改草稿，确认后保存。')
     setExportPath('')
@@ -69,11 +121,12 @@ export function NotesPanel({ notes, records, incomingDraft, onDraftConsumed, onS
     setLastAppliedId(null)
     setEditInstruction('')
     onDraftConsumed()
-  }, [incomingDraft, onDraftConsumed])
+  }, [incomingDraft, onDraftConsumed, folderFilter])
 
   const selectNote = (note: Note) => {
+    if ((selectedId !== note.id || hasUnsavedChanges) && !confirmDiscard()) return
     setSelectedId(note.id)
-    setDraft({ title: note.title, body: note.body, sources: note.sources.map(source => ({ recordId: source.recordId, atSeconds: source.atSeconds })) })
+    setDraft({ title: note.title, body: note.body, sources: note.sources.map(source => ({ recordId: source.recordId, atSeconds: source.atSeconds })), folderId: note.folderId ?? null })
     setError(''); setNotice(''); setExportPath('')
     setProposal(proposal?.noteId === note.id ? proposal : null); setLastAppliedId(null); setEditInstruction('')
   }
@@ -83,6 +136,7 @@ export function NotesPanel({ notes, records, incomingDraft, onDraftConsumed, onS
       title: note.title,
       body: [note.body.trim(), draft.body.trim()].filter(Boolean).join('\n\n---\n\n'),
       sources: mergeSources(note.sources, draft.sources),
+      folderId: note.folderId ?? null,
     })
     setNotice(`已合并到《${note.title}》的草稿，保存前可继续修改。`)
     setError(''); setExportPath('')
@@ -94,7 +148,8 @@ export function NotesPanel({ notes, records, incomingDraft, onDraftConsumed, onS
       if (proposal) { await onRejectEdit(proposal.id); setProposal(null) }
       const saved = await onSave(draft, selectedId ?? undefined)
       setSelectedId(saved.id)
-      setDraft({ title: saved.title, body: saved.body, sources: saved.sources })
+      setDraft({ title: saved.title, body: saved.body, sources: saved.sources, folderId: saved.folderId ?? null })
+      if (folderFilter !== 'all' && (saved.folderId ?? null) !== folderForFilter(folderFilter)) setFolderFilter(saved.folderId ?? 'uncategorized')
       setLastAppliedId(null)
       setNotice('已保存到本地笔记。')
       await refreshEvents(saved.id)
@@ -119,7 +174,7 @@ export function NotesPanel({ notes, records, incomingDraft, onDraftConsumed, onS
     setBusy(true); setError('')
     try {
       const saved = await onApplyEdit(proposal.id)
-      setDraft({ title: saved.title, body: saved.body, sources: saved.sources })
+      setDraft({ title: saved.title, body: saved.body, sources: saved.sources, folderId: saved.folderId ?? null })
       setLastAppliedId(proposal.id)
       setProposal(null)
       setNotice('已按确认的建议修改笔记，可撤销这次操作。')
@@ -138,7 +193,7 @@ export function NotesPanel({ notes, records, incomingDraft, onDraftConsumed, onS
     setBusy(true); setError('')
     try {
       const restored = await onUndoEdit(lastAppliedId)
-      setDraft({ title: restored.title, body: restored.body, sources: restored.sources })
+      setDraft({ title: restored.title, body: restored.body, sources: restored.sources, folderId: restored.folderId ?? null })
       setLastAppliedId(null)
       setNotice('已撤销这次修改。')
       await refreshEvents(selectedId)
@@ -146,17 +201,23 @@ export function NotesPanel({ notes, records, incomingDraft, onDraftConsumed, onS
   }
   const sourceTitle = (source: NoteSourceInput) => records.find(record => record.id === source.recordId)?.title
     ?? notes.flatMap(note => note.sources).find(item => keyOf(item) === keyOf(source))?.title ?? '来源已移除'
-  const saved = notes.find(note => note.id === selectedId)
-  const hasUnsavedChanges = Boolean(saved && (saved.title !== draft.title || saved.body !== draft.body ||
-    JSON.stringify(saved.sources.map(keyOf)) !== JSON.stringify(draft.sources.map(keyOf))))
 
   return <section className="notes-panel" aria-label="资料库笔记">
     <PanelHeading id="sec-01-library" serial="SEC-01" overline="library" title="资料库 / 笔记" count={notes.length} />
     <div className="notes-layout">
       <aside className="notes-index" aria-label="已保存的笔记">
-        <div className="notes-index-head"><span>本地笔记</span><button type="button" disabled={busy} onClick={() => { setSelectedId(null); setDraft(emptyDraft()); setError(''); setNotice(''); setExportPath(''); setProposal(null); setLastAppliedId(null) }}>＋ 新建</button></div>
-        {notes.length === 0 && <p className="notes-empty">暂无笔记。分析资料后可从回答中生成草稿。</p>}
-        {notes.map(note => <button className="notes-index-item" type="button" key={note.id} disabled={busy} data-selected={selectedId === note.id} onClick={() => selectNote(note)}>
+        <div className="notes-folder-head"><span>文件夹</span><button type="button" disabled={busy} onClick={() => { setFolderMode('create'); setFolderName(''); setFolderError('') }}>＋ 新建</button></div>
+        <nav className="notes-folder-list" aria-label="笔记文件夹">
+          <button type="button" disabled={busy} aria-current={folderFilter === 'all' ? 'page' : undefined} onClick={() => changeFolderFilter('all')}><span>全部笔记</span><small>{notes.length}</small></button>
+          <button type="button" disabled={busy} aria-current={folderFilter === 'uncategorized' ? 'page' : undefined} onClick={() => changeFolderFilter('uncategorized')}><span>未分类</span><small>{notes.filter(note => !note.folderId).length}</small></button>
+          {folders.map(folder => <button type="button" key={folder.id} disabled={busy} aria-current={folderFilter === folder.id ? 'page' : undefined} onClick={() => changeFolderFilter(folder.id)}><span>{folder.name}</span><small>{notes.filter(note => note.folderId === folder.id).length}</small></button>)}
+        </nav>
+        {selectedFolder && <div className="notes-folder-actions"><button type="button" disabled={busy} onClick={() => { setFolderMode('rename'); setFolderName(selectedFolder.name); setFolderError('') }}>重命名</button><button type="button" disabled={busy || hasUnsavedChanges || hasNewDraft} onClick={() => { void removeFolder() }}>删除文件夹</button></div>}
+        {folderMode && <form className="notes-folder-form" onSubmit={event => { event.preventDefault(); void submitFolder() }}><label htmlFor="note-folder-name">{folderMode === 'create' ? '新文件夹名称' : '重命名文件夹'}</label><input id="note-folder-name" autoFocus value={folderName} maxLength={60} onChange={event => setFolderName(event.target.value)} /><div><button type="submit" disabled={busy || !folderName.trim()}>保存</button><button type="button" disabled={busy} onClick={() => { setFolderMode(null); setFolderError('') }}>取消</button></div></form>}
+        {folderError && <p className="notes-folder-error" role="alert">{folderError}</p>}
+        <div className="notes-index-head"><span>笔记 <small>{visibleNotes.length}</small></span><button type="button" disabled={busy} onClick={newNote}>＋ 新建笔记</button></div>
+        {visibleNotes.length === 0 && <p className="notes-empty">{notes.length === 0 ? '暂无笔记。分析资料后可从回答中生成草稿。' : '这里还没有笔记。'}</p>}
+        {visibleNotes.map(note => <button className="notes-index-item" type="button" key={note.id} disabled={busy} data-selected={selectedId === note.id} onClick={() => selectNote(note)}>
           <strong>{note.title}</strong><small>{new Date(note.updatedAt).toLocaleString('zh-CN')} · {note.sources.length} 个引用</small>
         </button>)}
       </aside>
@@ -164,6 +225,8 @@ export function NotesPanel({ notes, records, incomingDraft, onDraftConsumed, onS
         <div className="notes-editor-head"><span>{selectedId ? '编辑笔记' : '笔记草稿'}</span><span>{selectedId ? '已保存' : '未保存'}</span></div>
         <label htmlFor="note-title">标题</label>
         <input id="note-title" value={draft.title} maxLength={120} onChange={event => setDraft(current => ({ ...current, title: event.target.value }))} placeholder="输入笔记标题" />
+        <label htmlFor="note-folder-select">文件夹</label>
+        <select id="note-folder-select" value={draft.folderId ?? ''} onChange={event => setDraft(current => ({ ...current, folderId: event.target.value || null }))}><option value="">未分类</option>{folders.map(folder => <option key={folder.id} value={folder.id}>{folder.name}</option>)}</select>
         <label htmlFor="note-body">正文</label>
         <textarea id="note-body" value={draft.body} onChange={event => setDraft(current => ({ ...current, body: event.target.value }))} placeholder="记录要保留的结论、问题与行动项" />
         <div className="notes-source-head">来源 <span>{draft.sources.length}</span></div>

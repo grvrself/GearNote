@@ -4,14 +4,19 @@ import type { KnowledgeRecord } from './data'
 
 export type NoteSourceInput = { recordId: string; atSeconds?: number }
 export type NoteSource = NoteSourceInput & { title: string; url: string }
-export type Note = { id: string; title: string; body: string; sources: NoteSource[]; createdAt: number; updatedAt: number }
-export type NoteDraft = { title: string; body: string; sources: NoteSourceInput[] }
+export type Note = { id: string; title: string; body: string; sources: NoteSource[]; folderId?: string | null; createdAt: number; updatedAt: number }
+export type NoteDraft = { title: string; body: string; sources: NoteSourceInput[]; folderId?: string | null }
+export type NoteFolder = { id: string; name: string; createdAt: string }
 export type NoteEditProposal = { id: string; noteId: string; mode: 'append' | 'replace'; beforeText: string; afterText: string; reason: string; status: string; createdAt: string }
 export type NoteWorkflowEvent = { id: string; proposalId: string; action: string; at: string; detail: string; undoable: boolean }
 
 export const listNotes = () => invoke<Note[]>('list_notes')
-export const saveNote = (draft: NoteDraft, id?: string) => invoke<Note>('save_note', { id: id ?? null, ...draft })
+export const saveNote = (draft: NoteDraft, id?: string) => invoke<Note>('save_note', { id: id ?? null, ...draft, folderId: draft.folderId ?? null })
 export const exportNote = (id: string) => invoke<string>('export_note', { id })
+export const listNoteFolders = () => invoke<NoteFolder[]>('list_note_folders')
+export const createNoteFolder = (name: string) => invoke<NoteFolder>('create_note_folder', { name })
+export const renameNoteFolder = (id: string, name: string) => invoke<void>('rename_note_folder', { id, name })
+export const deleteNoteFolder = (id: string) => invoke<number>('delete_note_folder', { id })
 export const proposeNoteEdit = (noteId: string, instruction: string) => invoke<NoteEditProposal>('propose_note_edit', { noteId, instruction })
 export const applyNoteEdit = (proposalId: string) => invoke<Note>('apply_note_edit', { proposalId })
 export const undoNoteEdit = (proposalId: string) => invoke<Note>('undo_note_edit', { proposalId })

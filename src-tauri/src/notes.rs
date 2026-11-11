@@ -20,9 +20,15 @@ pub struct Note {
     pub title: String,
     pub body: String,
     pub sources: Vec<NoteSource>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder_id: Option<String>,
     pub created_at: u128,
     pub updated_at: u128,
 }
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NoteFolder { pub id: String, pub name: String, pub created_at: String }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -84,8 +90,42 @@ pub fn list_notes(state: State<'_, NotesState>) -> Result<Vec<Note>, String> {
     Ok(notes)
 }
 
+fn folder_name(name: &str) -> Result<&str, String> {
+    let name = name.trim();
+    if name.is_empty() || name.chars().count() > 60 || name.chars().any(|ch| ch.is_control() || ch == '/' || ch == '\\') || matches!(name, "." | ".." | "全部笔记" | "未分类") {
+        return Err("文件夹名称应为 1–60 字，不能含斜杠或使用系统分类名称".into());
+    }
+    Ok(name)
+}
+
 #[tauri::command]
-pub fn save_note(app: AppHandle, state: State<'_, NotesState>, records: State<'_, AppState>, id: Option<String>, title: String, body: String, sources: Vec<NoteSourceInput>) -> Result<Note, String> {
+pub fn list_note_folders(state: State<'_, NotesState>) -> Result<Vec<NoteFolder>, String> {
+    crate::db::list_note_folders(&state.path)
+}
+
+#[tauri::command]
+pub fn create_note_folder(state: State<'_, NotesState>, name: String) -> Result<NoteFolder, String> {
+    let folder = NoteFolder { id: format!("folder-{}", Uuid::new_v4()), name: folder_name(&name)?.into(), created_at: now()?.to_string() };
+    crate::db::create_note_folder(&state.path, &folder)?;
+    Ok(folder)
+}
+
+#[tauri::command]
+pub fn rename_note_folder(state: State<'_, NotesState>, id: String, name: String) -> Result<(), String> {
+    crate::db::rename_note_folder(&state.path, &id, folder_name(&name)?)
+}
+
+#[tauri::command]
+pub fn delete_note_folder(state: State<'_, NotesState>, id: String) -> Result<usize, String> {
+    let mut guard = state.notes.lock().map_err(|_| "笔记暂不可用")?;
+    let moved = guard.iter().filter(|note| note.folder_id.as_deref() == Some(id.as_str())).count();
+    let next = crate::db::delete_note_folder(&state.path, &id, &guard, now()?)?;
+    *guard = next;
+    Ok(moved)
+}
+
+#[tauri::command]
+pub fn save_note(app: AppHandle, state: State<'_, NotesState>, records: State<'_, AppState>, id: Option<String>, title: String, body: String, sources: Vec<NoteSourceInput>, folder_id: Option<String>) -> Result<Note, String> {
     let title = title.trim();
     let body = body.trim();
     if title.is_empty() || title.chars().count() > 120 || title.chars().any(char::is_control) { return Err("笔记标题应为 1–120 字".into()); }
@@ -104,16 +144,20 @@ pub fn save_note(app: AppHandle, state: State<'_, NotesState>, records: State<'_
     };
     let timestamp = now()?;
     let mut guard = state.notes.lock().map_err(|_| "笔记暂不可用")?;
+    if let Some(folder_id) = &folder_id {
+        if !crate::db::note_folder_exists(&state.path, folder_id)? { return Err("目标文件夹不存在，请重新选择".into()); }
+    }
     let mut next = guard.clone();
     let note = if let Some(id) = id {
         let item = next.iter_mut().find(|item| item.id == id).ok_or("笔记不存在")?;
         item.title = title.into();
         item.body = body.into();
         item.sources = resolved;
+        item.folder_id = folder_id;
         item.updated_at = timestamp;
         item.clone()
     } else {
-        let item = Note { id: format!("note-{}", Uuid::new_v4()), title: title.into(), body: body.into(), sources: resolved, created_at: timestamp, updated_at: timestamp };
+        let item = Note { id: format!("note-{}", Uuid::new_v4()), title: title.into(), body: body.into(), sources: resolved, folder_id, created_at: timestamp, updated_at: timestamp };
         next.push(item.clone());
         item
     };
@@ -147,4 +191,17 @@ pub fn export_note(app: AppHandle, state: State<'_, NotesState>, id: String) -> 
     }
     fs::write(&path, markdown).map_err(|error| format!("导出失败：{error}"))?;
     Ok(path.to_string_lossy().into_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::folder_name;
+
+    #[test]
+    fn folder_names_cannot_shadow_system_categories() {
+        assert_eq!(folder_name("  项目笔记  ").unwrap(), "项目笔记");
+        assert!(folder_name("未分类").is_err());
+        assert!(folder_name("全部笔记").is_err());
+        assert!(folder_name("项目/笔记").is_err());
+    }
 }

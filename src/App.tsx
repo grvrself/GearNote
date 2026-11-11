@@ -17,7 +17,7 @@ import { Topbar, type BrowserChoice } from './components/Topbar'
 import { recordFixtures } from './data'
 import { loadBridgeStatus, loadSavedRecords, type BridgeStatus } from './records'
 import type { KnowledgeRecord } from './data'
-import { applyNoteEdit, draftFromMessage, exportNote, getPendingNoteEdit, listNoteWorkflowEvents, listNotes, proposeNoteEdit, rejectNoteEdit, saveNote, undoNoteEdit, type Note, type NoteDraft } from './notes'
+import { applyNoteEdit, createNoteFolder, deleteNoteFolder, draftFromMessage, exportNote, getPendingNoteEdit, listNoteFolders, listNoteWorkflowEvents, listNotes, proposeNoteEdit, rejectNoteEdit, renameNoteFolder, saveNote, undoNoteEdit, type Note, type NoteDraft, type NoteFolder } from './notes'
 import {
   MINI_CONTEXT_EVENT, MINI_READY_EVENT, MINI_REMOVE_REFERENCE_EVENT, MINI_REVEAL_EVENT,
   openMiniWindow,
@@ -40,6 +40,7 @@ export default function App() {
   const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null)
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [notes, setNotes] = useState<Note[]>([])
+  const [noteFolders, setNoteFolders] = useState<NoteFolder[]>([])
   const [noteDraft, setNoteDraft] = useState<NoteDraft | null>(null)
   const [sessions, setSessions] = useState<ChatSessionSummary[]>([])
   const [activeSessionId, setActiveSessionId] = useState('')
@@ -93,6 +94,7 @@ export default function App() {
   useEffect(() => {
     if (!isTauri()) return
     void listNotes().then(setNotes).catch(() => setMiniError('本地笔记读取失败。'))
+    void listNoteFolders().then(setNoteFolders).catch(() => setMiniError('笔记文件夹读取失败。'))
   }, [])
 
   const createNoteDraft = (message: ChatMessage) => {
@@ -104,6 +106,22 @@ export default function App() {
     const saved = await saveNote(draft, id)
     setNotes(await listNotes())
     return saved
+  }
+
+  const addNoteFolder = async (name: string) => {
+    const folder = await createNoteFolder(name)
+    setNoteFolders(await listNoteFolders())
+    return folder
+  }
+  const changeNoteFolderName = async (id: string, name: string) => {
+    await renameNoteFolder(id, name)
+    setNoteFolders(await listNoteFolders())
+  }
+  const removeNoteFolder = async (id: string) => {
+    const moved = await deleteNoteFolder(id)
+    setNoteFolders(await listNoteFolders())
+    setNotes(await listNotes())
+    return moved
   }
 
   const applyNoteEditAndRefresh = async (proposalId: string) => {
@@ -271,7 +289,7 @@ export default function App() {
 
       <main className="main-panel" id="sec-01">
         {view === 'chat' ? <ChatPanel records={records} sessionId={activeSessionId} referencedIds={referencedIds} historyOpen={showHistory} agentAvailable={agentAvailable} sending={sending} streaming={streaming} error={agentError} messages={messages} workingContext={workingContext} projectMemory={projectMemory} compactedSummary={compactedSummary} compactedCount={compactedCount} onCompactContext={async () => applyChatState(await compactChatContext())} onSuggestWorkingContext={suggestWorkingContext} onApplyWorkingSuggestion={async id => applyChatState(await applyWorkingSuggestion(id))} onUndoWorkingSuggestion={async id => applyChatState(await undoWorkingSuggestion(id))} onRejectWorkingSuggestion={rejectWorkingSuggestion} onGetPendingWorkingSuggestion={getPendingWorkingSuggestion} onListWorkingWorkflowEvents={listWorkingWorkflowEvents} onSaveWorkingContext={async (goal, completed, nextStep) => applyChatState(await saveWorkingContext(goal, completed, nextStep))} onConfirmMemory={async (content, source, expiresAt) => applyChatState(await confirmProjectMemory(content, source, expiresAt))} onRevokeMemory={async id => applyChatState(await revokeProjectMemory(id))} onSend={sendQuestion} onPreviewContext={(question, frameId, explore, messageIds) => previewAgentContext(question, referencedIds, frameId, explore, messageIds)} onOpenAgentSetup={() => { setView('settings'); setSettingsSection('overview') }} onCreateNoteDraft={createNoteDraft} onSummarize={() => { void sendQuestion('请总结本轮参考资料的核心内容，并标注来源。') }} onRemoveReference={id => setReferencedIds(current => current.filter(value => value !== id))} onRevealRecord={revealRecord} onToggleHistory={() => setRightOpen(current => !current)} onShowHistory={() => setRightOpen(true)}  /> : view === 'library' ? null : <div className="pending-view"><PanelHeading id={`sec-01-${view}${settingsSection === 'shortcuts' ? '-shortcuts' : ''}`} serial="SEC-01" overline={settingsSection === 'shortcuts' ? 'shortcuts' : view} title={pendingTitle} />{view === 'settings' && settingsSection === 'shortcuts' ? <div className="shortcut-preview"><p>当前已启用的应用内快捷键</p><div><span>查找记录</span><kbd>CTRL K</kbd></div><HudButton type="button" onClick={() => setSettingsSection('overview')}>返回设置</HudButton></div> : view === 'settings' ? <><div className="settings-actions"><HudButton type="button" onClick={() => setSettingsSection('shortcuts')}>快捷键设置</HudButton></div><AgentSetup onStatusChange={setAgentStatus} /><PersonaSetup /><ExtensionSetup status={bridgeStatus} /></> : <p>资料索引接入后显示内容。</p>}</div>}
-        <div className="notes-host" hidden={view !== 'library'}><NotesPanel notes={notes} records={records} incomingDraft={noteDraft} onDraftConsumed={() => setNoteDraft(null)} onSave={persistNote} onExport={exportNote} onRevealRecord={revealRecord} onProposeEdit={proposeNoteEdit} onApplyEdit={applyNoteEditAndRefresh} onUndoEdit={undoNoteEditAndRefresh} onRejectEdit={rejectNoteEdit} onListWorkflowEvents={listNoteWorkflowEvents} onGetPendingEdit={getPendingNoteEdit} /></div>
+        <div className="notes-host" hidden={view !== 'library'}><NotesPanel notes={notes} folders={noteFolders} onCreateFolder={addNoteFolder} onRenameFolder={changeNoteFolderName} onDeleteFolder={removeNoteFolder} records={records} incomingDraft={noteDraft} onDraftConsumed={() => setNoteDraft(null)} onSave={persistNote} onExport={exportNote} onRevealRecord={revealRecord} onProposeEdit={proposeNoteEdit} onApplyEdit={applyNoteEditAndRefresh} onUndoEdit={undoNoteEditAndRefresh} onRejectEdit={rejectNoteEdit} onListWorkflowEvents={listNoteWorkflowEvents} onGetPendingEdit={getPendingNoteEdit} /></div>
       </main>
 
       {showHistory && <HistoryPanel records={records} selectedId={selectedId} referencedIds={referencedIds} focusRequest={focusRequest} onSelect={id => setSelectedId(current => current === id ? null : id)} onReference={id => setReferencedIds(current => current.includes(id) ? current : [...current, id])} onRemoveReference={id => setReferencedIds(current => current.filter(value => value !== id))} onCollapse={() => setRightOpen(false)} miniAvailable={miniAvailable} onOpenMini={() => { void handleOpenMini() }} searchRef={searchRef} onRecordsChanged={async () => setSavedRecords(await loadSavedRecords())} />}

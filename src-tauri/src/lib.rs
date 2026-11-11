@@ -30,6 +30,7 @@ pub fn run() {
             agent::get_persona, agent::save_persona, agent::get_default_persona, agent::reload_persona,
             agent::get_chat_frame_image,
             notes::list_notes, notes::save_note, notes::export_note,
+            notes::list_note_folders, notes::create_note_folder, notes::rename_note_folder, notes::delete_note_folder,
             workflow::propose_note_edit, workflow::apply_note_edit, workflow::undo_note_edit,
             workflow::reject_note_edit, workflow::list_note_workflow_events, workflow::get_pending_note_edit,
             workflow::suggest_working_context, workflow::apply_working_suggestion, workflow::undo_working_suggestion,

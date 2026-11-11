@@ -513,7 +513,8 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("knowflow-workflow-{}", Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join(db::FILE_NAME);
-        let original = note();
+        let mut original = note();
+        original.folder_id = Some("folder-test".into());
         db::write_notes(&path, &[original.clone()]).unwrap();
         let (proposal, after) = parse_model_edit(r#"{"mode":"append","targetText":"","replacementText":"新增结论。","reason":"补充说明"}"#, &original).unwrap();
         store_note_proposal(&path, &original, &after, &proposal).unwrap();
@@ -521,6 +522,7 @@ mod tests {
         let mut notes = vec![original.clone()];
         let applied = apply_note_edit_inner(&path, &mut notes, &proposal.id).unwrap();
         assert!(applied.body.ends_with("新增结论。"));
+        assert_eq!(applied.folder_id.as_deref(), Some("folder-test"));
         assert_eq!(db::read_notes(&path).unwrap().unwrap()[0].body, applied.body);
         assert!(list_note_workflow_events_inner(&path, &original.id).unwrap().iter().any(|event| event.undoable));
         assert!(apply_note_edit_inner(&path, &mut notes, &proposal.id).is_err());
