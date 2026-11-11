@@ -62,6 +62,7 @@ export function ChatPanel({ records, sessionId, referencedIds, workingContext = 
   const [contextPreviewBusy, setContextPreviewBusy] = useState(false)
   const [contextPreviewError, setContextPreviewError] = useState('')
   const [memoryError, setMemoryError] = useState('')
+  const [memoryPanelOpen, setMemoryPanelOpen] = useState(false)
   const [goal, setGoal] = useState(workingContext.goal)
   const [completed, setCompleted] = useState(workingContext.completed)
   const [nextStep, setNextStep] = useState(workingContext.nextStep)
@@ -79,12 +80,14 @@ export function ChatPanel({ records, sessionId, referencedIds, workingContext = 
   previewIdentityRef.current = previewIdentity
   const referencedRecords = referencedIds.map(id => records.find(record => record.id === id)).filter((record): record is KnowledgeRecord => Boolean(record))
   const selectedMessages = selectedMessageIds.map(id => messages.find(message => message.id === id)).filter((message): message is ChatMessage => Boolean(message))
+  const referenceCount = referencedRecords.length + selectedMessages.length
+  const referenceLabel = referencedRecords[0]?.title ?? (selectedMessages[0] ? `${selectedMessages[0].role === 'agent' ? 'Agent 回答' : '你的消息'}：${selectedMessages[0].paragraphs.join(' ')}` : '')
   const usableMemory = projectMemory.filter(item => !item.expiresAt || Number(item.expiresAt) > Date.now())
   const hasBackground = usableMemory.length > 0 || Boolean(compactedSummary || workingContext.goal || workingContext.completed || workingContext.nextStep)
   const hasReference = referencedRecords.length > 0 || selectedMessages.length > 0 || Boolean(attachedFrame) || hasBackground
   const canSend = agentAvailable || isCaptureCommand(draft)
 
-  useEffect(() => { setDraft(''); setExplore(false); setAttachedFrame(null); setSelectedMessageIds([]); setDismissedNotes([]); setContextPreview(null); setContextPreviewOpen(false); setSuggestion(null) }, [sessionId])
+  useEffect(() => { setDraft(''); setExplore(false); setAttachedFrame(null); setSelectedMessageIds([]); setDismissedNotes([]); setContextPreview(null); setContextPreviewOpen(false); setMemoryPanelOpen(false); setSuggestion(null) }, [sessionId])
   useEffect(() => { setContextPreview(null); setContextPreviewOpen(false) }, [referencedIds.join('|')])
   useEffect(() => { setContextPreview(null); setContextPreviewOpen(false) }, [workingContext, projectMemory, compactedSummary])
   useEffect(() => { setGoal(workingContext.goal); setCompleted(workingContext.completed); setNextStep(workingContext.nextStep) }, [sessionId, workingContext])
@@ -168,31 +171,33 @@ export function ChatPanel({ records, sessionId, referencedIds, workingContext = 
     </ol>
 
     <div className="chat-composer" id="cmd-01">
-      <div className="composer-head"><label htmlFor="agent-draft">向 Agent 提问</label><div>{onPreviewContext && <button className="context-preview-toggle" type="button" aria-expanded={contextPreviewOpen} disabled={sending || contextPreviewBusy || !draft.trim() || isCaptureCommand(draft) || !hasReference} onClick={() => { void previewContext() }}>{contextPreviewBusy ? '读取中' : contextPreviewOpen ? '收起上下文' : '本轮上下文'}</button>}<span data-available={canSend}>{sending ? isCaptureCommand(draft) ? '正在截取' : '正在回答' : canSend ? '可以发送' : '尚未接入'}</span></div></div>
+      <div className="composer-head"><label htmlFor="agent-draft">向 Agent 提问</label><div>{!compact && <button className="context-preview-toggle" type="button" aria-expanded={memoryPanelOpen} aria-controls="session-tools" onClick={() => setMemoryPanelOpen(current => !current)}>会话管理</button>}{onPreviewContext && <button className="context-preview-toggle" type="button" aria-expanded={contextPreviewOpen} disabled={sending || contextPreviewBusy || !draft.trim() || isCaptureCommand(draft) || !hasReference} onClick={() => { void previewContext() }}>{contextPreviewBusy ? '读取中' : contextPreviewOpen ? '收起上下文' : '本轮上下文'}</button>}<span data-available={canSend}>{sending ? isCaptureCommand(draft) ? '正在截取' : '正在回答' : canSend ? '可以发送' : '尚未接入'}</span></div></div>
       {attachedFrame && <div className="composer-frame"><span>已选截图 / {formatElapsed(attachedFrame.atSeconds)} · 发送时会交给当前模型</span><button type="button" disabled={sending} aria-label="移除已选截图" onClick={() => { setAttachedFrame(null); setContextPreview(null); setContextPreviewOpen(false) }}>移除</button></div>}
-      {!compact && <div className="memory-controls">
+      {!compact && memoryPanelOpen && <div className="memory-panel" id="session-tools" aria-label="会话管理" onKeyDown={event => { if (event.key === 'Escape') setMemoryPanelOpen(false) }}>
+        <div className="memory-panel-head"><strong>会话管理</strong><button type="button" aria-label="关闭会话管理" onClick={() => setMemoryPanelOpen(false)}>关闭</button></div>
+        <div className="memory-controls">
         <details><summary>对话压缩 · 已覆盖 {compactedCount} 条</summary><p>原消息继续保存在会话中。压缩会调用当前配置的模型，并把摘要用于后续追问。</p>{compactedSummary && <pre>{compactedSummary}</pre>}<button type="button" disabled={sending || contextBusy || !agentAvailable || messages.length - compactedCount <= 8 || !onCompactContext} onClick={() => { setMemoryError(''); setContextBusy(true); void onCompactContext?.().catch(cause => setMemoryError(String(cause))).finally(() => setContextBusy(false)) }}>{contextBusy ? '处理中' : '压缩较早对话'}</button></details>
         <details><summary>工作状态建议</summary><p>模型只提出建议；检查后点击“接受建议”才会保存。</p><button type="button" disabled={sending || contextBusy || !agentAvailable || messages.length === 0 || !onSuggestWorkingContext} onClick={() => { setMemoryError(''); setContextBusy(true); void onSuggestWorkingContext?.().then(setSuggestion).catch(cause => setMemoryError(String(cause))).finally(() => setContextBusy(false)) }}>{contextBusy ? '处理中' : '生成建议'}</button>{suggestion && <div className="working-suggestion"><pre>目标：{suggestion.goal}{'\n'}已完成：{suggestion.completed}{'\n'}下一步：{suggestion.nextStep}</pre><button type="button" disabled={sending || contextBusy} onClick={() => { setMemoryError(''); setContextBusy(true); void onApplyWorkingSuggestion?.(suggestion).then(() => setSuggestion(null)).catch(cause => setMemoryError(String(cause))).finally(() => setContextBusy(false)) }}>接受建议</button><button type="button" onClick={() => setSuggestion(null)}>放弃</button></div>}</details>
         <details><summary>当前会话工作状态</summary><label>目标<textarea value={goal} maxLength={1200} onChange={event => setGoal(event.target.value)} /></label><label>已完成<textarea value={completed} maxLength={1200} onChange={event => setCompleted(event.target.value)} /></label><label>下一步<textarea value={nextStep} maxLength={1200} onChange={event => setNextStep(event.target.value)} /></label><button type="button" disabled={sending} onClick={() => { setMemoryError(''); void onSaveWorkingContext(goal, completed, nextStep).catch(cause => setMemoryError(String(cause))) }}>保存工作状态</button></details>
         <details><summary>默认项目记忆 · {projectMemory.length} 条</summary><p>只有点击“确认保存”才会作为已确认记忆供其他会话使用。</p><textarea value={memoryDraft} maxLength={1000} placeholder="例如：KnowFlow 使用 Tauri 2，前端采用 React + TypeScript。" onChange={event => setMemoryDraft(event.target.value)} /><input value={memorySource} maxLength={500} placeholder="来源或说明（可选）" onChange={event => setMemorySource(event.target.value)} /><label>到期日（可选）<input type="date" value={memoryExpiry} onChange={event => setMemoryExpiry(event.target.value)} /></label><button type="button" disabled={!memoryDraft.trim() || sending} onClick={() => { setMemoryError(''); const expiresAt = memoryExpiry ? new Date(`${memoryExpiry}T23:59:59.999`).getTime().toString() : undefined; void onConfirmMemory(memoryDraft, memorySource, expiresAt).then(() => { setMemoryDraft(''); setMemorySource(''); setMemoryExpiry('') }).catch(cause => setMemoryError(String(cause))) }}>确认保存记忆</button>{projectMemory.map(item => <p key={item.id}><span>{item.content} · 用户确认于 {new Date(Number(item.confirmedAt)).toLocaleString('zh-CN')}{item.expiresAt ? ` · 到期 ${new Date(Number(item.expiresAt)).toLocaleDateString('zh-CN')}${Number(item.expiresAt) <= Date.now() ? '（已过期）' : ''}` : ''}</span><button type="button" disabled={sending} onClick={() => { setMemoryError(''); void onRevokeMemory(item.id).catch(cause => setMemoryError(String(cause))) }}>撤销</button></p>)}</details>
+        </div>
+        {memoryError && <p className="chat-error" role="alert">{memoryError}</p>}
       </div>}
-      {memoryError && <p className="chat-error" role="alert">{memoryError}</p>}
       <textarea id="agent-draft" ref={draftRef} value={draft} readOnly={sending} onChange={event => { setDraft(event.target.value); setContextPreview(null); setContextPreviewOpen(false) }} onKeyDown={event => { if (event.ctrlKey && event.key === 'Enter') { event.preventDefault(); void send() } }} placeholder="提问，或输入「截取 01:20 的画面」" />
-      {referencedRecords.length > 0 && <div className="reference-review" aria-label="本轮已选资料">
-        <div className="reference-review-head"><strong>本轮已选资料</strong><span aria-live="polite">{referencedRecords.length} 条</span></div>
+      {referenceCount > 0 && <details className="reference-review" aria-label="本轮参考">
+        <summary className="reference-review-summary" title={referenceLabel}><strong>本轮参考</strong><span>{referenceLabel}</span><small aria-live="polite">{referenceCount} 条</small></summary>
+        {referencedRecords.length > 0 && <div className="reference-review-section"><div className="reference-review-head"><strong>资料</strong><span>{referencedRecords.length} 条</span></div>
         <ul>{referencedRecords.map(record => <li key={record.id}>
           <button className="reference-review-open" type="button" title={`定位资料：${record.title}`} onClick={() => onRevealRecord(record.id)}><span aria-hidden="true">{record.type === 'video' ? '■' : '◆'}</span><span>{record.title}{record.status !== 'ready' && <small> · 当前不可用于问答</small>}</span></button>
           <button className="reference-review-remove" type="button" disabled={sending} aria-label={`移出本轮参考：${record.title}`} onClick={() => onRemoveReference(record.id)}>移除</button>
-        </li>)}</ul>
-      </div>}
-      {selectedMessages.length > 0 && <div className="reference-review" aria-label="本轮已选对话消息">
-        <div className="reference-review-head"><strong>本轮已选对话消息</strong><span aria-live="polite">{selectedMessages.length} / 4 条</span></div>
+        </li>)}</ul></div>}
+        {selectedMessages.length > 0 && <div className="reference-review-section"><div className="reference-review-head"><strong>对话消息</strong><span>{selectedMessages.length} / 4 条</span></div>
         <ul>{selectedMessages.map(message => <li key={message.id}>
           <button className="reference-review-open" type="button" title="定位这条消息" onClick={() => document.getElementById(message.id)?.scrollIntoView({ behavior: 'smooth', block: 'center' })}><span aria-hidden="true">◇</span><span><b>{message.role === 'agent' ? 'Agent 回答' : '你'}</b> · {message.paragraphs.join(' ').slice(0, 140)}{message.paragraphs.join(' ').length > 140 ? '…' : ''}</span></button>
           <button className="reference-review-remove" type="button" disabled={sending} aria-label="移出本轮参考" onClick={() => toggleMessageReference(message.id)}>移除</button>
         </li>)}</ul>
-        <small className="message-reference-note">仅引用所选消息的文字。Agent 回答会标明来源于对话，不代表已核实的外部事实。</small>
-      </div>}
+        <small className="message-reference-note">仅引用所选消息的文字。Agent 回答会标明来源于对话，不代表已核实的外部事实。</small></div>}
+      </details>}
       {referencedRecords.length > 0 && !attachedFrame && <label className="explore-option"><input type="checkbox" checked={explore} disabled={sending} onChange={event => { setExplore(event.target.checked); setContextPreview(null); setContextPreviewOpen(false) }} /><span>资料探索</span><small>允许模型在本轮已选资料中搜索、读取原文；最多 6 次只读调用。上下文预览不包含调用后追加的片段。</small></label>}
       {contextPreviewError && <p className="chat-error" role="alert">{contextPreviewError}</p>}
       {contextPreviewOpen && contextPreview && <div className="context-inspector" aria-label="本轮上下文预览">
