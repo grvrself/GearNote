@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { recordFixtures, type KnowledgeRecord, type RecordType } from '../data'
 import { isTauri } from '@tauri-apps/api/core'
-import { queryRecordPage, type RecordPage } from '../records'
+import { getRecord, queryRecordPage, queryRecordSegments, type RecordPage, type RecordSegment } from '../records'
 import { ChamferCard } from './ChamferCard'
 import { HudButton } from './HudButton'
 import { PanelHeading } from './PanelHeading'
@@ -24,6 +24,12 @@ function formatElapsed(seconds: number) {
   return hours > 0
     ? `${String(hours).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}:${String(remainder).padStart(2, '0')}`
     : `${String(minutes).padStart(2, '0')}:${String(remainder).padStart(2, '0')}`
+}
+
+function parseTime(value: string): number | null {
+  if (!value.trim()) return null
+  if (!/^\d{1,3}:[0-5]\d(?::[0-5]\d)?$/.test(value.trim())) throw new Error('时间请填写 mm:ss 或 hh:mm:ss')
+  return value.trim().split(':').reduce((seconds, part) => seconds * 60 + Number(part), 0)
 }
 
 type Props = {
@@ -107,7 +113,7 @@ export function HistoryPanel({ records = recordFixtures, selectedId, referencedI
       </div>
       <label className="history-search">
         <span className="history-search-label">搜索</span>
-        <span className="history-search-field"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8" cy="8" r="5"/><path d="m12 12 5 5"/></svg><input ref={searchRef} value={query} onChange={event => { setQuery(event.target.value); setPageOffset(0) }} placeholder="标题或来源网站" /><kbd>CTRL K</kbd></span>
+        <span className="history-search-field"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8" cy="8" r="5"/><path d="m12 12 5 5"/></svg><input ref={searchRef} value={query} onChange={event => { setQuery(event.target.value); setPageOffset(0) }} placeholder="标题、网站或正文字幕" /><kbd>CTRL K</kbd></span>
       </label>
       <div className="status-showcase" aria-label="状态图例与组件样张">
         <span className="history-mini-label">状态示例</span>
@@ -153,10 +159,28 @@ type CardProps = {
 
 function RecordCard({ record, expanded, referenced, activeMoment, onToggle, onMoment, onReference, onRecordsChanged }: CardProps) {
   const [sourceMessage, setSourceMessage] = useState('')
-  const hasMatchingCue = record.transcript?.some(cue => cue.atSeconds === activeMoment) ?? false
+  const [fullRecord, setFullRecord] = useState<KnowledgeRecord | null>(null)
+  const [detailError, setDetailError] = useState('')
+  const [segmentQuery, setSegmentQuery] = useState('')
+  const [fromTime, setFromTime] = useState('')
+  const [toTime, setToTime] = useState('')
+  const [segmentResults, setSegmentResults] = useState<RecordSegment[] | null>(null)
+  const [segmentError, setSegmentError] = useState('')
+  const [segmentLoading, setSegmentLoading] = useState(false)
+  useEffect(() => {
+    if (!expanded || record.demo) return
+    let disposed = false
+    setFullRecord(null)
+    setDetailError('')
+    void getRecord(record.id).then(value => { if (!disposed) setFullRecord(value) })
+      .catch(error => { if (!disposed) setDetailError(String(error)) })
+    return () => { disposed = true }
+  }, [expanded, record])
+  const detail = record.demo ? record : fullRecord
+  const hasMatchingCue = detail?.transcript?.some(cue => cue.atSeconds === activeMoment) ?? false
   const previewCues = hasMatchingCue
-    ? record.transcript?.filter(cue => cue.atSeconds === activeMoment)
-    : record.transcript?.slice(0, 80)
+    ? detail?.transcript?.filter(cue => cue.atSeconds === activeMoment)
+    : detail?.transcript?.slice(0, 80)
   const copySource = async () => {
     if (!record.sourceUrl) return
     try {
@@ -165,6 +189,19 @@ function RecordCard({ record, expanded, referenced, activeMoment, onToggle, onMo
     } catch {
       setSourceMessage('复制失败，请稍后重试')
     }
+  }
+  const searchSegments = async () => {
+    try {
+      const start = parseTime(fromTime)
+      const end = parseTime(toTime)
+      if (start != null && end != null && start > end) throw new Error('结束时间不能早于开始时间')
+      setSegmentLoading(true)
+      setSegmentError('')
+      setSegmentResults(await queryRecordSegments(record.id, start, end, segmentQuery))
+    } catch (error) {
+      setSegmentError(String(error))
+      setSegmentResults(null)
+    } finally { setSegmentLoading(false) }
   }
   return <ChamferCard className={`record-card ${expanded ? 'is-expanded' : ''} ${referenced ? 'is-referenced' : ''}`} id={record.id}>
     <button className="record-summary" type="button" aria-expanded={expanded} aria-controls={`${record.id}-details`} onClick={onToggle}>
@@ -175,11 +212,14 @@ function RecordCard({ record, expanded, referenced, activeMoment, onToggle, onMo
     </button>
     <div className="record-status-row"><StatusBadge status={record.status} progress={record.progress} reason={record.faultReason} /></div>
     <div className="record-details" id={`${record.id}-details`} hidden={!expanded}>
-      {record.moments && <section className="record-section"><h3>{record.demo ? 'KEY TIMES / 关键时间点' : 'TIME INDEX / 字幕时间点'}</h3><div className="moment-list">{record.moments.map(moment => <button key={moment.atSeconds} type="button" className={activeMoment === moment.atSeconds ? 'is-active' : ''} onClick={() => onMoment(moment.atSeconds)}>{activeMoment === moment.atSeconds && <span aria-hidden="true">⌜</span>}<time dateTime={`PT${moment.atSeconds}S`}>{formatElapsed(moment.atSeconds)}</time> {moment.title}</button>)}</div></section>}
-      {record.transcript && <section className="record-section"><h3>TRANSCRIPT / 字幕摘录 · {record.transcript.length} 条</h3><div className="transcript-list">{previewCues?.map((cue, index) => <p key={`${cue.atSeconds}-${index}`}><time dateTime={`PT${cue.atSeconds}S`}>{formatElapsed(cue.atSeconds)}</time><span>{cue.text}</span></p>)}</div>{record.transcript.length > 80 && !hasMatchingCue && <p className="record-source-message">此处预览前 80 条；展开下方“阅读已保存字幕”可查看全文。</p>}</section>}
-      {Boolean(record.excerpt?.length) && <section className="record-section"><h3>EXCERPT / 正文摘录</h3><div className="transcript-list excerpt-list">{record.excerpt?.map((text, index) => <p key={index}>{text}</p>)}</div></section>}
-      {record.contentText && <details className="record-full"><summary>{record.type === 'video' ? '阅读已保存字幕' : '阅读已保存正文'}</summary><pre>{record.contentText}</pre></details>}
-      {record.type === 'video' && !record.demo && <StoryboardSection record={record} onChanged={onRecordsChanged} />}
+      {!record.demo && !detail && !detailError && <p className="record-source-message" role="status">正在读取资料…</p>}
+      {detailError && <p className="record-source-message" role="alert">资料读取失败：{detailError}</p>}
+      {detail?.moments && <section className="record-section"><h3>{record.demo ? 'KEY TIMES / 关键时间点' : 'TIME INDEX / 字幕时间点'}</h3><div className="moment-list">{detail.moments.map(moment => <button key={moment.atSeconds} type="button" className={activeMoment === moment.atSeconds ? 'is-active' : ''} onClick={() => onMoment(moment.atSeconds)}>{activeMoment === moment.atSeconds && <span aria-hidden="true">⌜</span>}<time dateTime={`PT${moment.atSeconds}S`}>{formatElapsed(moment.atSeconds)}</time> {moment.title}</button>)}</div></section>}
+      {detail?.transcript && <section className="record-section"><h3>TRANSCRIPT / 字幕摘录 · {detail.transcript.length} 条</h3><div className="transcript-list">{previewCues?.map((cue, index) => <p key={`${cue.atSeconds}-${index}`}><time dateTime={`PT${cue.atSeconds}S`}>{formatElapsed(cue.atSeconds)}</time><span>{cue.text}</span></p>)}</div>{detail.transcript.length > 80 && !hasMatchingCue && <p className="record-source-message">此处预览前 80 条；展开下方“阅读已保存字幕”可查看全文。</p>}</section>}
+      {record.type === 'video' && detail?.transcript && !record.demo && <details className="record-segment-search"><summary>按时间检索字幕</summary><form onSubmit={event => { event.preventDefault(); void searchSegments() }}><input value={segmentQuery} onChange={event => setSegmentQuery(event.target.value)} aria-label="字幕关键词" placeholder="字幕关键词（可留空）" /><input value={fromTime} onChange={event => setFromTime(event.target.value)} aria-label="开始时间" placeholder="开始 mm:ss" /><input value={toTime} onChange={event => setToTime(event.target.value)} aria-label="结束时间" placeholder="结束 mm:ss" /><HudButton type="submit" disabled={segmentLoading}>{segmentLoading ? '检索中…' : '检索'}</HudButton></form>{segmentError && <p role="alert" className="record-source-message">{segmentError}</p>}{segmentResults && <div className="record-segment-results">{segmentResults.length === 0 ? <p>该时间段没有匹配字幕</p> : segmentResults.map(segment => <button key={segment.ordinal} type="button" onClick={() => segment.atSeconds != null && onMoment(segment.atSeconds)}><time>{segment.atSeconds == null ? '—' : formatElapsed(segment.atSeconds)}</time><span>{segment.text}</span></button>)}{segmentResults.length === 100 && <p>仅显示前 100 条，请缩小时间范围或添加关键词。</p>}</div>}</details>}
+      {Boolean(detail?.excerpt?.length) && <section className="record-section"><h3>EXCERPT / 正文摘录</h3><div className="transcript-list excerpt-list">{detail?.excerpt?.map((text, index) => <p key={index}>{text}</p>)}</div></section>}
+      {detail?.contentText && <details className="record-full"><summary>{record.type === 'video' ? '阅读已保存字幕' : '阅读已保存正文'}</summary><pre>{detail.contentText}</pre></details>}
+      {record.type === 'video' && !record.demo && detail && <StoryboardSection record={detail} onChanged={onRecordsChanged} />}
       {record.status === 'extracting' && <p className="record-process-note">字幕提取进行中，摘录完成后显示。</p>}
       <div className="record-actions">
         <HudButton variant={record.status === 'ready' && !referenced ? 'primary' : 'default'} type="button" aria-pressed={referenced} disabled={record.status !== 'ready'} onClick={onReference}>{referenced ? '移出本轮参考' : '加入本轮参考'}</HudButton>

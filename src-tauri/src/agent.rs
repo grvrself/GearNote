@@ -900,7 +900,9 @@ pub fn preview_agent_context(app: AppHandle, agent: State<'_, AgentState>, stora
         } else { None };
         (session.messages[session.compacted_count.min(session.messages.len())..].to_vec(), selected_messages(session, &message_ids)?, frame, store.project_memory.iter().filter(|entry| memory_is_current(entry)).cloned().collect::<Vec<_>>(), session.working_context.clone(), session.compacted_summary.clone())
     };
-    let records = storage.records.lock().map_err(|_| "资料库暂不可用")?.clone();
+    let records = storage.records.lock().map_err(|_| "资料库暂不可用")?.iter()
+        .filter(|record| referenced_ids.contains(&record.id) || image_frame.as_ref().is_some_and(|frame| frame.record_id == record.id))
+        .cloned().collect::<Vec<_>>();
     let image = if let Some(frame) = image_frame {
         let path = app.path().app_data_dir().map_err(|error| error.to_string())?
             .join("chat-frames").join(format!("{}.jpg", frame.image_id));
@@ -984,7 +986,6 @@ pub async fn ask_agent(app: AppHandle, agent: State<'_, AgentState>, storage: St
         (session.messages[session.compacted_count.min(session.messages.len())..].to_vec(), selected_messages(session, &message_ids)?, store.project_memory.iter().filter(|entry| memory_is_current(entry)).cloned().collect::<Vec<_>>(), session.working_context.clone(), session.compacted_summary.clone())
     };
     if config.model.is_empty() { return Err("请先在设置页填写模型名称".into()); }
-    let records = storage.records.lock().map_err(|_| "资料库暂不可用")?.clone();
     let mut image_source = None;
     let attachment = if let Some(image_id) = frame_id {
         if config.base_url.starts_with("https://api.deepseek.com") && config.model.eq_ignore_ascii_case("deepseek-v4-pro") {
@@ -1003,11 +1004,14 @@ pub async fn ask_agent(app: AppHandle, agent: State<'_, AgentState>, storage: St
         if bytes.len() < 3 || bytes.len() > 8_000_000 || !bytes.starts_with(&[0xff, 0xd8, 0xff]) {
             return Err("截图文件无效或超过 8 MB".into());
         }
-        let title = records.iter().find(|record| record.id == frame.record_id)
-            .map(|record| record.title.as_str()).unwrap_or("视频截图");
-        image_source = Some(SourceChunk::image(frame.record_id.clone(), title.into(), frame.at_seconds));
+        let title = storage.records.lock().map_err(|_| "资料库暂不可用")?.iter()
+            .find(|record| record.id == frame.record_id).map(|record| record.title.clone())
+            .unwrap_or_else(|| "视频截图".into());
+        image_source = Some(SourceChunk::image(frame.record_id.clone(), title, frame.at_seconds));
         Some((frame, format!("data:image/jpeg;base64,{}", crate::storyboard::base64(&bytes))))
     } else { None };
+    let records = storage.records.lock().map_err(|_| "资料库暂不可用")?.iter()
+        .filter(|record| referenced_ids.contains(&record.id)).cloned().collect::<Vec<_>>();
     let reserve = if explore.unwrap_or(false) && image_source.is_none() && !referenced_ids.is_empty() { context::TOOL_RESERVE_CHARS } else { 0 };
     let prepared = context::build_with_message_refs(&persona, question, &recent_messages, &selected, &records, &referenced_ids, image_source, &project_memory, &working, &summary, reserve);
     if prepared.sources.is_empty() && project_memory.is_empty() && summary.is_empty() && working.goal.is_empty() && working.completed.is_empty() && working.next_step.is_empty() { return Err("请先添加资料，或保存项目记忆或工作状态".into()); }

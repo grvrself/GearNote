@@ -1,4 +1,4 @@
-use crate::storage::{persist_records, AppState, StoryboardCell, StoryboardResult};
+use crate::storage::{persist_record_at, AppState, StoryboardCell, StoryboardResult};
 use serde::Deserialize;
 use std::{fs, path::{Path, PathBuf}, process::Command};
 use tauri::{AppHandle, Manager, State};
@@ -214,8 +214,11 @@ pub async fn analyze_video_storyboard(app: AppHandle, state: State<'_, AppState>
     let result = StoryboardResult { image_count: image_names(&dir)?.len(), cells: evidence.cells };
     let mut records = state.records.lock().map_err(|_| "资料库暂不可用")?;
     let position = records.iter().position(|record| record.id == record_id).ok_or("视频记录已被删除")?;
-    records[position].storyboard = Some(result.clone());
-    persist_records(&state.records_path, &records)?;
+    let previous = records[position].storyboard.replace(result.clone());
+    if let Err(error) = persist_record_at(&state.records_path, &records[position], position, &records) {
+        records[position].storyboard = previous;
+        return Err(error);
+    }
     drop(records);
     let _ = crate::agent::record_completed_event(&app, "视频画面分析已完成", &format!("storyboard-{record_id}"));
     Ok(result)

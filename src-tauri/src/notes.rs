@@ -117,7 +117,12 @@ pub fn save_note(app: AppHandle, state: State<'_, NotesState>, records: State<'_
         next.push(item.clone());
         item
     };
-    persist(&state.path, &next)?;
+    let position = next.iter().position(|item| item.id == note.id).ok_or("笔记位置无效")?;
+    if state.path.extension().is_some_and(|value| value == "db") {
+        crate::db::upsert_note(&state.path, &note, position)?;
+    } else {
+        persist(&state.path, &next)?;
+    }
     *guard = next;
     drop(guard);
     let _ = crate::agent::record_completed_event(&app, &format!("笔记《{}》已保存", note.title), &format!("note-{}-{}", note.id, timestamp));

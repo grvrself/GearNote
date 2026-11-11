@@ -130,6 +130,7 @@ impl AppState {
             fs::rename(&backup_path, &records_path)?;
         }
         let db_path = data_dir.join(crate::db::FILE_NAME);
+        crate::db::backup_before_phase_four(&db_path).map_err(std::io::Error::other)?;
         let mut records: Vec<KnowledgeRecord> = if let Some(saved) = crate::db::read_records(&db_path).map_err(std::io::Error::other)? {
             saved
         } else {
@@ -219,14 +220,14 @@ impl AppState {
         if let Some(index) = existing_index {
             let existing_id = records[index].id.clone();
             let previous = std::mem::replace(&mut records[index], KnowledgeRecord { id: existing_id, ..record });
-            if let Err(error) = persist_records(&self.records_path, &records) {
+            if let Err(error) = persist_record_at(&self.records_path, &records[index], index, &records) {
                 records[index] = previous;
                 return Err(error);
             }
             return Ok(CaptureResult { record: records[index].clone(), already_saved: false, updated: true });
         }
         records.insert(0, record.clone());
-        if let Err(error) = persist_records(&self.records_path, &records) {
+        if let Err(error) = persist_record_at(&self.records_path, &records[0], 0, &records) {
             records.remove(0);
             return Err(error);
         }
@@ -341,14 +342,14 @@ impl AppState {
             let old = std::mem::replace(&mut records[index], KnowledgeRecord {
                 id: existing_id, ..record.clone()
             });
-            if let Err(error) = persist_records(&self.records_path, &records) {
+            if let Err(error) = persist_record_at(&self.records_path, &records[index], index, &records) {
                 records[index] = old;
                 return Err(error);
             }
             return Ok(CaptureResult { record: records[index].clone(), already_saved: false, updated: true });
         }
         records.insert(0, record.clone());
-        if let Err(error) = persist_records(&self.records_path, &records) {
+        if let Err(error) = persist_record_at(&self.records_path, &records[0], 0, &records) {
             records.remove(0);
             return Err(error);
         }
@@ -477,14 +478,51 @@ pub(crate) fn persist_records(path: &PathBuf, records: &[KnowledgeRecord]) -> Re
     Ok(())
 }
 
+pub(crate) fn persist_record_at(path: &PathBuf, record: &KnowledgeRecord, position: usize, all_records: &[KnowledgeRecord]) -> Result<(), String> {
+    if path.extension().is_some_and(|value| value == "db") { crate::db::upsert_record(path, record, position) }
+    else { persist_records(path, all_records) }
+}
+
 #[tauri::command]
-pub fn list_records(state: State<'_, AppState>) -> Result<Vec<KnowledgeRecord>, String> {
-    state.records.lock().map(|records| records.clone()).map_err(|_| "资料库暂不可用".into())
+pub fn list_records(state: State<'_, AppState>) -> Result<Vec<RecordSummary>, String> {
+    let records = state.records.lock().map_err(|_| "资料库暂不可用")?;
+    Ok(records.iter().map(|record| RecordSummary {
+        id: record.id.clone(), record_type: record.record_type.clone(), title: record.title.clone(),
+        site: record.site.clone(), saved_at: record.saved_at.clone(), status: record.status,
+        source_url: record.source_url.clone(),
+        duration_seconds: record.duration_seconds, caption_language: record.caption_language.clone(), fault_reason: record.fault_reason.clone(),
+    }).collect())
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecordSummary {
+    pub(crate) id: String,
+    #[serde(rename = "type")]
+    pub(crate) record_type: String,
+    pub(crate) title: String,
+    pub(crate) site: String,
+    pub(crate) saved_at: String,
+    pub(crate) status: crate::ProcessStatus,
+    pub(crate) source_url: String,
+    pub(crate) duration_seconds: Option<u32>,
+    pub(crate) caption_language: Option<String>,
+    pub(crate) fault_reason: Option<String>,
 }
 
 #[tauri::command]
 pub fn query_record_page(state: State<'_, AppState>, record_type: String, search: String, offset: u64, limit: u64) -> Result<crate::db::RecordPage, String> {
     crate::db::query_record_page(&state.records_path, &record_type, &search, offset, limit)
+}
+
+#[tauri::command]
+pub fn get_record(state: State<'_, AppState>, id: String) -> Result<KnowledgeRecord, String> {
+    crate::db::get_record(&state.records_path, &id)
+}
+
+#[tauri::command]
+pub fn query_record_segments(state: State<'_, AppState>, record_id: String, start_at: Option<u32>, end_at: Option<u32>, search: String, limit: u64) -> Result<Vec<crate::db::RecordSegment>, String> {
+    crate::db::query_record_segments(&state.records_path, &record_id, start_at, end_at, &search, limit)
 }
 
 #[derive(Serialize)]
