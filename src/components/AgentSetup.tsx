@@ -79,7 +79,7 @@ export function AgentSetup({ onStatusChange }: Props) {
     <div className="agent-tool-probe">
       <div><strong>资料探索兼容性</strong><HudButton type="button" disabled={!isTauri() || saving || testing || !hasKey || !savedConfig.model || baseUrl !== savedConfig.baseUrl || model !== savedConfig.model} onClick={() => { void testTools() }}>{testing ? '测试中' : '测试已保存配置'}</HudButton></div>
       <p>点击后会向已保存的模型服务发送一段虚构测试资料，可能产生少量 API 用量；不会读取真实资料或写入会话。修改配置后请先保存。</p>
-      {probe && <div className="agent-tool-probe-result" role="status"><strong>{probe.searched && probe.read ? '搜索与读取均通过' : probe.supported ? '只确认了部分工具调用' : '未检测到工具调用'}</strong><span>耗时 {(probe.elapsedMs / 1000).toFixed(1)} 秒</span>{probe.steps.length > 0 && <ol>{probe.steps.map((step, index) => <li key={index}>{step}</li>)}</ol>}</div>}
+      {probe && <div className="agent-tool-probe-result" role="status"><strong>{probe.searched && probe.read ? '搜索与读取均通过' : probe.supported ? '只确认了部分工具调用' : '未检测到工具调用'}</strong><span>耗时 {(probe.elapsedMs / 1000).toFixed(1)} 秒</span>{probe.reason && <p>{probe.reason}</p>}{probe.steps.length > 0 && <ol>{probe.steps.map((step, index) => <li key={index}>{step}</li>)}</ol>}</div>}
       {probeError && <p role="alert">{probeError}</p>}
     </div>
   </section></ChamferCard>

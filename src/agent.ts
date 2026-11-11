@@ -3,7 +3,7 @@ import { listen } from '@tauri-apps/api/event'
 import type { ChatMessage } from './chat-data'
 
 export type AgentStatus = { baseUrl: string; model: string; hasKey: boolean; keyPersistent: boolean; keyWarning: string | null }
-export type ToolProbe = { supported: boolean; searched: boolean; read: boolean; elapsedMs: number; steps: string[] }
+export type ToolProbe = { supported: boolean; searched: boolean; read: boolean; elapsedMs: number; steps: string[]; reason: string }
 export type ChatSessionSummary = { id: string; title: string; updatedAt: string; messageCount: number }
 export type WorkingContext = { goal: string; completed: string; nextStep: string; updatedAt: string }
 export type ProjectMemory = { id: string; content: string; source: string; createdAt: string; confirmedAt: string; expiresAt?: string | null; active: boolean }

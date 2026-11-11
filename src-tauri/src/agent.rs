@@ -618,6 +618,27 @@ struct Exploration { messages: Vec<serde_json::Value>, sources: Vec<SourceChunk>
 const MAX_TOOL_OUTPUT_CHARS: usize = 4_000;
 const MAX_TOOL_CALL_CHARS: usize = 2_000;
 
+fn is_deepseek_api(base_url: &str) -> bool {
+    Url::parse(base_url).ok().and_then(|url| url.host_str().map(|host| host.eq_ignore_ascii_case("api.deepseek.com"))).unwrap_or(false)
+}
+
+fn exploration_payload(config: &AgentConfig, messages: &[serde_json::Value], tool_choice: &str) -> serde_json::Value {
+    let mut payload = serde_json::json!({"model":config.model,"stream":false,"messages":messages,
+        "tools":crate::read_tools::definitions(),"tool_choice":tool_choice});
+    if is_deepseek_api(&config.base_url) { payload["thinking"] = serde_json::json!({"type":"disabled"}); }
+    payload
+}
+
+fn answer_payload(config: &AgentConfig, messages: &[serde_json::Value], explored: bool) -> serde_json::Value {
+    let mut payload = serde_json::json!({"model":config.model,"stream":true,"messages":messages});
+    if explored && is_deepseek_api(&config.base_url) {
+        payload["tools"] = crate::read_tools::definitions();
+        payload["tool_choice"] = serde_json::json!("none");
+        payload["thinking"] = serde_json::json!({"type":"disabled"});
+    }
+    payload
+}
+
 fn execute_reference_tool(index: &ReadIndex, sources: &mut Vec<SourceChunk>, name: &str, args: &serde_json::Value) -> serde_json::Value {
     match name {
         "search_references" => index.search(args.get("query").and_then(serde_json::Value::as_str).unwrap_or_default()),
@@ -673,21 +694,27 @@ async fn explore_references<F: Fn(&str)>(
     let mut output_chars = 0;
     let mut call_chars = 0;
     for round in 0..3 {
-        let response = client.post(format!("{}/chat/completions", config.base_url)).bearer_auth(key)
-            .json(&serde_json::json!({"model":config.model,"stream":false,"messages":messages,
-                "tools":crate::read_tools::definitions(),"tool_choice":if round == 0 { "required" } else { "auto" }}))
-            .send().await.map_err(|error| format!("资料探索请求失败：{error}"))?;
-        if !response.status().is_success() {
+        let mut choice = if round == 0 { "required" } else { "auto" };
+        let response = loop {
+            let payload = exploration_payload(config, &messages, choice);
+            let response = client.post(format!("{}/chat/completions", config.base_url)).bearer_auth(key)
+                .json(&payload).send().await.map_err(|error| format!("资料探索请求失败：{error}"))?;
+            if response.status().is_success() { break response; }
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
             let lower = body.to_lowercase();
-            if round == 0 && (status == reqwest::StatusCode::BAD_REQUEST || status.as_u16() == 422)
-                && (lower.contains("tool") || lower.contains("function")) {
-                activity("当前模型不支持资料探索，改用普通问答");
+            let tool_error = status == reqwest::StatusCode::BAD_REQUEST || status.as_u16() == 422;
+            if round == 0 && choice == "required" && tool_error && (lower.contains("tool_choice") || lower.contains("required")) {
+                activity("模型服务不接受强制工具调用，改用自动模式重试…");
+                choice = "auto";
+                continue;
+            }
+            if round == 0 && tool_error && (lower.contains("tool") || lower.contains("function")) {
+                activity("模型服务拒绝工具参数，改用普通问答");
                 return Ok(None);
             }
             return Err(provider_error(status, &body, &config.base_url, &config.model));
-        }
+        };
         let body: serde_json::Value = response.json().await.map_err(|_| "资料探索响应格式无效")?;
         let reply = body.pointer("/choices/0/message").ok_or("资料探索未返回消息")?;
         let Some(tool_calls) = reply.get("tool_calls").and_then(serde_json::Value::as_array).filter(|calls| !calls.is_empty()) else {
@@ -733,7 +760,7 @@ async fn explore_references<F: Fn(&str)>(
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ToolProbe { supported: bool, searched: bool, read: bool, elapsed_ms: u128, steps: Vec<String> }
+pub struct ToolProbe { supported: bool, searched: bool, read: bool, elapsed_ms: u128, steps: Vec<String>, reason: String }
 
 #[tauri::command]
 pub async fn test_agent_tools(state: State<'_, AgentState>) -> Result<ToolProbe, String> {
@@ -757,10 +784,12 @@ pub async fn test_agent_tools(state: State<'_, AgentState>) -> Result<ToolProbe,
     let index = ReadIndex::new(&[record], &ids);
     let client = reqwest::Client::builder().connect_timeout(Duration::from_secs(15)).timeout(Duration::from_secs(60)).build().map_err(|_| "无法初始化测试连接")?;
     let start = Instant::now();
-    let result = explore_references(|_| {}, &client, &config, &key, &prepared, &index).await?;
+    let activity = Mutex::new(Vec::<String>::new());
+    let result = explore_references(|message| { if let Ok(mut events) = activity.lock() { events.push(message.into()); } }, &client, &config, &key, &prepared, &index).await?;
     let steps = result.map(|item| item.steps).unwrap_or_default();
+    let reason = if steps.is_empty() { activity.lock().ok().map(|events| events.join("；")).filter(|text| !text.is_empty()).unwrap_or_else(|| "服务未返回可识别的工具调用".into()) } else { String::new() };
     Ok(ToolProbe { supported: !steps.is_empty(), searched: steps.iter().any(|step| step.starts_with("搜索“") && step.contains("命中")),
-        read: steps.iter().any(|step| step.starts_with("读取《") && step.contains("来源 [")), elapsed_ms: start.elapsed().as_millis(), steps })
+        read: steps.iter().any(|step| step.starts_with("读取《") && step.contains("来源 [")), elapsed_ms: start.elapsed().as_millis(), steps, reason })
 }
 
 async fn auxiliary_completion(state: &AgentState, system: &str, user: String) -> Result<String, String> {
@@ -989,6 +1018,7 @@ pub async fn ask_agent(app: AppHandle, agent: State<'_, AgentState>, storage: St
             let _ = app.emit("knowflow:agent-tool", ToolActivity { request_id: request_id.clone(), message: message.into() });
         }, &client, &config, &key, &prepared, &index).await?
     } else { None };
+    let explored = exploration.is_some();
     let (request_messages, sources, tool_steps) = if let Some(exploration) = exploration {
         (exploration.messages, exploration.sources, exploration.steps)
     } else {
@@ -997,7 +1027,7 @@ pub async fn ask_agent(app: AppHandle, agent: State<'_, AgentState>, storage: St
             serde_json::json!({"role":"user","content":user_content})], prepared.sources, Vec::new())
     };
     let mut response = client.post(format!("{}/chat/completions", config.base_url)).bearer_auth(key)
-        .json(&serde_json::json!({"model": config.model, "stream": true, "messages": request_messages}))
+        .json(&answer_payload(&config, &request_messages, explored))
         .send().await.map_err(|error| format!("模型请求失败：{error}"))?;
     if !response.status().is_success() {
         let status = response.status();
@@ -1263,6 +1293,48 @@ mod tests {
     }
 
     #[test]
+    fn rejected_required_tool_choice_retries_with_auto() {
+        use std::io::{BufRead, Read, Write};
+        use std::net::TcpListener;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            let replies = [
+                ("400 Bad Request", serde_json::json!({"error":{"message":"tool_choice required is not supported"}})),
+                ("200 OK", serde_json::json!({"choices":[{"message":{"role":"assistant","content":null,"tool_calls":[{"id":"call-search","type":"function","function":{"name":"search_references","arguments":"{\"query\":\"所有权\"}"}}]}}]})),
+                ("200 OK", serde_json::json!({"choices":[{"message":{"role":"assistant","content":"已检索"}}]})),
+            ];
+            let mut choices = Vec::new();
+            for (status, reply) in replies {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                let mut length = 0;
+                loop {
+                    line.clear(); reader.read_line(&mut line).unwrap();
+                    if line == "\r\n" { break; }
+                    if let Some(value) = line.to_ascii_lowercase().strip_prefix("content-length:") { length = value.trim().parse::<usize>().unwrap(); }
+                }
+                let mut body = vec![0; length]; reader.read_exact(&mut body).unwrap();
+                let request: serde_json::Value = serde_json::from_slice(&body).unwrap();
+                choices.push(request["tool_choice"].as_str().unwrap().to_string());
+                let body = reply.to_string();
+                write!(stream, "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).unwrap();
+            }
+            choices
+        });
+        let record: KnowledgeRecord = serde_json::from_value(serde_json::json!({"id":"rec-selected","type":"article","title":"Rust","site":"example.com",
+            "savedAt":"2026-11-11T00:00:00Z","status":"ready","sourceUrl":"https://example.com","contentText":"Rust 的所有权规则","excerpt":[]})).unwrap();
+        let prepared = context::build("人格", "所有权是什么？", &[], &[record.clone()], &[record.id.clone()], None, &[], &WorkingContext::default(), "");
+        let index = ReadIndex::new(&[record], &["rec-selected".into()]);
+        let config = AgentConfig { base_url: format!("http://127.0.0.1:{port}/v1"), model: "mock".into() };
+        let exploration = tauri::async_runtime::block_on(explore_references(|_| {}, &reqwest::Client::new(), &config, "test", &prepared, &index)).unwrap().unwrap();
+        assert_eq!(server.join().unwrap(), ["required", "auto", "auto"]);
+        assert_eq!(exploration.steps.len(), 1);
+    }
+
+    #[test]
     fn unsupported_tool_api_falls_back_to_regular_answer() {
         use std::io::{Read, Write};
         use std::net::TcpListener;
@@ -1295,6 +1367,20 @@ mod tests {
         let generic = provider_error(reqwest::StatusCode::BAD_REQUEST,
             r#"{"error":{"message":"Unknown model: example"}}"#, "https://api.example.com/v1", "example");
         assert!(generic.contains("Unknown model: example"));
+    }
+    #[test]
+    fn deepseek_tool_requests_explicitly_disable_thinking() {
+        let deepseek = AgentConfig { base_url: "https://api.deepseek.com".into(), model: "deepseek-flash".into() };
+        let first = exploration_payload(&deepseek, &[], "required");
+        assert_eq!(first["tool_choice"], "required");
+        assert_eq!(first["thinking"]["type"], "disabled");
+        let final_answer = answer_payload(&deepseek, &[], true);
+        assert_eq!(final_answer["tool_choice"], "none");
+        assert_eq!(final_answer["thinking"]["type"], "disabled");
+        assert!(final_answer["tools"].is_array());
+        let regular_answer = answer_payload(&deepseek, &[], false);
+        assert!(regular_answer.get("thinking").is_none());
+        assert!(!is_deepseek_api("https://api.deepseek.com.example.invalid"));
     }
 
     #[test]
