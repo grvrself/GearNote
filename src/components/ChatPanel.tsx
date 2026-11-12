@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ChatFrame, ChatMessage, ChatStreaming } from '../chat-data'
 import type { KnowledgeRecord } from '../data'
-import type { ContextPreview, ProjectMemory, WorkingContext, WorkingSuggestion, WorkingWorkflowEvent } from '../agent'
+import type { ContextPreview, PendingChoice, ProjectMemory, WorkingContext, WorkingSuggestion, WorkingWorkflowEvent } from '../agent'
 import { isCaptureCommand } from '../capture-command'
 import { CapturedFrame } from './CapturedFrame'
 import { ChamferCard } from './ChamferCard'
@@ -11,6 +11,7 @@ import { WorkingSuggestionPanel } from './WorkingSuggestionPanel'
 import './chat.css'
 
 type Props = {
+  pendingChoice?: PendingChoice | null
   records: KnowledgeRecord[]
   sessionId?: string
   referencedIds: string[]
@@ -34,7 +35,7 @@ type Props = {
   suggestingMessageId?: string | null
   suggestionErrorId?: string | null
   error?: string
-  onSend?: (question: string, frameId?: string, messageIds?: string[]) => Promise<boolean>
+  onSend?: (question: string, frameId?: string, messageIds?: string[], choiceId?: string) => Promise<boolean>
   onPreviewContext?: (question: string, frameId?: string, messageIds?: string[]) => Promise<ContextPreview>
   onOpenAgentSetup?: () => void
   onSummarize?: () => void
@@ -88,8 +89,9 @@ function StreamingRun({ streaming }: { streaming: ChatStreaming }) {
   </div>
 }
 
-export function ChatPanel({ records, sessionId, referencedIds, workingContext = { goal: '', completed: '', nextStep: '', updatedAt: '' }, projectMemory = [], compactedSummary = '', compactedCount = 0, onCompactContext, onApplyWorkingSuggestion, onUndoWorkingSuggestion, onRejectWorkingSuggestion, onGetPendingWorkingSuggestion, onListWorkingWorkflowEvents, onSaveWorkingContext = async () => {}, onConfirmMemory = async () => {}, onRevokeMemory = async () => {}, historyOpen, agentAvailable, sending = false, streaming = null, suggestingMessageId = null, suggestionErrorId = null, error = '', onSend, onPreviewContext, onOpenAgentSetup, onSummarize, onRemoveReference, onRevealRecord, onToggleHistory, onShowHistory, onCreateNoteDraft, messages = [], compact = false }: Props) {
+export function ChatPanel({ records, pendingChoice = null, sessionId, referencedIds, workingContext = { goal: '', completed: '', nextStep: '', updatedAt: '' }, projectMemory = [], compactedSummary = '', compactedCount = 0, onCompactContext, onApplyWorkingSuggestion, onUndoWorkingSuggestion, onRejectWorkingSuggestion, onGetPendingWorkingSuggestion, onListWorkingWorkflowEvents, onSaveWorkingContext = async () => {}, onConfirmMemory = async () => {}, onRevokeMemory = async () => {}, historyOpen, agentAvailable, sending = false, streaming = null, suggestingMessageId = null, suggestionErrorId = null, error = '', onSend, onPreviewContext, onOpenAgentSetup, onSummarize, onRemoveReference, onRevealRecord, onToggleHistory, onShowHistory, onCreateNoteDraft, messages = [], compact = false }: Props) {
   const [draft, setDraft] = useState('')
+  const [choiceSubmitting, setChoiceSubmitting] = useState(false)
   const [attachedFrame, setAttachedFrame] = useState<ChatFrame | null>(null)
   const [selectedMessageIds, setSelectedMessageIds] = useState<string[]>([])
   const [dismissedNotes, setDismissedNotes] = useState<string[]>([])
@@ -160,6 +162,13 @@ export function ChatPanel({ records, sessionId, referencedIds, workingContext = 
     draftRef.current?.focus()
   }
 
+  const selectChoice = async (label: string) => {
+    if (!onSend || !pendingChoice || sending || streaming || choiceSubmitting) return
+    setChoiceSubmitting(true)
+    try { await onSend(`选择：${label}`, undefined, [], pendingChoice.id) }
+    finally { setChoiceSubmitting(false) }
+  }
+
   const previewContext = async () => {
     if (!onPreviewContext || !draft.trim() || contextPreviewBusy) return
     if (contextPreview && contextPreviewOpen) { setContextPreviewOpen(false); return }
@@ -208,6 +217,10 @@ export function ChatPanel({ records, sessionId, referencedIds, workingContext = 
           {message.id === latestAgentId && suggestingMessageId === message.id && <p className="chat-suggestion-status" role="status">正在准备下一步建议…</p>}
           {message.id === latestAgentId && suggestionErrorId === message.id && <p className="chat-suggestion-status">本轮建议暂未生成，回答不受影响。</p>}
           {message.id === latestAgentId && Boolean(message.suggestions?.length) && <div className="chat-suggestions"><span>接下来可以</span><div>{message.suggestions?.map(suggestion => <button type="button" key={suggestion.prompt} disabled={sending} title={suggestion.prompt} onClick={() => chooseSuggestion(suggestion.prompt)}>{suggestion.label} ↗</button>)}</div></div>}
+          {pendingChoice?.status === 'open' && pendingChoice.messageId === message.id && <div className="chat-choice" role="group" aria-label={pendingChoice.prompt}>
+            {pendingChoice.options.map(option => <button type="button" key={option.id} disabled={sending || Boolean(streaming) || choiceSubmitting || !agentAvailable} onClick={() => { void selectChoice(option.label) }}><strong>{option.label}{pendingChoice.recommended === option.id && <span className="chat-choice-recommended">推荐</span>}</strong>{option.detail && <span>{option.detail}</span>}</button>)}
+            <small>也可以在下方输入自己的选择；发送后会按你的回答继续。</small>
+          </div>}
           {!compact && onCreateNoteDraft && message.role === 'agent' && !message.frame && Boolean(message.citations?.some(citation => records.some(record => record.id === citation.recordId && !record.demo))) && !dismissedNotes.includes(message.id) && <div className="message-note-offer"><span>将这次分析整理成笔记？</span><div><button type="button" onClick={() => onCreateNoteDraft(message)}>整理为笔记<span className="mono-note-gear"><GearIcon kind="center" /></span></button><button type="button" onClick={() => setDismissedNotes(current => [...current, message.id])}>暂不整理</button></div></div>}
         </ChamferCard>
       </li>)}

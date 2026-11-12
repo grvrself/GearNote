@@ -571,7 +571,7 @@ mod tests {
             project_id: "project-default".into(),
             working_context: WorkingContext { goal: "完成阶段五".into(), completed: "".into(), next_step: "验证流程".into(), updated_at: "200".into() },
             compacted_summary: String::new(), compacted_count: 0, compacted_at: String::new(),
-            referenced_ids: vec![], messages: vec![],
+            referenced_ids: vec![], messages: vec![], pending_choice: None,
         }] }
     }
 

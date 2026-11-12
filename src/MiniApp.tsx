@@ -2,7 +2,7 @@ import { isTauri } from '@tauri-apps/api/core'
 import { emitTo, listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { useEffect, useRef, useState } from 'react'
-import { askAgent, getAgentStatus, getChatState, setChatReferences, suggestChatFollowups, type AgentStatus } from './agent'
+import { askAgent, getAgentStatus, getChatState, setChatReferences, suggestChatFollowups, type AgentStatus, type PendingChoice } from './agent'
 import type { ChatMessage, ChatStreaming } from './chat-data'
 import { ChatPanel } from './components/ChatPanel'
 import { recordFixtures } from './data'
@@ -26,6 +26,7 @@ export default function MiniApp() {
   const [streaming, setStreaming] = useState<ChatStreaming | null>(null)
   const [suggestingMessageId, setSuggestingMessageId] = useState<string | null>(null)
   const [suggestionErrorId, setSuggestionErrorId] = useState<string | null>(null)
+  const [pendingChoice, setPendingChoice] = useState<PendingChoice | null>(null)
   const sendingRef = useRef(false)
   const desktop = isTauri()
   const records = desktop ? savedRecords : recordFixtures.map(record => ({ ...record, demo: true }))
@@ -35,15 +36,15 @@ export default function MiniApp() {
     let disposed = false
     let stop: UnlistenFn | undefined
     void Promise.all([getAgentStatus(), getChatState()]).then(([status, chat]) => {
-      if (!disposed) { setAgentStatus(status); setActiveSessionId(chat.activeId); setMessages(chat.messages); setReferencedIds(chat.referencedIds) }
+      if (!disposed) { setAgentStatus(status); setActiveSessionId(chat.activeId); setMessages(chat.messages); setPendingChoice(chat.pendingChoice); setReferencedIds(chat.referencedIds) }
     }).catch(() => { if (!disposed) setError('对话或模型配置读取失败') })
     void listen('knowflow:chat-changed', () => {
-      if (!sendingRef.current) void getChatState().then(chat => { if (!disposed) { setActiveSessionId(chat.activeId); setMessages(chat.messages); setReferencedIds(chat.referencedIds) } })
+      if (!sendingRef.current) void getChatState().then(chat => { if (!disposed) { setActiveSessionId(chat.activeId); setMessages(chat.messages); setPendingChoice(chat.pendingChoice); setReferencedIds(chat.referencedIds) } })
     }).then(unlisten => { if (disposed) unlisten(); else stop = unlisten })
     return () => { disposed = true; stop?.() }
   }, [desktop])
 
-  const sendQuestion = async (question: string, frameId?: string, messageIds: string[] = []) => {
+  const sendQuestion = async (question: string, frameId?: string, messageIds: string[] = [], choiceId?: string) => {
     if (sendingRef.current) return false
     sendingRef.current = true
     setSending(true)
@@ -52,19 +53,21 @@ export default function MiniApp() {
     setError('')
     try {
       const reply = await askAgent(question, referencedIds, delta => setStreaming(current => current && { ...current, answer: current.answer + delta }), frameId,
-        activity => setStreaming(current => current && { ...current, activity, activities: [...current.activities, activity] }), messageIds)
+        activity => setStreaming(current => current && { ...current, activity, activities: [...current.activities, activity] }), messageIds, choiceId)
       const chat = await getChatState()
       setActiveSessionId(chat.activeId)
       setMessages(chat.messages)
+      setPendingChoice(chat.pendingChoice)
       setReferencedIds(chat.referencedIds)
       setStreaming(null)
-      if (!reply.frame) {
+      if (!reply.frame && !(chat.pendingChoice?.status === 'open' && chat.pendingChoice.messageId === reply.id)) {
         setSuggestingMessageId(reply.id)
         void suggestChatFollowups(chat.activeId, reply.id)
           .then(async () => {
             const updated = await getChatState()
             setActiveSessionId(updated.activeId)
             setMessages(updated.messages)
+            setPendingChoice(updated.pendingChoice)
             setReferencedIds(updated.referencedIds)
           })
           .catch(() => setSuggestionErrorId(reply.id))
@@ -150,6 +153,6 @@ export default function MiniApp() {
       </div>
     </header>
     {error && <div className="mini-error" role="alert"><span>{error}</span><button type="button" aria-label="关闭错误提示" onClick={() => setError('')}>×</button></div>}
-    <ChatPanel compact records={records} sessionId={activeSessionId} referencedIds={referencedIds} historyOpen={false} agentAvailable={Boolean(agentStatus?.hasKey && agentStatus.model)} sending={sending} streaming={streaming} suggestingMessageId={suggestingMessageId} suggestionErrorId={suggestionErrorId} onSend={sendQuestion} onOpenAgentSetup={() => { void showMain() }} onRemoveReference={removeReference} onRevealRecord={revealRecord} onToggleHistory={() => { void showMain() }} onShowHistory={() => { void showMain() }} messages={messages} />
+    <ChatPanel compact records={records} pendingChoice={pendingChoice} sessionId={activeSessionId} referencedIds={referencedIds} historyOpen={false} agentAvailable={Boolean(agentStatus?.hasKey && agentStatus.model)} sending={sending} streaming={streaming} suggestingMessageId={suggestingMessageId} suggestionErrorId={suggestionErrorId} onSend={sendQuestion} onOpenAgentSetup={() => { void showMain() }} onRemoveReference={removeReference} onRevealRecord={revealRecord} onToggleHistory={() => { void showMain() }} onShowHistory={() => { void showMain() }} messages={messages} />
   </div>
 }

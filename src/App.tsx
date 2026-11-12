@@ -42,6 +42,7 @@ export default function App() {
   const [bridgeStatus, setBridgeStatus] = useState<BridgeStatus | null>(null)
   const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null)
   const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [pendingChoice, setPendingChoice] = useState<ChatState['pendingChoice']>(null)
   const [notes, setNotes] = useState<Note[]>([])
   const [noteFolders, setNoteFolders] = useState<NoteFolder[]>([])
   const [noteDraft, setNoteDraft] = useState<NoteDraft | null>(null)
@@ -65,6 +66,7 @@ export default function App() {
     setActiveSessionId(state.activeId)
     setSessions(state.sessions)
     setMessages(state.messages)
+    setPendingChoice(state.pendingChoice)
     setReferencedIds(state.referencedIds)
     setWorkingContext(state.workingContext)
     setProjectMemory(state.projectMemory)
@@ -140,7 +142,7 @@ export default function App() {
     return restored
   }
 
-  const sendQuestion = async (question: string, frameId?: string, messageIds: string[] = []) => {
+  const sendQuestion = async (question: string, frameId?: string, messageIds: string[] = [], choiceId?: string) => {
     if (sendingRef.current) return false
     sendingRef.current = true
     setSending(true)
@@ -149,11 +151,11 @@ export default function App() {
     setAgentError('')
     try {
       const reply = await askAgent(question, referencedIds, delta => setStreaming(current => current && { ...current, answer: current.answer + delta }), frameId,
-        activity => setStreaming(current => current && { ...current, activity, activities: [...current.activities, activity] }), messageIds)
+        activity => setStreaming(current => current && { ...current, activity, activities: [...current.activities, activity] }), messageIds, choiceId)
       const saved = await getChatState()
       applyChatState(saved)
       setStreaming(null)
-      if (!reply.frame) {
+      if (!reply.frame && !(saved.pendingChoice?.status === 'open' && saved.pendingChoice.messageId === reply.id)) {
         setSuggestingMessageId(reply.id)
         void suggestChatFollowups(saved.activeId, reply.id)
           .then(async () => applyChatState(await getChatState()))
@@ -320,7 +322,7 @@ export default function App() {
       <Sidebar view={view} sessions={sessions} activeSessionId={activeSessionId} sessionBusy={sending} sessionError={sessionError} onViewChange={changeView} onCreateSession={() => { void manageSession(createChatSession) }} onSwitchSession={id => { void manageSession(() => switchChatSession(id)) }} onDeleteSession={id => { void manageSession(() => deleteChatSession(id)) }} />
 
       <main className="main-panel" id="sec-01">
-        {view === 'chat' ? <ChatPanel records={records} sessionId={activeSessionId} referencedIds={referencedIds} historyOpen={showHistory} agentAvailable={agentAvailable} sending={sending} streaming={streaming} suggestingMessageId={suggestingMessageId} suggestionErrorId={suggestionErrorId} error={agentError} messages={messages} workingContext={workingContext} projectMemory={projectMemory} compactedSummary={compactedSummary} compactedCount={compactedCount} onCompactContext={async () => applyChatState(await compactChatContext())} onApplyWorkingSuggestion={async id => applyChatState(await applyWorkingSuggestion(id))} onUndoWorkingSuggestion={async id => applyChatState(await undoWorkingSuggestion(id))} onRejectWorkingSuggestion={rejectWorkingSuggestion} onGetPendingWorkingSuggestion={getPendingWorkingSuggestion} onListWorkingWorkflowEvents={listWorkingWorkflowEvents} onSaveWorkingContext={async (goal, completed, nextStep) => applyChatState(await saveWorkingContext(goal, completed, nextStep))} onConfirmMemory={async (content, source, expiresAt) => applyChatState(await confirmProjectMemory(content, source, expiresAt))} onRevokeMemory={async id => applyChatState(await revokeProjectMemory(id))} onSend={sendQuestion} onPreviewContext={(question, frameId, messageIds) => previewAgentContext(question, referencedIds, frameId, messageIds)} onOpenAgentSetup={() => { setView('settings'); setSettingsSection('overview') }} onCreateNoteDraft={createNoteDraft} onSummarize={() => { void sendQuestion('请总结本轮参考资料的核心内容，并标注来源。') }} onRemoveReference={id => setReferencedIds(current => current.filter(value => value !== id))} onRevealRecord={revealRecord} onToggleHistory={() => setRightOpen(current => !current)} onShowHistory={() => setRightOpen(true)}  /> : view === 'library' ? null : <div className="pending-view"><PanelHeading id={`sec-01-${view}${settingsSection === 'shortcuts' ? '-shortcuts' : ''}`} serial="SEC-01" overline={settingsSection === 'shortcuts' ? 'shortcuts' : view} title={pendingTitle} />{view === 'settings' && settingsSection === 'shortcuts' ? <div className="shortcut-preview"><p>当前已启用的应用内快捷键</p><div><span>查找记录</span><kbd>CTRL K</kbd></div><HudButton type="button" onClick={() => setSettingsSection('overview')}>返回设置</HudButton></div> : view === 'plugins' ? <ExtensionSetup status={bridgeStatus} /> : view === 'settings' ? <><div className="settings-actions"><HudButton type="button" onClick={() => setSettingsSection('shortcuts')}>快捷键设置</HudButton></div><ThemeSettings /><AgentSetup onStatusChange={setAgentStatus} /><PersonaSetup /></> : <SkillsPanel />}</div>}
+        {view === 'chat' ? <ChatPanel records={records} pendingChoice={pendingChoice} sessionId={activeSessionId} referencedIds={referencedIds} historyOpen={showHistory} agentAvailable={agentAvailable} sending={sending} streaming={streaming} suggestingMessageId={suggestingMessageId} suggestionErrorId={suggestionErrorId} error={agentError} messages={messages} workingContext={workingContext} projectMemory={projectMemory} compactedSummary={compactedSummary} compactedCount={compactedCount} onCompactContext={async () => applyChatState(await compactChatContext())} onApplyWorkingSuggestion={async id => applyChatState(await applyWorkingSuggestion(id))} onUndoWorkingSuggestion={async id => applyChatState(await undoWorkingSuggestion(id))} onRejectWorkingSuggestion={rejectWorkingSuggestion} onGetPendingWorkingSuggestion={getPendingWorkingSuggestion} onListWorkingWorkflowEvents={listWorkingWorkflowEvents} onSaveWorkingContext={async (goal, completed, nextStep) => applyChatState(await saveWorkingContext(goal, completed, nextStep))} onConfirmMemory={async (content, source, expiresAt) => applyChatState(await confirmProjectMemory(content, source, expiresAt))} onRevokeMemory={async id => applyChatState(await revokeProjectMemory(id))} onSend={sendQuestion} onPreviewContext={(question, frameId, messageIds) => previewAgentContext(question, referencedIds, frameId, messageIds)} onOpenAgentSetup={() => { setView('settings'); setSettingsSection('overview') }} onCreateNoteDraft={createNoteDraft} onSummarize={() => { void sendQuestion('请总结本轮参考资料的核心内容，并标注来源。') }} onRemoveReference={id => setReferencedIds(current => current.filter(value => value !== id))} onRevealRecord={revealRecord} onToggleHistory={() => setRightOpen(current => !current)} onShowHistory={() => setRightOpen(true)}  /> : view === 'library' ? null : <div className="pending-view"><PanelHeading id={`sec-01-${view}${settingsSection === 'shortcuts' ? '-shortcuts' : ''}`} serial="SEC-01" overline={settingsSection === 'shortcuts' ? 'shortcuts' : view} title={pendingTitle} />{view === 'settings' && settingsSection === 'shortcuts' ? <div className="shortcut-preview"><p>当前已启用的应用内快捷键</p><div><span>查找记录</span><kbd>CTRL K</kbd></div><HudButton type="button" onClick={() => setSettingsSection('overview')}>返回设置</HudButton></div> : view === 'plugins' ? <ExtensionSetup status={bridgeStatus} /> : view === 'settings' ? <><div className="settings-actions"><HudButton type="button" onClick={() => setSettingsSection('shortcuts')}>快捷键设置</HudButton></div><ThemeSettings /><AgentSetup onStatusChange={setAgentStatus} /><PersonaSetup /></> : <SkillsPanel />}</div>}
         <div className="notes-host" hidden={view !== 'library'}><NotesPanel notes={notes} folders={noteFolders} onCreateFolder={addNoteFolder} onRenameFolder={changeNoteFolderName} onDeleteFolder={removeNoteFolder} records={records} incomingDraft={noteDraft} onDraftConsumed={() => setNoteDraft(null)} onSave={persistNote} onExport={exportNote} onRevealRecord={revealRecord} onProposeEdit={proposeNoteEdit} onApplyEdit={applyNoteEditAndRefresh} onUndoEdit={undoNoteEditAndRefresh} onRejectEdit={rejectNoteEdit} onListWorkflowEvents={listNoteWorkflowEvents} onGetPendingEdit={getPendingNoteEdit} /></div>
       </main>
 

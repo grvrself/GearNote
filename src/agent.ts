@@ -7,7 +7,9 @@ export type ToolProbe = { supported: boolean; searched: boolean; read: boolean; 
 export type ChatSessionSummary = { id: string; title: string; updatedAt: string; messageCount: number }
 export type WorkingContext = { goal: string; completed: string; nextStep: string; updatedAt: string }
 export type ProjectMemory = { id: string; content: string; source: string; createdAt: string; confirmedAt: string; expiresAt?: string | null; active: boolean }
-export type ChatState = { activeId: string; sessions: ChatSessionSummary[]; messages: ChatMessage[]; referencedIds: string[]; workingContext: WorkingContext; projectMemory: ProjectMemory[]; compactedSummary: string; compactedCount: number }
+export type ChoiceOption = { id: string; label: string; detail: string }
+export type PendingChoice = { id: string; messageId: string; prompt: string; why: string; options: ChoiceOption[]; recommended: string | null; status: 'open' | 'answered' | 'dismissed'; selectedId: string | null; customText: string | null; answeredAt: string | null }
+export type ChatState = { activeId: string; sessions: ChatSessionSummary[]; messages: ChatMessage[]; referencedIds: string[]; workingContext: WorkingContext; projectMemory: ProjectMemory[]; compactedSummary: string; compactedCount: number; pendingChoice: PendingChoice | null }
 export type WorkingSuggestion = { id: string; sessionId: string; before: WorkingContext; after: WorkingContext; status: string; createdAt: string }
 export type WorkingWorkflowEvent = { id: string; proposalId: string; action: string; at: string; detail: string; undoable: boolean }
 export type PersonaInfo = { content: string; path: string; isDefault: boolean }
@@ -59,7 +61,7 @@ export const getPendingWorkingSuggestion = (sessionId: string) => invoke<Working
 export const listWorkingWorkflowEvents = (sessionId: string) => invoke<WorkingWorkflowEvent[]>('list_working_workflow_events', { sessionId })
 export const previewAgentContext = (question: string, referencedIds: string[], frameId?: string, messageIds: string[] = []) =>
   invoke<ContextPreview>('preview_agent_context', { question, referencedIds, frameId: frameId ?? null, messageIds })
-export async function askAgent(question: string, referencedIds: string[], onDelta: (delta: string) => void, frameId?: string, onActivity?: (message: string) => void, messageIds: string[] = []) {
+export async function askAgent(question: string, referencedIds: string[], onDelta: (delta: string) => void, frameId?: string, onActivity?: (message: string) => void, messageIds: string[] = [], choiceId?: string) {
   const requestId = crypto.randomUUID()
   const stop = await listen<StreamDelta>('knowflow:agent-stream', event => {
     if (event.payload.requestId === requestId) onDelta(event.payload.delta)
@@ -74,7 +76,7 @@ export async function askAgent(question: string, referencedIds: string[], onDelt
     throw error
   }
   try {
-    return await invoke<ChatMessage>('ask_agent', { question, referencedIds, requestId, frameId: frameId ?? null, messageIds })
+    return await invoke<ChatMessage>('ask_agent', { question, referencedIds, requestId, frameId: frameId ?? null, messageIds, choiceId: choiceId ?? null })
   } finally {
     stop()
     stopActivity()
