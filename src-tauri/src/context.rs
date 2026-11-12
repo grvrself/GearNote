@@ -250,7 +250,7 @@ mod tests {
             "contentText":"内容".repeat(20_000), "excerpt":[]
         })).unwrap();
         let messages = (0..30).map(|i| ChatMessage { id: i.to_string(), role: "user".into(), created_at: "1".into(),
-            paragraphs: vec!["历史".repeat(1_000)], tool_steps: vec![], citations: vec![], frame: None, run: None }).collect::<Vec<_>>();
+            paragraphs: vec!["历史".repeat(1_000)], tool_steps: vec![], citations: vec![], frame: None, run: None, suggestions: Vec::new() }).collect::<Vec<_>>();
         let result = build(&"人格".repeat(5_000), "问题", &messages, &[record.clone()], &["rec-a".into()], None, &[], &WorkingContext::default(), "");
         assert!(result.preview.text_chars <= MAX_TEXT_CHARS);
         assert!(result.preview.omitted_history_count > 0);
@@ -276,7 +276,7 @@ mod tests {
     }
     #[test]
     fn compacted_dialogue_is_background_and_original_messages_remain_outside_request() {
-        let recent = ChatMessage { id: "recent".into(), role: "user".into(), created_at: "3".into(), paragraphs: vec!["继续做".into()], tool_steps: vec![], citations: vec![], frame: None, run: None };
+        let recent = ChatMessage { id: "recent".into(), role: "user".into(), created_at: "3".into(), paragraphs: vec!["继续做".into()], tool_steps: vec![], citations: vec![], frame: None, run: None, suggestions: Vec::new() };
         let prepared = build("管家", "下一步", &[recent], &[], &[], None, &[], &WorkingContext::default(), "先前约定先完成资料收集");
         assert!(prepared.user_text.contains("先前约定先完成资料收集"));
         assert!(prepared.user_text.contains("继续做"));
@@ -285,7 +285,7 @@ mod tests {
     }
     #[test]
     fn explicitly_selected_old_message_becomes_labeled_source() {
-        let old = ChatMessage { id: "old".into(), role: "agent".into(), created_at: "1".into(), paragraphs: vec!["先核对配置文件".into()], tool_steps: vec![], citations: vec![], frame: None, run: None };
+        let old = ChatMessage { id: "old".into(), role: "agent".into(), created_at: "1".into(), paragraphs: vec!["先核对配置文件".into()], tool_steps: vec![], citations: vec![], frame: None, run: None, suggestions: Vec::new() };
         let prepared = build_with_message_refs("管家", "之前建议什么", &[], &[old], &[], &[], None, &[], &WorkingContext::default(), "旧摘要", 0);
         assert_eq!(prepared.preview.referenced_message_count, 1);
         assert_eq!(prepared.sources[0].record_id, "chat:old");

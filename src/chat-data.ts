@@ -9,6 +9,7 @@ export type ChatFrame = { imageId: string; recordId: string; atSeconds: number }
 
 export type ChatRun = { elapsedMs: number; changedFiles: string[] }
 export type ChatStreaming = { question: string; answer: string; startedAt: number; activity?: string; activities: string[] }
+export type ChatSuggestion = { label: string; prompt: string }
 
 export type ChatMessage = {
   id: string
@@ -17,6 +18,7 @@ export type ChatMessage = {
   paragraphs: string[]
   toolSteps?: string[]
   run?: ChatRun
+  suggestions?: ChatSuggestion[]
   points?: string[]
   citations?: ChatCitation[]
   frame?: ChatFrame

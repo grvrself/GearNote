@@ -4,12 +4,9 @@ import type { WorkingContext, WorkingSuggestion, WorkingWorkflowEvent } from '..
 type Props = {
   sessionId?: string
   workingContext: WorkingContext
-  messageCount: number
-  agentAvailable: boolean
   sending: boolean
   busy: boolean
   onBusyChange: (busy: boolean) => void
-  onSuggest?: () => Promise<WorkingSuggestion>
   onApply?: (proposalId: string) => Promise<void>
   onUndo?: (proposalId: string) => Promise<void>
   onReject?: (proposalId: string) => Promise<void>
@@ -23,7 +20,7 @@ const fields = [
   { key: 'nextStep', label: '下一步' },
 ] as const
 
-export function WorkingSuggestionPanel({ sessionId, workingContext, messageCount, agentAvailable, sending, busy, onBusyChange, onSuggest, onApply, onUndo, onReject, onGetPending, onListEvents }: Props) {
+export function WorkingSuggestionPanel({ sessionId, workingContext, sending, busy, onBusyChange, onApply, onUndo, onReject, onGetPending, onListEvents }: Props) {
   const [proposal, setProposal] = useState<WorkingSuggestion | null>(null)
   const [events, setEvents] = useState<WorkingWorkflowEvent[]>([])
   const [error, setError] = useState('')
@@ -57,12 +54,9 @@ export function WorkingSuggestionPanel({ sessionId, workingContext, messageCount
     finally { onBusyChange(false) }
   }
 
-  return <details className="working-flow"><summary>会话计划建议</summary>
-    <p>模型根据近期对话提出建议。逐项核对后确认，才会修改当前会话的计划。</p>
-    <button type="button" disabled={sending || busy || !!visibleProposal || !agentAvailable || messageCount === 0 || !onSuggest}
-      onClick={() => { void run(async () => { if (!onSuggest) return; setProposal(await onSuggest()); await refresh() }) }}>
-      {busy ? '处理中' : '生成建议'}
-    </button>
+  if (!visibleProposal && events.length === 0 && !error) return null
+  return <details className="working-flow"><summary>会话计划变更记录</summary>
+    {visibleProposal && <p>这条旧计划提案仍待确认。逐项核对后，才会修改当前会话的计划。</p>}
     {visibleProposal && <div className="working-suggestion">
       {fields.filter(field => visibleProposal.before[field.key] !== visibleProposal.after[field.key]).map(field =>
         <div className="working-diff" key={field.key}><strong>{field.label}</strong><small>原内容</small><pre>{visibleProposal.before[field.key] || '（空）'}</pre><small>建议改为</small><pre>{visibleProposal.after[field.key] || '（空）'}</pre></div>)}

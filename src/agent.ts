@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
-import type { ChatMessage } from './chat-data'
+import type { ChatMessage, ChatSuggestion } from './chat-data'
 
 export type AgentStatus = { baseUrl: string; model: string; exploreReferences: boolean; hasKey: boolean; keyPersistent: boolean; keyWarning: string | null }
 export type ToolProbe = { supported: boolean; searched: boolean; read: boolean; elapsedMs: number; steps: string[]; reason: string }
@@ -40,6 +40,7 @@ export const saveExploreReferences = (enabled: boolean) => invoke<AgentStatus>('
 export const testAgentTools = () => invoke<ToolProbe>('test_agent_tools')
 export const listChatMessages = () => invoke<ChatMessage[]>('list_chat_messages')
 export const getChatState = () => invoke<ChatState>('get_chat_state')
+export const suggestChatFollowups = (sessionId: string, messageId: string) => invoke<ChatSuggestion[]>('suggest_chat_followups', { sessionId, messageId })
 export const getChatFrameImage = (imageId: string) => invoke<string>('get_chat_frame_image', { imageId })
 export const createChatSession = () => invoke<ChatState>('create_chat_session')
 export const switchChatSession = (id: string) => invoke<ChatState>('switch_chat_session', { id })

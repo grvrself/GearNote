@@ -2,7 +2,7 @@ import { isTauri } from '@tauri-apps/api/core'
 import { emitTo, listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { useEffect, useRef, useState } from 'react'
-import { askAgent, getAgentStatus, getChatState, setChatReferences, type AgentStatus } from './agent'
+import { askAgent, getAgentStatus, getChatState, setChatReferences, suggestChatFollowups, type AgentStatus } from './agent'
 import type { ChatMessage, ChatStreaming } from './chat-data'
 import { ChatPanel } from './components/ChatPanel'
 import { recordFixtures } from './data'
@@ -24,6 +24,8 @@ export default function MiniApp() {
   const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null)
   const [sending, setSending] = useState(false)
   const [streaming, setStreaming] = useState<ChatStreaming | null>(null)
+  const [suggestingMessageId, setSuggestingMessageId] = useState<string | null>(null)
+  const [suggestionErrorId, setSuggestionErrorId] = useState<string | null>(null)
   const sendingRef = useRef(false)
   const desktop = isTauri()
   const records = desktop ? savedRecords : recordFixtures.map(record => ({ ...record, demo: true }))
@@ -46,15 +48,28 @@ export default function MiniApp() {
     sendingRef.current = true
     setSending(true)
     setStreaming({ question, answer: '', startedAt: Date.now(), activities: [] })
+    setSuggestionErrorId(null)
     setError('')
     try {
-      await askAgent(question, referencedIds, delta => setStreaming(current => current && { ...current, answer: current.answer + delta }), frameId,
+      const reply = await askAgent(question, referencedIds, delta => setStreaming(current => current && { ...current, answer: current.answer + delta }), frameId,
         activity => setStreaming(current => current && { ...current, activity, activities: [...current.activities, activity] }), messageIds)
       const chat = await getChatState()
       setActiveSessionId(chat.activeId)
       setMessages(chat.messages)
       setReferencedIds(chat.referencedIds)
       setStreaming(null)
+      if (!reply.frame) {
+        setSuggestingMessageId(reply.id)
+        void suggestChatFollowups(chat.activeId, reply.id)
+          .then(async () => {
+            const updated = await getChatState()
+            setActiveSessionId(updated.activeId)
+            setMessages(updated.messages)
+            setReferencedIds(updated.referencedIds)
+          })
+          .catch(() => setSuggestionErrorId(reply.id))
+          .finally(() => setSuggestingMessageId(current => current === reply.id ? null : current))
+      }
       return true
     } catch (cause) {
       setStreaming(null)
@@ -135,6 +150,6 @@ export default function MiniApp() {
       </div>
     </header>
     {error && <div className="mini-error" role="alert"><span>{error}</span><button type="button" aria-label="关闭错误提示" onClick={() => setError('')}>×</button></div>}
-    <ChatPanel compact records={records} sessionId={activeSessionId} referencedIds={referencedIds} historyOpen={false} agentAvailable={Boolean(agentStatus?.hasKey && agentStatus.model)} sending={sending} streaming={streaming} onSend={sendQuestion} onOpenAgentSetup={() => { void showMain() }} onRemoveReference={removeReference} onRevealRecord={revealRecord} onToggleHistory={() => { void showMain() }} onShowHistory={() => { void showMain() }} messages={messages} />
+    <ChatPanel compact records={records} sessionId={activeSessionId} referencedIds={referencedIds} historyOpen={false} agentAvailable={Boolean(agentStatus?.hasKey && agentStatus.model)} sending={sending} streaming={streaming} suggestingMessageId={suggestingMessageId} suggestionErrorId={suggestionErrorId} onSend={sendQuestion} onOpenAgentSetup={() => { void showMain() }} onRemoveReference={removeReference} onRevealRecord={revealRecord} onToggleHistory={() => { void showMain() }} onShowHistory={() => { void showMain() }} messages={messages} />
   </div>
 }

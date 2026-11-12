@@ -28,7 +28,7 @@ pub fn run() {
             agent::create_chat_session, agent::switch_chat_session, agent::rename_chat_session,
             agent::delete_chat_session, agent::set_chat_references, agent::save_working_context, agent::confirm_project_memory, agent::revoke_project_memory, agent::compact_chat_context, agent::preview_agent_context, agent::ask_agent,
             agent::get_persona, agent::save_persona, agent::get_default_persona, agent::reload_persona,
-            agent::get_chat_frame_image,
+            agent::get_chat_frame_image, agent::suggest_chat_followups,
             notes::list_notes, notes::save_note, notes::export_note,
             notes::list_note_folders, notes::create_note_folder, notes::rename_note_folder, notes::delete_note_folder,
             workflow::propose_note_edit, workflow::apply_note_edit, workflow::undo_note_edit,
