@@ -73,7 +73,7 @@ export function Sidebar({ view, sessions, activeSessionId, sessionBusy, sessionE
   const visibleSessions = sessions.filter(session => session.title.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()))
   const activeSession = sessions.find(session => session.id === activeSessionId)
 
-  return <aside className="left-sidebar" id="nav-01" aria-label="工作区导航与会话管理">
+  return <aside className="left-sidebar" id="nav-01" aria-label="工作区导航与会话列表">
     <div className="sidebar-section-heading"><span>NAV-01 / WORKSPACE</span></div>
     <div className="mono-workspace-gear" aria-hidden="true"><GearIcon kind="sidebar" size={20} /></div>
     <nav className="sidebar-nav" aria-label="主导航">
@@ -81,7 +81,7 @@ export function Sidebar({ view, sessions, activeSessionId, sessionBusy, sessionE
     </nav>
 
     <section className="sidebar-sessions" id="ses-01" aria-labelledby="ses-01-label" data-open={sessionListOpen}>
-      <button className="session-rail-toggle" type="button" aria-label="会话管理" aria-expanded={sessionListOpen} onClick={() => setSessionListOpen(open => !open)}>▤</button>
+      <button className="session-rail-toggle" type="button" aria-label="会话列表" aria-expanded={sessionListOpen} onClick={() => setSessionListOpen(open => !open)}>▤</button>
       <div className="session-manager">
         <div className="sidebar-section-heading session-heading"><span id="ses-01-label">会话</span><button type="button" disabled={sessionBusy || !activeSessionId} onClick={onCreateSession} aria-label="新建会话" title="新建会话">＋</button></div>
         <label className="session-search"><input aria-label="查找会话" value={query} onChange={event => setQuery(event.target.value)} placeholder="查找会话" /></label>

@@ -132,7 +132,6 @@ body[data-theme='mono'] .message-card-referenced .chamfer-content { border-left:
 body[data-theme='mono'] .message-note-offer button:first-child { display: inline-flex; align-items: center; }
 body[data-theme='mono'] .message-note-offer button:first-child { border-color: var(--paper); color: var(--accent-ink); background: var(--paper); border-radius: 6px; }
 body[data-theme='mono'] .message-note-offer button:first-child .gear-icon { color: var(--accent-ink); }
-body[data-theme='mono'] .memory-panel,
 body[data-theme='mono'] .reference-review,
 body[data-theme='mono'] .context-inspector,
 body[data-theme='mono'] .record-full,

@@ -10,8 +10,6 @@ export type ProjectMemory = { id: string; content: string; source: string; creat
 export type ChoiceOption = { id: string; label: string; detail: string }
 export type PendingChoice = { id: string; messageId: string; prompt: string; why: string; options: ChoiceOption[]; recommended: string | null; status: 'open' | 'answered' | 'dismissed'; selectedId: string | null; customText: string | null; answeredAt: string | null }
 export type ChatState = { activeId: string; sessions: ChatSessionSummary[]; messages: ChatMessage[]; referencedIds: string[]; workingContext: WorkingContext; projectMemory: ProjectMemory[]; compactedSummary: string; compactedCount: number; pendingChoice: PendingChoice | null }
-export type WorkingSuggestion = { id: string; sessionId: string; before: WorkingContext; after: WorkingContext; status: string; createdAt: string }
-export type WorkingWorkflowEvent = { id: string; proposalId: string; action: string; at: string; detail: string; undoable: boolean }
 export type PersonaInfo = { content: string; path: string; isDefault: boolean }
 export type ContextPreview = {
   systemText: string
@@ -49,16 +47,6 @@ export const switchChatSession = (id: string) => invoke<ChatState>('switch_chat_
 export const renameChatSession = (id: string, title: string) => invoke<ChatState>('rename_chat_session', { id, title })
 export const deleteChatSession = (id: string) => invoke<ChatState>('delete_chat_session', { id })
 export const setChatReferences = (id: string, referencedIds: string[]) => invoke<ChatState>('set_chat_references', { id, referencedIds })
-export const saveWorkingContext = (goal: string, completed: string, nextStep: string) => invoke<ChatState>('save_working_context', { goal, completed, nextStep })
-export const confirmProjectMemory = (content: string, source = '', expiresAt?: string) => invoke<ChatState>('confirm_project_memory', { content, source, expiresAt: expiresAt ?? null })
-export const revokeProjectMemory = (id: string) => invoke<ChatState>('revoke_project_memory', { id })
-export const compactChatContext = () => invoke<ChatState>('compact_chat_context')
-export const suggestWorkingContext = () => invoke<WorkingSuggestion>('suggest_working_context')
-export const applyWorkingSuggestion = (proposalId: string) => invoke<ChatState>('apply_working_suggestion', { proposalId })
-export const undoWorkingSuggestion = (proposalId: string) => invoke<ChatState>('undo_working_suggestion', { proposalId })
-export const rejectWorkingSuggestion = (proposalId: string) => invoke<void>('reject_working_suggestion', { proposalId })
-export const getPendingWorkingSuggestion = (sessionId: string) => invoke<WorkingSuggestion | null>('get_pending_working_suggestion', { sessionId })
-export const listWorkingWorkflowEvents = (sessionId: string) => invoke<WorkingWorkflowEvent[]>('list_working_workflow_events', { sessionId })
 export const previewAgentContext = (question: string, referencedIds: string[], frameId?: string, messageIds: string[] = []) =>
   invoke<ContextPreview>('preview_agent_context', { question, referencedIds, frameId: frameId ?? null, messageIds })
 export async function askAgent(question: string, referencedIds: string[], onDelta: (delta: string) => void, frameId?: string, onActivity?: (message: string) => void, messageIds: string[] = [], choiceId?: string) {
