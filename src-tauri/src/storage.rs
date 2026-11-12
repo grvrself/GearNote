@@ -4,7 +4,7 @@ use std::{
     io::Write,
     path::PathBuf,
     sync::Mutex,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tauri::{AppHandle, Manager, State};
 use url::Url;
@@ -103,8 +103,37 @@ pub struct CaptureResult {
     pub updated: bool,
 }
 
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CaptureJob {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub record_type: String,
+    pub title: String,
+    pub site: String,
+    pub status: crate::ProcessStatus,
+    pub fault_reason: Option<String>,
+    pub started_at_ms: u64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CaptureJobStart {
+    pub url: String,
+    pub title: String,
+    #[serde(rename = "type")]
+    pub record_type: String,
+}
+
+struct CaptureJobEntry {
+    job: CaptureJob,
+    source_url: String,
+    started: Instant,
+}
+
 pub struct AppState {
     pub records: Mutex<Vec<KnowledgeRecord>>,
+    capture_jobs: Mutex<Vec<CaptureJobEntry>>,
     pub records_path: PathBuf,
     pub pair_code: String,
     pub last_extension_seen: Mutex<Option<Instant>>,
@@ -154,11 +183,86 @@ impl AppState {
         }
         Ok(Self {
             records: Mutex::new(records),
+            capture_jobs: Mutex::new(Vec::new()),
             records_path: db_path,
             pair_code,
             last_extension_seen: Mutex::new(None),
             bridge_error: Mutex::new(None),
         })
+    }
+
+    pub fn start_capture_job(&self, input: CaptureJobStart) -> Result<CaptureJob, String> {
+        if !matches!(input.record_type.as_str(), "video" | "article") { return Err("资料类型无效".into()); }
+        let parsed = Url::parse(&input.url).map_err(|_| "网页地址无效".to_owned())?;
+        if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none()
+            || !parsed.username().is_empty() || parsed.password().is_some() { return Err("网页地址无效".into()); }
+        if input.title.trim().is_empty() { return Err("资料标题为空".into()); }
+        let title: String = input.title.trim().chars().take(300).collect();
+        let source_url = parsed.to_string();
+        let mut jobs = self.capture_jobs.lock().map_err(|_| "采集任务暂不可用".to_owned())?;
+        jobs.retain(|entry| !(entry.source_url == source_url && entry.job.status == crate::ProcessStatus::Fault));
+        if jobs.iter().filter(|entry| matches!(entry.job.status, crate::ProcessStatus::Extracting | crate::ProcessStatus::Summarizing)).count() >= 20 {
+            return Err("同时采集的资料过多，请稍后重试".into());
+        }
+        let started_at_ms = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
+        let job = CaptureJob { id: format!("job-{}", Uuid::new_v4()), record_type: input.record_type,
+            title, site: parsed.host_str().unwrap_or_default().to_owned(),
+            status: crate::ProcessStatus::Extracting, fault_reason: None, started_at_ms };
+        jobs.insert(0, CaptureJobEntry { job: job.clone(), source_url, started: Instant::now() });
+        let mut fault_count = 0;
+        jobs.retain(|entry| {
+            if entry.job.status != crate::ProcessStatus::Fault { return true; }
+            fault_count += 1;
+            fault_count <= 20
+        });
+        Ok(job)
+    }
+
+    pub fn finish_capture_job(&self, id: &str, reason: Option<&str>) -> Result<bool, String> {
+        let mut jobs = self.capture_jobs.lock().map_err(|_| "采集任务暂不可用".to_owned())?;
+        let Some(index) = jobs.iter().position(|entry| entry.job.id == id) else { return Ok(false); };
+        if let Some(reason) = reason {
+            jobs[index].job.status = crate::ProcessStatus::Fault;
+            jobs[index].job.fault_reason = Some(reason.chars().take(240).collect());
+        } else {
+            jobs.remove(index);
+        }
+        Ok(true)
+    }
+
+    pub fn set_capture_job_stage(&self, id: &str) -> Result<bool, String> {
+        let mut jobs = self.capture_jobs.lock().map_err(|_| "采集任务暂不可用".to_owned())?;
+        let Some(entry) = jobs.iter_mut().find(|entry| entry.job.id == id) else { return Ok(false); };
+        if entry.job.status != crate::ProcessStatus::Extracting { return Ok(false); }
+        entry.job.status = crate::ProcessStatus::Summarizing;
+        entry.started = Instant::now();
+        Ok(true)
+    }
+
+    pub fn expire_capture_jobs(&self) -> bool {
+        let Ok(mut jobs) = self.capture_jobs.lock() else { return false; };
+        let mut changed = false;
+        for entry in jobs.iter_mut() {
+            if matches!(entry.job.status, crate::ProcessStatus::Extracting | crate::ProcessStatus::Summarizing)
+                && entry.started.elapsed() >= Duration::from_secs(600) {
+                entry.job.status = crate::ProcessStatus::Fault;
+                entry.job.fault_reason = Some("采集等待超过 10 分钟，请在原页面重试。".into());
+                changed = true;
+            }
+        }
+        changed
+    }
+
+    pub fn capture_job_snapshot(&self) -> Result<Vec<CaptureJob>, String> {
+        let jobs = self.capture_jobs.lock().map_err(|_| "采集任务暂不可用".to_owned())?;
+        Ok(jobs.iter().map(|entry| entry.job.clone()).collect())
+    }
+
+    pub fn dismiss_capture_job(&self, id: &str) -> Result<bool, String> {
+        let mut jobs = self.capture_jobs.lock().map_err(|_| "采集任务暂不可用".to_owned())?;
+        let Some(index) = jobs.iter().position(|entry| entry.job.id == id && entry.job.status == crate::ProcessStatus::Fault) else { return Ok(false); };
+        jobs.remove(index);
+        Ok(true)
     }
 
     pub fn capture(&self, input: ArticleCapture) -> Result<CaptureResult, String> {
@@ -430,7 +534,7 @@ mod tests {
         })).unwrap();
         let path = std::env::temp_dir().join(format!("knowflow-article-test-{}.json", Uuid::new_v4()));
         let state = AppState {
-            records: Mutex::new(vec![old]), records_path: path.clone(), pair_code: String::new(),
+            records: Mutex::new(vec![old]), capture_jobs: Mutex::new(Vec::new()), records_path: path.clone(), pair_code: String::new(),
             last_extension_seen: Mutex::new(None), bridge_error: Mutex::new(None),
         };
         let result = state.capture(ArticleCapture {
@@ -494,6 +598,16 @@ pub fn list_records(state: State<'_, AppState>) -> Result<Vec<RecordSummary>, St
     }).collect())
 }
 
+#[tauri::command]
+pub fn list_capture_jobs(state: State<'_, AppState>) -> Result<Vec<CaptureJob>, String> {
+    state.capture_job_snapshot()
+}
+
+#[tauri::command]
+pub fn dismiss_capture_job(state: State<'_, AppState>, id: String) -> Result<bool, String> {
+    state.dismiss_capture_job(&id)
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RecordSummary {
@@ -540,4 +654,43 @@ pub fn get_bridge_status(state: State<'_, AppState>) -> BridgeStatus {
         .is_some_and(|seen| seen.elapsed() < Duration::from_secs(95));
     let error = state.bridge_error.lock().ok().and_then(|error| error.clone());
     BridgeStatus { pair_code: state.pair_code.clone(), connected, error }
+}
+
+#[cfg(test)]
+mod capture_job_tests {
+    use super::*;
+
+    fn state() -> AppState {
+        AppState { records: Mutex::new(Vec::new()), capture_jobs: Mutex::new(Vec::new()),
+            records_path: PathBuf::new(), pair_code: String::new(),
+            last_extension_seen: Mutex::new(None), bridge_error: Mutex::new(None) }
+    }
+
+    fn start(state: &AppState) -> CaptureJob {
+        state.start_capture_job(CaptureJobStart { url: "https://example.com/video".into(),
+            title: "测试视频".into(), record_type: "video".into() }).unwrap()
+    }
+
+    #[test]
+    fn capture_job_rotates_only_during_real_stages() {
+        let state = state();
+        let job = start(&state);
+        assert_eq!(job.status, crate::ProcessStatus::Extracting);
+        assert!(state.set_capture_job_stage(&job.id).unwrap());
+        assert_eq!(state.capture_job_snapshot().unwrap()[0].status, crate::ProcessStatus::Summarizing);
+        assert!(state.finish_capture_job(&job.id, None).unwrap());
+        assert!(state.capture_job_snapshot().unwrap().is_empty());
+    }
+
+    #[test]
+    fn failed_or_stale_jobs_stop_and_can_be_dismissed() {
+        let state = state();
+        let job = start(&state);
+        state.capture_jobs.lock().unwrap()[0].started = Instant::now() - Duration::from_secs(601);
+        assert!(state.expire_capture_jobs());
+        assert_eq!(state.capture_job_snapshot().unwrap()[0].status, crate::ProcessStatus::Fault);
+        assert!(!state.set_capture_job_stage(&job.id).unwrap());
+        assert!(state.dismiss_capture_job(&job.id).unwrap());
+        assert!(state.capture_job_snapshot().unwrap().is_empty());
+    }
 }

@@ -6,3 +6,12 @@ src-tauri/gen/schemas/
 .npm-cache/
 .test-tmp/
 .verification-temp/
+.env
+.env.*
+!.env.example
+*.db
+*.db-*
+*.sqlite*
+agent-key.bin
+agent-config.json
+extension-pair-code.txt

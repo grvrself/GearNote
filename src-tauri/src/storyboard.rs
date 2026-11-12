@@ -70,7 +70,7 @@ fn engine_path(app: &AppHandle) -> Result<PathBuf, String> {
         .join("..").join("vendor").join("dsh-video-storyboard")
         .join("bin").join("storyboard.mjs");
     if development.is_file() { return Ok(development); }
-    Err("分镜引擎文件缺失，请重新安装 KnowFlow。".into())
+    Err("分镜引擎文件缺失，请重新安装 GearNote。".into())
 }
 
 fn tool_path(program: &str) -> PathBuf {
@@ -103,7 +103,7 @@ pub(crate) async fn capture_frame(app: &AppHandle, source_url: &str, seconds: u3
     let url = url::Url::parse(source_url).map_err(|_| "视频链接无效")?;
     if !matches!(url.scheme(), "http" | "https") { return Err("视频链接无效".into()); }
     let script = engine_path(app)?.with_file_name("knowflow-frame.mjs");
-    if !script.is_file() { return Err("取帧脚本缺失，请重新安装 KnowFlow。".into()); }
+    if !script.is_file() { return Err("取帧脚本缺失，请重新安装 GearNote。".into()); }
     if !available("node") || !available("ffmpeg") ||
         !Command::new(tool_path("yt-dlp")).arg("--version").output().is_ok_and(|output| output.status.success()) {
         return Err("取帧需要 Node.js、FFmpeg 和 yt-dlp。".into());
@@ -156,10 +156,10 @@ pub async fn analyze_video_storyboard(app: AppHandle, state: State<'_, AppState>
     };
     if cookies_text.is_some() && !is_bilibili { return Err("当前仅支持 B 站 cookies.txt。".into()); }
     let engine = engine_path(&app)?;
-    if !available("node") { return Err("缺少 Node.js，请安装后重启 KnowFlow。".into()); }
-    if !available("ffmpeg") || !available("ffprobe") { return Err("缺少 FFmpeg（ffmpeg 和 ffprobe），请安装后重启 KnowFlow。".into()); }
+    if !available("node") { return Err("缺少 Node.js，请安装后重启 GearNote。".into()); }
+    if !available("ffmpeg") || !available("ffprobe") { return Err("缺少 FFmpeg（ffmpeg 和 ffprobe），请安装后重启 GearNote。".into()); }
     if !Command::new(tool_path("yt-dlp")).arg("--version").output().is_ok_and(|output| output.status.success()) {
-        return Err("缺少 yt-dlp。请安装后重启 KnowFlow，网页视频画面分析需要它下载视频。".into());
+        return Err("缺少 yt-dlp。请安装后重启 GearNote，网页视频画面分析需要它下载视频。".into());
     }
     let dir = app.path().app_data_dir().map_err(|error| error.to_string())?
         .join("storyboards").join(&record_id);

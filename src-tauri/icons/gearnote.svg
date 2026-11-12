@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="48" fill="#fff"/>
+  <defs>
+    <path id="tooth" d="M233 91 241 35h30l8 56z" fill="#000"/>
+  </defs>
+  <g>
+    <use href="#tooth"/>
+    <use href="#tooth" transform="rotate(18 256 256)"/>
+    <use href="#tooth" transform="rotate(36 256 256)"/>
+    <use href="#tooth" transform="rotate(54 256 256)"/>
+    <use href="#tooth" transform="rotate(72 256 256)"/>
+    <use href="#tooth" transform="rotate(90 256 256)"/>
+    <use href="#tooth" transform="rotate(108 256 256)"/>
+    <use href="#tooth" transform="rotate(126 256 256)"/>
+    <use href="#tooth" transform="rotate(144 256 256)"/>
+    <use href="#tooth" transform="rotate(162 256 256)"/>
+    <use href="#tooth" transform="rotate(180 256 256)"/>
+    <use href="#tooth" transform="rotate(198 256 256)"/>
+    <use href="#tooth" transform="rotate(216 256 256)"/>
+    <use href="#tooth" transform="rotate(234 256 256)"/>
+    <use href="#tooth" transform="rotate(252 256 256)"/>
+    <use href="#tooth" transform="rotate(270 256 256)"/>
+    <use href="#tooth" transform="rotate(288 256 256)"/>
+    <use href="#tooth" transform="rotate(306 256 256)"/>
+    <use href="#tooth" transform="rotate(324 256 256)"/>
+    <use href="#tooth" transform="rotate(342 256 256)"/>
+    <circle cx="256" cy="256" r="180" fill="#000"/>
+    <circle cx="256" cy="256" r="150" fill="none" stroke="#fff" stroke-width="4"/>
+    <circle cx="256" cy="256" r="48" fill="#fff"/>
+    <circle cx="256" cy="256" r="41" fill="#000"/>
+    <circle cx="256" cy="256" r="35" fill="#fff"/>
+  </g>
+</svg>

@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { recordFixtures, type KnowledgeRecord, type RecordType } from '../data'
 import { isTauri } from '@tauri-apps/api/core'
-import { getRecord, queryRecordPage, queryRecordSegments, type RecordPage, type RecordSegment } from '../records'
+import { getRecord, queryRecordPage, queryRecordSegments, type CaptureJob, type RecordPage, type RecordSegment } from '../records'
 import { ChamferCard } from './ChamferCard'
 import { HudButton } from './HudButton'
 import { PanelHeading } from './PanelHeading'
 import { StatusBadge } from './StatusBadge'
+import { GearDivider } from './GearIcon'
 import { StoryboardSection } from './StoryboardSection'
 import './history.css'
 
@@ -26,6 +27,12 @@ function formatElapsed(seconds: number) {
     : `${String(minutes).padStart(2, '0')}:${String(remainder).padStart(2, '0')}`
 }
 
+function waitLabel(startedAtMs: number, now: number) {
+  const seconds = Math.max(0, Math.floor((now - startedAtMs) / 1000))
+  if (seconds < 15) return null
+  return seconds < 60 ? `已等待 ${seconds} 秒` : `已等待 ${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒`
+}
+
 function parseTime(value: string): number | null {
   if (!value.trim()) return null
   if (!/^\d{1,3}:[0-5]\d(?::[0-5]\d)?$/.test(value.trim())) throw new Error('时间请填写 mm:ss 或 hh:mm:ss')
@@ -34,6 +41,7 @@ function parseTime(value: string): number | null {
 
 type Props = {
   records?: KnowledgeRecord[]
+  captureJobs?: CaptureJob[]
   selectedId: string | null
   referencedIds: string[]
   focusRequest?: { id: string; atSeconds?: number } | null
@@ -45,17 +53,26 @@ type Props = {
   onOpenMini: () => void
   searchRef?: RefObject<HTMLInputElement | null>
   onRecordsChanged: () => Promise<void>
+  onDismissCaptureJob?: (id: string) => Promise<void>
 }
 
-export function HistoryPanel({ records = recordFixtures, selectedId, referencedIds, focusRequest, onSelect, onReference, onRemoveReference, onCollapse, miniAvailable, onOpenMini, searchRef, onRecordsChanged }: Props) {
+export function HistoryPanel({ records = recordFixtures, captureJobs = [], selectedId, referencedIds, focusRequest, onSelect, onReference, onRemoveReference, onCollapse, miniAvailable, onOpenMini, searchRef, onRecordsChanged, onDismissCaptureJob }: Props) {
   const [filter, setFilter] = useState<Filter>('all')
   const [query, setQuery] = useState('')
   const [activeMoment, setActiveMoment] = useState<number | null>(null)
   const [pageOffset, setPageOffset] = useState(0)
   const [page, setPage] = useState<RecordPage | null>(null)
   const [pageError, setPageError] = useState('')
+  const [now, setNow] = useState(Date.now())
   const handledFocus = useRef<typeof focusRequest>(null)
   const desktop = isTauri()
+  const hasActiveJob = captureJobs.some(job => job.status === 'extracting' || job.status === 'summarizing')
+
+  useEffect(() => {
+    if (!hasActiveJob) return
+    const timer = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(timer)
+  }, [hasActiveJob])
 
   useEffect(() => {
     if (!focusRequest || handledFocus.current === focusRequest) return
@@ -92,6 +109,8 @@ export function HistoryPanel({ records = recordFixtures, selectedId, referencedI
     const matchesQuery = `${record.title} ${record.site}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())
     return matchesType && matchesQuery
   }), [records, filter, query])
+  const visibleJobs = captureJobs.filter(job => (filter === 'all' || job.type === filter)
+    && `${job.title} ${job.site}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()))
   const visibleRecords = desktop ? page?.items ?? [] : filteredFixtures.slice(pageOffset, pageOffset + PAGE_SIZE)
   const total = desktop ? page?.total ?? 0 : filteredFixtures.length
   const loading = desktop && !page && !pageError
@@ -103,6 +122,7 @@ export function HistoryPanel({ records = recordFixtures, selectedId, referencedI
       <PanelHeading id="rec-02-title" serial="REC-02" overline="history" title="历史记录" count={records.length} />
       <button className="history-collapse" type="button" aria-label="收起记录" onClick={onCollapse}>收起记录</button>
     </div>
+    <GearDivider area="history" />
     <div className="history-tools">
       <div className="history-filter-row">
         <div className="history-filters" role="group" aria-label="资料类型筛选">
@@ -125,10 +145,17 @@ export function HistoryPanel({ records = recordFixtures, selectedId, referencedI
         </div>
       </div>
     </div>
-    <div className="history-list" role="list" aria-label="已保存记录">
+    <div className="history-list" role="list" aria-label="采集任务与已保存记录">
+      {visibleJobs.map(job => <div className="capture-job-card" role="listitem" key={job.id}>
+        <div className="capture-job-heading"><span>{job.type === 'video' ? 'VIDEO' : 'ARTICLE'} / {job.status === 'fault' ? '采集失败' : job.status === 'summarizing' ? '摘要生成中' : '采集中'}</span>{job.status === 'fault' && onDismissCaptureJob && <button type="button" onClick={() => { void onDismissCaptureJob(job.id) }}>关闭</button>}</div>
+        <strong title={job.title}>{job.title}</strong>
+        <span className="capture-job-site">{job.site}</span>
+        <StatusBadge status={job.status} reason={job.faultReason ?? undefined} />
+        {(job.status === 'extracting' || job.status === 'summarizing') && waitLabel(job.startedAtMs, now) && <span className="capture-job-wait">{waitLabel(job.startedAtMs, now)}</span>}
+      </div>)}
       {loading && <p className="history-empty" role="status">正在读取资料…</p>}
       {pageError && <p className="history-empty" role="alert">资料读取失败：{pageError}</p>}
-      {!loading && !pageError && visibleRecords.length === 0 && <p className="history-empty">无匹配记录</p>}
+      {!loading && !pageError && visibleRecords.length === 0 && visibleJobs.length === 0 && <p className="history-empty">无匹配记录</p>}
       {visibleRecords.map(record => <div role="listitem" key={record.id}>
         <RecordCard
           record={record}

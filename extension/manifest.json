@@ -1,11 +1,12 @@
 {
   "manifest_version": 3,
-  "name": "KnowFlow 内容捕获",
-  "version": "0.2.2",
-  "description": "点击扩展图标，将网页文章或现有视频字幕保存到本机 KnowFlow。",
+  "name": "GearNote 内容捕获",
+  "version": "0.2.3",
+  "description": "点击扩展图标，将网页文章或现有视频字幕保存到本机 GearNote。",
   "permissions": ["activeTab", "scripting", "storage", "alarms"],
   "host_permissions": ["http://127.0.0.1/*", "https://*.hdslb.com/*"],
   "background": { "service_worker": "background.js", "type": "module" },
-  "action": { "default_title": "保存当前网页或视频字幕到 KnowFlow" },
+  "icons": { "16": "icons/16x16.png", "48": "icons/48x48.png", "128": "icons/128x128.png" },
+  "action": { "default_title": "保存当前网页或视频字幕到 GearNote", "default_icon": { "16": "icons/16x16.png", "48": "icons/48x48.png", "128": "icons/128x128.png" } },
   "options_page": "options.html"
 }

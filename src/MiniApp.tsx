@@ -126,7 +126,7 @@ export default function MiniApp() {
 
   return <div className="mini-shell" id="mini-01">
     <header className="mini-titlebar" data-tauri-drag-region>
-      <span className="mini-serial" data-tauri-drag-region>KF-001 / MINI-01</span>
+      <span className="mini-serial" data-tauri-drag-region>GN-001 / MINI-01</span>
       <span className="mini-title" data-tauri-drag-region>提问小窗</span>
       <span className="mini-pin" data-tauri-drag-region>TOP / ON</span>
       <div className="mini-window-controls" role="group" aria-label="小窗控制">

@@ -19,7 +19,7 @@ async function heartbeat() {
   try {
     await bridgeRequest('/v1/status', pairCode)
   } catch {
-    // KnowFlow may be closed; the next alarm will reconnect.
+    // GearNote may be closed; the next alarm will reconnect.
   }
 }
 
@@ -49,7 +49,7 @@ function isKnownVideoPage(url) {
   return /^https?:\/\/(www\.|m\.)?(youtube\.com\/(watch|shorts\/)|bilibili\.com\/video\/)/i.test(url)
 }
 
-async function captureVideo(tabId, pairCode) {
+async function captureVideo(tabId, pairCode, jobId) {
   const [injected] = await chrome.scripting.executeScript({ target: { tabId }, world: 'MAIN', func: discoverVideo })
   const discovered = injected?.result
   if (!discovered?.url) throw new Error('无法读取视频页面')
@@ -77,6 +77,7 @@ async function captureVideo(tabId, pairCode) {
       trackUrl: discovered.trackUrl,
       cues,
       faultReason,
+      jobId,
     }),
   })
   return { result, faultReason }
@@ -94,6 +95,7 @@ chrome.action.onClicked.addListener(async tab => {
     await showResult(tabId, false, '当前页面不能捕获，请打开普通网页文章')
     return
   }
+  let jobId = null
   try {
     let videoPage = isKnownVideoPage(tab.url)
     if (!videoPage) {
@@ -101,11 +103,18 @@ chrome.action.onClicked.addListener(async tab => {
         Boolean(document.querySelector('video track[src]') || [...document.querySelectorAll('video')].some(video => [...video.textTracks].some(track => track.cues?.length))) })
       videoPage = Boolean(detected?.result)
     }
+    const job = await bridgeRequest('/v1/capture-jobs', pairCode, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: tab.url, title: tab.title || tab.url, type: videoPage ? 'video' : 'article' }),
+    })
+    jobId = job.id
     if (videoPage) {
-      const { result, faultReason } = await captureVideo(tabId, pairCode)
-      await showResult(tabId, !faultReason, faultReason
-        ? `字幕捕获失败：${faultReason}。可在该页面再次点击扩展图标重试。`
-        : result.alreadySaved ? '该视频已保存到 KnowFlow' : '视频字幕已保存到 KnowFlow')
+      const { result, faultReason } = await captureVideo(tabId, pairCode, jobId)
+      const ready = result.record.status === 'ready'
+      await showResult(tabId, ready, ready
+        ? result.alreadySaved ? '该视频已保存到 GearNote' : '视频字幕已保存到 GearNote'
+        : `字幕捕获失败：${result.record.faultReason || faultReason}。可在该页面再次点击扩展图标重试。`)
       return
     }
     const injected = await chrome.scripting.executeScript({ target: { tabId }, func: extractArticle })
@@ -115,10 +124,19 @@ chrome.action.onClicked.addListener(async tab => {
     const result = await bridgeRequest('/v1/articles', pairCode, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(article),
+      body: JSON.stringify({ ...article, jobId }),
     })
-    await showResult(tabId, true, result.alreadySaved ? '这篇文章已经保存在 KnowFlow' : result.updated ? '文章正文已更新到 KnowFlow' : '文章已保存到 KnowFlow')
+    await showResult(tabId, true, result.alreadySaved ? '这篇文章已经保存在 GearNote' : result.updated ? '文章正文已更新到 GearNote' : '文章已保存到 GearNote')
   } catch (error) {
-    await showResult(tabId, false, `捕获失败：${error.message || '请检查 KnowFlow 是否已打开'}`)
+    if (jobId) {
+      try {
+        await bridgeRequest('/v1/capture-jobs/fail', pairCode, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: jobId, reason: error.message || '采集失败，请在原页面重试。' }),
+        })
+      } catch { /* The desktop app may have closed during capture. */ }
+    }
+    await showResult(tabId, false, `捕获失败：${error.message || '请检查 GearNote 是否已打开'}`)
   }
 })

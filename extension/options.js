@@ -26,7 +26,7 @@ form.addEventListener('submit', async event => {
     result.textContent = '连接成功。现在可以点击扩展图标保存网页文章。'
     result.dataset.state = 'success'
   } catch (error) {
-    result.textContent = `连接失败：${error.message || '请先打开 KnowFlow 桌面程序'}`
+    result.textContent = `连接失败：${error.message || '请先打开 GearNote 桌面程序'}`
     result.dataset.state = 'error'
   }
 })

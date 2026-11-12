@@ -23,7 +23,7 @@ export async function openMiniWindow() {
 
   const mini = new WebviewWindow(MINI_LABEL, {
     url: '/?window=mini',
-    title: 'KnowFlow · 提问小窗',
+    title: 'GearNote · 提问小窗',
     ...MINI_SIZE,
     center: true,
     decorations: false,

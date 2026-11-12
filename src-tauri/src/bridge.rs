@@ -1,4 +1,4 @@
-use crate::storage::{AppState, ArticleCapture, VideoCapture};
+use crate::storage::{AppState, ArticleCapture, CaptureJobStart, VideoCapture};
 use serde_json::{json, Value};
 use std::{
     collections::HashMap,
@@ -13,6 +13,13 @@ const MAX_BODY_BYTES: usize = 1_200_000;
 const MAX_HEADER_BYTES: usize = 16_384;
 
 pub fn start(app: AppHandle) {
+    let watchdog_app = app.clone();
+    std::thread::spawn(move || loop {
+        std::thread::sleep(Duration::from_secs(30));
+        if watchdog_app.state::<AppState>().expire_capture_jobs() {
+            let _ = watchdog_app.emit("gearnote:capture-jobs-changed", ());
+        }
+    });
     std::thread::spawn(move || {
         let listener = match TcpListener::bind(("127.0.0.1", BRIDGE_PORT)) {
             Ok(listener) => listener,
@@ -26,7 +33,7 @@ pub fn start(app: AppHandle) {
         for connection in listener.incoming() {
             match connection {
                 Ok(stream) => handle_connection(stream, &app),
-                Err(error) => eprintln!("KnowFlow bridge connection failed: {error}"),
+                Err(error) => eprintln!("GearNote bridge connection failed: {error}"),
             }
         }
     });
@@ -47,10 +54,39 @@ fn handle_connection(mut stream: TcpStream, app: &AppHandle) {
         state.mark_extension_seen();
         match (method.as_str(), path.as_str()) {
             ("GET", "/v1/status") => Ok((200, json!({ "connected": true }))),
+            ("POST", "/v1/capture-jobs") => {
+                let input: CaptureJobStart = serde_json::from_slice(&body)
+                    .map_err(|_| (400, "采集任务格式无效".to_owned()))?;
+                let job = state.start_capture_job(input).map_err(|message| (400, message))?;
+                let _ = app.emit("gearnote:capture-jobs-changed", ());
+                Ok((200, json!(job)))
+            }
+            ("POST", "/v1/capture-jobs/stage") => {
+                let value: Value = serde_json::from_slice(&body).map_err(|_| (400, "采集阶段格式无效".to_owned()))?;
+                let id = value.get("id").and_then(Value::as_str).ok_or((400, "采集任务编号缺失".to_owned()))?;
+                if value.get("stage").and_then(Value::as_str) != Some("summarizing") {
+                    return Ok((400, json!({ "error": "采集阶段无效" })));
+                }
+                let changed = state.set_capture_job_stage(id).map_err(|message| (400, message))?;
+                if changed { let _ = app.emit("gearnote:capture-jobs-changed", ()); }
+                Ok((200, json!({ "changed": changed })))
+            }
+            ("POST", "/v1/capture-jobs/fail") => {
+                let value: Value = serde_json::from_slice(&body).map_err(|_| (400, "失败状态格式无效".to_owned()))?;
+                let id = value.get("id").and_then(Value::as_str).ok_or((400, "采集任务编号缺失".to_owned()))?;
+                let reason = value.get("reason").and_then(Value::as_str).filter(|reason| !reason.trim().is_empty()).unwrap_or("采集失败，请在原页面重试。");
+                let changed = state.finish_capture_job(id, Some(reason)).map_err(|message| (400, message))?;
+                if changed { let _ = app.emit("gearnote:capture-jobs-changed", ()); }
+                Ok((200, json!({ "changed": changed })))
+            }
             ("POST", "/v1/articles") => {
+                let job_id = serde_json::from_slice::<Value>(&body).ok().and_then(|value| value.get("jobId").and_then(Value::as_str).map(str::to_owned));
                 let input: ArticleCapture = serde_json::from_slice(&body)
                     .map_err(|_| (400, "文章数据格式无效".to_owned()))?;
                 let result = state.capture(input).map_err(|message| (400, message))?;
+                if job_id.as_deref().is_some_and(|id| state.finish_capture_job(id, None).unwrap_or(false)) {
+                    let _ = app.emit("gearnote:capture-jobs-changed", ());
+                }
                 if !result.already_saved {
                     let _ = app.emit("knowflow:records-changed", result.record.id.clone());
                     let _ = crate::agent::record_completed_event(&app, &format!("网页《{}》正文已保存", result.record.title), &format!("article-{}", result.record.id));
@@ -58,9 +94,13 @@ fn handle_connection(mut stream: TcpStream, app: &AppHandle) {
                 Ok((200, json!(result)))
             }
             ("POST", "/v1/videos") => {
+                let job_id = serde_json::from_slice::<Value>(&body).ok().and_then(|value| value.get("jobId").and_then(Value::as_str).map(str::to_owned));
                 let input: VideoCapture = serde_json::from_slice(&body)
                     .map_err(|_| (400, "视频字幕数据格式无效".to_owned()))?;
                 let result = state.capture_video(input).map_err(|message| (400, message))?;
+                if job_id.as_deref().is_some_and(|id| state.finish_capture_job(id, None).unwrap_or(false)) {
+                    let _ = app.emit("gearnote:capture-jobs-changed", ());
+                }
                 if !result.already_saved {
                     let _ = app.emit("knowflow:records-changed", result.record.id.clone());
                     if result.record.status == crate::ProcessStatus::Ready {

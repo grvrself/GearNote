@@ -1,0 +1,4 @@
+.skills-panel { max-width: 640px; margin-top: var(--space-6); padding: var(--space-5); border: var(--edge) solid var(--line); background: var(--panel-2); }
+.skills-panel-marker { color: var(--accent); font: 600 var(--fs-11) var(--font-label); letter-spacing: var(--ls-label); }
+.skills-panel h3 { margin: var(--space-4) 0 var(--space-2); font: 900 var(--fs-20) var(--font-body); letter-spacing: var(--ls-title); }
+.skills-panel p { margin: 0; line-height: var(--chat-line-height); }

@@ -66,7 +66,7 @@ export function StoryboardSection({ record, onChanged }: Props) {
       <p>此视频需要 B 站登录态。在浏览器登录 B 站后，导出仅含 B 站域名的 Netscape 格式 cookies.txt；它包含登录凭据，请勿分享。</p>
       <label>选择 cookies.txt <input type="file" accept=".txt,text/plain" disabled={busy} onChange={event => setCookiesFile(event.target.files?.[0] ?? null)} /></label>
       <HudButton type="button" disabled={busy || !cookiesFile} onClick={() => { void analyze(true) }}>用所选文件重试</HudButton>
-      <p>文件内容只用于本次取流；KnowFlow 不长期保存，临时副本在分析结束后删除。</p>
+      <p>文件内容只用于本次取流；GearNote 不长期保存，临时副本在分析结束后删除。</p>
     </div>}
     {result && <>
       <p className="storyboard-note">{result.imageCount} 张分镜图 · {result.cells.length} 个时间段</p>

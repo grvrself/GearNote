@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "KnowFlow",
+  "productName": "GearNote",
   "version": "0.1.0",
   "identifier": "com.knowflow.desktop",
   "build": {
@@ -22,7 +22,7 @@
   },
   "app": {
     "windows": [
-      { "title": "KnowFlow", "width": 1480, "height": 900, "minWidth": 880, "minHeight": 600, "decorations": false, "shadow": false }
+      { "title": "GearNote", "width": 1480, "height": 900, "minWidth": 880, "minHeight": 600, "decorations": false, "shadow": false }
     ],
     "security": { "csp": null }
   }

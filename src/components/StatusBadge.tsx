@@ -1,4 +1,5 @@
 import type { ProcessStatus } from '../data'
+import { GearIcon } from './GearIcon'
 import './primitives.css'
 
 const labels: Record<ProcessStatus, string> = {
@@ -14,6 +15,7 @@ export function StatusBadge({ status, progress, reason }: Props) {
     <span className="status-badge">
       {status === 'fault' && <span className="status-hazard" aria-hidden="true" />}
       <span className="status-label">{labels[status]}</span>
+      {status !== 'fault' && <span className="mono-status-gear"><GearIcon kind={status === 'ready' ? 'complete' : 'working'} /></span>}
       {(status === 'extracting' || status === 'summarizing') && <span className="status-ticks" aria-hidden="true">
         {Array.from({ length: 12 }, (_, index) => <i key={index} className={index < activeTicks ? 'filled' : ''} />)}
       </span>}

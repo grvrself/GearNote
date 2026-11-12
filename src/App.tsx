@@ -1,21 +1,23 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { isTauri } from '@tauri-apps/api/core'
-import { askAgent, compactChatContext, suggestWorkingContext, applyWorkingSuggestion, undoWorkingSuggestion, rejectWorkingSuggestion, getPendingWorkingSuggestion, listWorkingWorkflowEvents, confirmProjectMemory, revokeProjectMemory, saveWorkingContext, createChatSession, deleteChatSession, getAgentStatus, getChatState, previewAgentContext, renameChatSession, setChatReferences, switchChatSession, type AgentStatus, type ChatSessionSummary, type ChatState } from './agent'
+import { askAgent, compactChatContext, suggestWorkingContext, applyWorkingSuggestion, undoWorkingSuggestion, rejectWorkingSuggestion, getPendingWorkingSuggestion, listWorkingWorkflowEvents, confirmProjectMemory, revokeProjectMemory, saveWorkingContext, createChatSession, deleteChatSession, getAgentStatus, getChatState, previewAgentContext, setChatReferences, switchChatSession, type AgentStatus, type ChatSessionSummary, type ChatState } from './agent'
 import type { ChatMessage } from './chat-data'
 import { AgentSetup } from './components/AgentSetup'
 import { PersonaSetup } from './components/PersonaSetup'
+import { ThemeSettings } from './components/ThemeSettings'
 import { emitTo, listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow'
 import { HistoryPanel } from './components/HistoryPanel'
 import { ChatPanel } from './components/ChatPanel'
 import { NotesPanel } from './components/NotesPanel'
 import { ExtensionSetup } from './components/ExtensionSetup'
+import { SkillsPanel } from './components/SkillsPanel'
 import { PanelHeading } from './components/PanelHeading'
 import { HudButton } from './components/HudButton'
 import { Sidebar, navigation, type SettingsSection, type View } from './components/Sidebar'
 import { Topbar, type BrowserChoice } from './components/Topbar'
 import { recordFixtures } from './data'
-import { loadBridgeStatus, loadSavedRecords, type BridgeStatus } from './records'
+import { dismissCaptureJob, listCaptureJobs, loadBridgeStatus, loadSavedRecords, type BridgeStatus, type CaptureJob } from './records'
 import type { KnowledgeRecord } from './data'
 import { applyNoteEdit, createNoteFolder, deleteNoteFolder, draftFromMessage, exportNote, getPendingNoteEdit, listNoteFolders, listNoteWorkflowEvents, listNotes, proposeNoteEdit, rejectNoteEdit, renameNoteFolder, saveNote, undoNoteEdit, type Note, type NoteDraft, type NoteFolder } from './notes'
 import {
@@ -36,6 +38,7 @@ export default function App() {
   const [miniOpening, setMiniOpening] = useState(false)
   const [miniError, setMiniError] = useState('')
   const [savedRecords, setSavedRecords] = useState<KnowledgeRecord[]>([])
+  const [captureJobs, setCaptureJobs] = useState<CaptureJob[]>([])
   const [bridgeStatus, setBridgeStatus] = useState<BridgeStatus | null>(null)
   const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null)
   const [messages, setMessages] = useState<ChatMessage[]>([])
@@ -148,6 +151,7 @@ export default function App() {
       setStreaming(null)
       return true
     } catch (error) {
+      try { applyChatState(await getChatState()) } catch { /* Keep the original send error visible. */ }
       setStreaming(null)
       setAgentError(String(error))
       return false
@@ -226,6 +230,23 @@ export default function App() {
   useEffect(() => {
     if (!isTauri()) return
     let disposed = false
+    let stop: UnlistenFn | undefined
+    const refresh = async () => {
+      try {
+        const jobs = await listCaptureJobs()
+        if (!disposed) setCaptureJobs(jobs)
+      } catch { if (!disposed) setMiniError('采集任务读取失败。') }
+    }
+    void listen('gearnote:capture-jobs-changed', () => { void refresh() }).then(unlisten => {
+      if (disposed) unlisten()
+      else { stop = unlisten; void refresh() }
+    }).catch(() => { if (!disposed) setMiniError('采集状态监听失败。') })
+    return () => { disposed = true; stop?.() }
+  }, [])
+
+  useEffect(() => {
+    if (!isTauri()) return
+    let disposed = false
     const refresh = async () => {
       try {
         const status = await loadBridgeStatus()
@@ -281,18 +302,18 @@ export default function App() {
   }, [openSearch])
 
   return <div className="app-shell">
-    <Topbar sectionId="sec-01" browser={browser} onBrowserChange={setBrowser} extensionConnected={extensionConnected} onOpenExtensionSetup={() => { setView('settings'); setSettingsSection('overview') }} />
+    <Topbar sectionId="sec-01" browser={browser} onBrowserChange={setBrowser} extensionConnected={extensionConnected} onOpenExtensionSetup={() => setView('plugins')} />
     {miniError && <div className="app-error" role="alert"><span>{miniError}</span><button type="button" aria-label="关闭错误提示" onClick={() => setMiniError('')}>×</button></div>}
 
     <div className={`workspace ${showHistory ? '' : 'without-history'}`}>
-      <Sidebar view={view} recordCount={records.length} sessions={sessions} activeSessionId={activeSessionId} sessionBusy={sending} sessionError={sessionError} onViewChange={changeView} onCreateSession={() => { void manageSession(createChatSession) }} onSwitchSession={id => { void manageSession(() => switchChatSession(id)) }} onRenameSession={(id, title) => { void manageSession(() => renameChatSession(id, title)) }} onDeleteSession={id => { void manageSession(() => deleteChatSession(id)) }} />
+      <Sidebar view={view} sessions={sessions} activeSessionId={activeSessionId} sessionBusy={sending} sessionError={sessionError} onViewChange={changeView} onCreateSession={() => { void manageSession(createChatSession) }} onSwitchSession={id => { void manageSession(() => switchChatSession(id)) }} onDeleteSession={id => { void manageSession(() => deleteChatSession(id)) }} />
 
       <main className="main-panel" id="sec-01">
-        {view === 'chat' ? <ChatPanel records={records} sessionId={activeSessionId} referencedIds={referencedIds} historyOpen={showHistory} agentAvailable={agentAvailable} sending={sending} streaming={streaming} error={agentError} messages={messages} workingContext={workingContext} projectMemory={projectMemory} compactedSummary={compactedSummary} compactedCount={compactedCount} onCompactContext={async () => applyChatState(await compactChatContext())} onSuggestWorkingContext={suggestWorkingContext} onApplyWorkingSuggestion={async id => applyChatState(await applyWorkingSuggestion(id))} onUndoWorkingSuggestion={async id => applyChatState(await undoWorkingSuggestion(id))} onRejectWorkingSuggestion={rejectWorkingSuggestion} onGetPendingWorkingSuggestion={getPendingWorkingSuggestion} onListWorkingWorkflowEvents={listWorkingWorkflowEvents} onSaveWorkingContext={async (goal, completed, nextStep) => applyChatState(await saveWorkingContext(goal, completed, nextStep))} onConfirmMemory={async (content, source, expiresAt) => applyChatState(await confirmProjectMemory(content, source, expiresAt))} onRevokeMemory={async id => applyChatState(await revokeProjectMemory(id))} onSend={sendQuestion} onPreviewContext={(question, frameId, messageIds) => previewAgentContext(question, referencedIds, frameId, messageIds)} onOpenAgentSetup={() => { setView('settings'); setSettingsSection('overview') }} onCreateNoteDraft={createNoteDraft} onSummarize={() => { void sendQuestion('请总结本轮参考资料的核心内容，并标注来源。') }} onRemoveReference={id => setReferencedIds(current => current.filter(value => value !== id))} onRevealRecord={revealRecord} onToggleHistory={() => setRightOpen(current => !current)} onShowHistory={() => setRightOpen(true)}  /> : view === 'library' ? null : <div className="pending-view"><PanelHeading id={`sec-01-${view}${settingsSection === 'shortcuts' ? '-shortcuts' : ''}`} serial="SEC-01" overline={settingsSection === 'shortcuts' ? 'shortcuts' : view} title={pendingTitle} />{view === 'settings' && settingsSection === 'shortcuts' ? <div className="shortcut-preview"><p>当前已启用的应用内快捷键</p><div><span>查找记录</span><kbd>CTRL K</kbd></div><HudButton type="button" onClick={() => setSettingsSection('overview')}>返回设置</HudButton></div> : view === 'settings' ? <><div className="settings-actions"><HudButton type="button" onClick={() => setSettingsSection('shortcuts')}>快捷键设置</HudButton></div><AgentSetup onStatusChange={setAgentStatus} /><PersonaSetup /><ExtensionSetup status={bridgeStatus} /></> : <p>资料索引接入后显示内容。</p>}</div>}
+        {view === 'chat' ? <ChatPanel records={records} sessionId={activeSessionId} referencedIds={referencedIds} historyOpen={showHistory} agentAvailable={agentAvailable} sending={sending} streaming={streaming} error={agentError} messages={messages} workingContext={workingContext} projectMemory={projectMemory} compactedSummary={compactedSummary} compactedCount={compactedCount} onCompactContext={async () => applyChatState(await compactChatContext())} onSuggestWorkingContext={suggestWorkingContext} onApplyWorkingSuggestion={async id => applyChatState(await applyWorkingSuggestion(id))} onUndoWorkingSuggestion={async id => applyChatState(await undoWorkingSuggestion(id))} onRejectWorkingSuggestion={rejectWorkingSuggestion} onGetPendingWorkingSuggestion={getPendingWorkingSuggestion} onListWorkingWorkflowEvents={listWorkingWorkflowEvents} onSaveWorkingContext={async (goal, completed, nextStep) => applyChatState(await saveWorkingContext(goal, completed, nextStep))} onConfirmMemory={async (content, source, expiresAt) => applyChatState(await confirmProjectMemory(content, source, expiresAt))} onRevokeMemory={async id => applyChatState(await revokeProjectMemory(id))} onSend={sendQuestion} onPreviewContext={(question, frameId, messageIds) => previewAgentContext(question, referencedIds, frameId, messageIds)} onOpenAgentSetup={() => { setView('settings'); setSettingsSection('overview') }} onCreateNoteDraft={createNoteDraft} onSummarize={() => { void sendQuestion('请总结本轮参考资料的核心内容，并标注来源。') }} onRemoveReference={id => setReferencedIds(current => current.filter(value => value !== id))} onRevealRecord={revealRecord} onToggleHistory={() => setRightOpen(current => !current)} onShowHistory={() => setRightOpen(true)}  /> : view === 'library' ? null : <div className="pending-view"><PanelHeading id={`sec-01-${view}${settingsSection === 'shortcuts' ? '-shortcuts' : ''}`} serial="SEC-01" overline={settingsSection === 'shortcuts' ? 'shortcuts' : view} title={pendingTitle} />{view === 'settings' && settingsSection === 'shortcuts' ? <div className="shortcut-preview"><p>当前已启用的应用内快捷键</p><div><span>查找记录</span><kbd>CTRL K</kbd></div><HudButton type="button" onClick={() => setSettingsSection('overview')}>返回设置</HudButton></div> : view === 'plugins' ? <ExtensionSetup status={bridgeStatus} /> : view === 'settings' ? <><div className="settings-actions"><HudButton type="button" onClick={() => setSettingsSection('shortcuts')}>快捷键设置</HudButton></div><ThemeSettings /><AgentSetup onStatusChange={setAgentStatus} /><PersonaSetup /></> : <SkillsPanel />}</div>}
         <div className="notes-host" hidden={view !== 'library'}><NotesPanel notes={notes} folders={noteFolders} onCreateFolder={addNoteFolder} onRenameFolder={changeNoteFolderName} onDeleteFolder={removeNoteFolder} records={records} incomingDraft={noteDraft} onDraftConsumed={() => setNoteDraft(null)} onSave={persistNote} onExport={exportNote} onRevealRecord={revealRecord} onProposeEdit={proposeNoteEdit} onApplyEdit={applyNoteEditAndRefresh} onUndoEdit={undoNoteEditAndRefresh} onRejectEdit={rejectNoteEdit} onListWorkflowEvents={listNoteWorkflowEvents} onGetPendingEdit={getPendingNoteEdit} /></div>
       </main>
 
-      {showHistory && <HistoryPanel records={records} selectedId={selectedId} referencedIds={referencedIds} focusRequest={focusRequest} onSelect={id => setSelectedId(current => current === id ? null : id)} onReference={id => setReferencedIds(current => current.includes(id) ? current : [...current, id])} onRemoveReference={id => setReferencedIds(current => current.filter(value => value !== id))} onCollapse={() => setRightOpen(false)} miniAvailable={miniAvailable} onOpenMini={() => { void handleOpenMini() }} searchRef={searchRef} onRecordsChanged={async () => setSavedRecords(await loadSavedRecords())} />}
+      {showHistory && <HistoryPanel records={records} captureJobs={captureJobs} selectedId={selectedId} referencedIds={referencedIds} focusRequest={focusRequest} onSelect={id => setSelectedId(current => current === id ? null : id)} onReference={id => setReferencedIds(current => current.includes(id) ? current : [...current, id])} onRemoveReference={id => setReferencedIds(current => current.filter(value => value !== id))} onCollapse={() => setRightOpen(false)} miniAvailable={miniAvailable} onOpenMini={() => { void handleOpenMini() }} searchRef={searchRef} onRecordsChanged={async () => setSavedRecords(await loadSavedRecords())} onDismissCaptureJob={async id => { try { await dismissCaptureJob(id); setCaptureJobs(await listCaptureJobs()) } catch { setMiniError('关闭采集错误失败。') } }} />}
     </div>
   </div>
 }

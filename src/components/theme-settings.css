@@ -1,0 +1,5 @@
+.theme-settings { max-width: var(--setup-max-width); margin: var(--space-5) 0; padding: var(--space-4); border: var(--edge) solid var(--line); background: var(--panel); }
+.theme-settings h2 { margin: 0 0 var(--space-3); color: var(--paper); font-size: var(--fs-15); }
+.theme-settings > div { display: flex; gap: var(--space-2); }
+.theme-settings button { min-height: var(--control-height); padding: var(--space-2) var(--space-4); border: var(--edge) solid var(--line); color: var(--paper); background: var(--panel-2); }
+.theme-settings button[aria-pressed='true'] { border-color: var(--accent); color: var(--accent-ink); background: var(--accent); }

@@ -4,7 +4,7 @@ use std::collections::HashSet;
 
 pub const MAX_TEXT_CHARS: usize = 24_000;
 pub const TOOL_RESERVE_CHARS: usize = 7_000;
-const MAX_HISTORY_MESSAGES: usize = 8;
+const MAX_HISTORY_MESSAGES: usize = 16;
 const MAX_HISTORY_CHARS: usize = 4_000;
 const MAX_HISTORY_ITEM_CHARS: usize = 600;
 const MAX_SOURCE_CHUNKS: usize = 8;

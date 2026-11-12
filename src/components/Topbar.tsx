@@ -1,6 +1,7 @@
 import { isTauri } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { HudButton } from './HudButton'
+import { GearIcon } from './GearIcon'
 import './topbar.css'
 
 export type BrowserChoice = 'Chrome' | 'Edge'
@@ -26,8 +27,8 @@ export function Topbar({ sectionId, browser, onBrowserChange, extensionConnected
   return <header className="hud-topbar">
     <div className="hud-title-strip" data-tauri-drag-region>
       <div className="hud-title-identity" data-tauri-drag-region>
-        <span className="hud-title-serial" data-tauri-drag-region>KF-001 / {sectionId.toUpperCase()}</span>
-        <span className="hud-title-name" data-tauri-drag-region>KNOWFLOW</span>
+        <span className="hud-title-serial" data-tauri-drag-region>GN-001 / {sectionId.toUpperCase()}</span>
+        <span className="hud-title-name" data-tauri-drag-region>GEARNOTE</span><span className="mono-brand-gear" data-tauri-drag-region><GearIcon kind="brand" size={20} /></span>
         <span className="hud-title-section" data-tauri-drag-region>知识工作台</span>
       </div>
       <div className="hud-title-drag-space" data-tauri-drag-region aria-hidden="true" />

@@ -19,7 +19,7 @@ export function ExtensionSetup({ status }: Props) {
   }
 
   return <ChamferCard className="extension-setup-card"><section className="extension-setup" id="ext-01" aria-labelledby="ext-01-title">
-    <div className="extension-setup-head"><span>EXT-01 / BROWSER BRIDGE</span><h3 id="ext-01-title">网页与视频字幕捕获</h3></div>
+    <div className="extension-setup-head"><span>EXT-01 / BROWSER BRIDGE</span><h3 id="ext-01-title">GearNote 浏览器扩展</h3></div>
     <p>点击浏览器工具栏图标后，扩展会保存当前文章；在带字幕的视频页面，则保存字幕与时间点。资料只写入这台电脑。</p>
     <div className="extension-setup-state" role="status">连接状态：<strong>{status?.error ? '本机连接异常' : status?.connected ? '扩展已连接' : '扩展未连接'}</strong></div>
     {status?.error && <p className="extension-setup-error">{status.error}</p>}
@@ -33,7 +33,7 @@ export function ExtensionSetup({ status }: Props) {
       <li>在 Chrome 打开 <code>chrome://extensions</code>；在 Edge 打开 <code>edge://extensions</code>。</li>
       <li>开启「开发者模式」，选择「加载已解压的扩展」，选中本项目的 <code>extension</code> 文件夹。</li>
       <li>打开扩展详情的「扩展程序选项」，粘贴上方配对码并连接。</li>
-      <li>打开普通网页文章，或打开带字幕的 YouTube / Bilibili 视频，点击浏览器工具栏的 KnowFlow 扩展图标。</li>
+      <li>打开普通网页文章，或打开带字幕的 YouTube / Bilibili 视频，点击浏览器工具栏的 GearNote 扩展图标。</li>
     </ol>
     <p className="extension-setup-note">视频必须有播放器提供的字幕轨道；无字幕的视频会显示失败原因。Bilibili 的部分字幕需要先登录。失败后在视频页再次点击扩展图标即可重试。</p>
     <p className="extension-setup-note">旧版抓取的 Bilibili 字幕未核对视频身份。新版会移除这些字幕并标记为待重新捕获；在原视频页再次点击扩展图标即可更新。</p>

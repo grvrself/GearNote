@@ -1,6 +1,6 @@
 use crate::{context::{self, ContextPreview, PreparedContext, SourceChunk}, read_tools::ReadIndex, storage::AppState};
 use serde::{Deserialize, Serialize};
-use std::{collections::HashSet, fs, io::Write, path::PathBuf, sync::Mutex, time::{Duration, Instant}};
+use std::{collections::{HashMap, HashSet}, fs, io::Write, path::PathBuf, sync::Mutex, time::{Duration, Instant}};
 use tauri::{AppHandle, Emitter, Manager, State};
 use url::Url;
 use uuid::Uuid;
@@ -151,6 +151,7 @@ pub struct AgentState {
     pub(crate) sessions: Mutex<ChatStore>,
     persona: Mutex<String>,
     pub(crate) busy: Mutex<bool>,
+    auto_compact_failures: Mutex<HashMap<String, usize>>,
     config_path: PathBuf,
     key_path: PathBuf,
     pub(crate) sessions_path: PathBuf,
@@ -177,7 +178,7 @@ impl AgentState {
         if !persona_path.exists() { fs::write(&persona_path, DEFAULT_PERSONA)?; }
         let persona = fs::read_to_string(&persona_path)?;
         let persona = if valid_persona(&persona) { persona } else { DEFAULT_PERSONA.into() };
-        Ok(Self { config: Mutex::new(config), key: Mutex::new(key), key_warning: Mutex::new(key_warning), sessions: Mutex::new(sessions), persona: Mutex::new(persona), busy: Mutex::new(false), config_path, key_path, sessions_path, persona_path })
+        Ok(Self { config: Mutex::new(config), key: Mutex::new(key), key_warning: Mutex::new(key_warning), sessions: Mutex::new(sessions), persona: Mutex::new(persona), busy: Mutex::new(false), auto_compact_failures: Mutex::new(HashMap::new()), config_path, key_path, sessions_path, persona_path })
     }
 }
 
@@ -790,7 +791,7 @@ pub async fn test_agent_tools(state: State<'_, AgentState>) -> Result<ToolProbe,
     let key = state.key.lock().map_err(|_| "模型密钥暂不可用")?.clone().ok_or("请先保存 API 密钥")?;
     if config.model.is_empty() { return Err("请先保存模型名称".into()); }
     let record: crate::storage::KnowledgeRecord = serde_json::from_value(serde_json::json!({
-        "id":"probe-record", "type":"article", "title":"KnowFlow 虚构测试资料", "site":"local-probe",
+        "id":"probe-record", "type":"article", "title":"GearNote 虚构测试资料", "site":"local-probe",
         "savedAt":"2026-01-01T00:00:00Z", "status":"ready", "sourceUrl":"https://example.invalid/knowflow-probe",
         "contentText":"验证标记 ALPHA-27 仅用于确认模型能搜索并读取虚构资料。", "excerpt":[]
     })).map_err(|_| "测试资料生成失败")?;
@@ -809,10 +810,14 @@ pub async fn test_agent_tools(state: State<'_, AgentState>) -> Result<ToolProbe,
 }
 
 pub(crate) async fn auxiliary_completion(state: &AgentState, system: &str, user: String) -> Result<String, String> {
+    auxiliary_completion_with_timeout(state, system, user, Duration::from_secs(120)).await
+}
+
+async fn auxiliary_completion_with_timeout(state: &AgentState, system: &str, user: String, timeout: Duration) -> Result<String, String> {
     let config = state.config.lock().map_err(|_| "模型配置暂不可用")?.clone();
     let key = state.key.lock().map_err(|_| "模型密钥暂不可用")?.clone().ok_or("请先配置 API 密钥")?;
     if config.model.is_empty() { return Err("请先配置模型名称".into()); }
-    let client = reqwest::Client::builder().connect_timeout(Duration::from_secs(15)).timeout(Duration::from_secs(120))
+    let client = reqwest::Client::builder().connect_timeout(Duration::from_secs(15)).timeout(timeout)
         .build().map_err(|error| error.to_string())?;
     let response = client.post(format!("{}/chat/completions", config.base_url)).bearer_auth(key)
         .json(&serde_json::json!({"model":config.model,"stream":false,"messages":[{"role":"system","content":system},{"role":"user","content":user}]}))
@@ -829,12 +834,24 @@ pub(crate) async fn auxiliary_completion(state: &AgentState, system: &str, user:
     Ok(answer)
 }
 
-#[tauri::command]
-pub async fn compact_chat_context(app: AppHandle, state: State<'_, AgentState>) -> Result<ChatState, String> {
-    let (session_id, prior_summary, start, end, input, last_id) = {
+const COMPACT_KEEP_RECENT: usize = 8;
+const AUTO_COMPACT_MESSAGE_THRESHOLD: usize = 16;
+const AUTO_COMPACT_CHAR_THRESHOLD: usize = 3_200;
+
+fn should_auto_compact(session: &ChatSession) -> bool {
+    let pending = &session.messages[session.compacted_count.min(session.messages.len())..];
+    pending.len() >= AUTO_COMPACT_MESSAGE_THRESHOLD ||
+        (pending.len() >= COMPACT_KEEP_RECENT + 2 && pending.iter()
+            .flat_map(|message| message.paragraphs.iter())
+            .map(|paragraph| paragraph.chars().count()).sum::<usize>() >= AUTO_COMPACT_CHAR_THRESHOLD)
+}
+
+async fn compact_session_context(app: &AppHandle, state: &AgentState, session_id: &str, require_idle: bool, timeout: Duration) -> Result<ChatState, String> {
+    let (prior_summary, start, end, input, last_id) = {
         let store = state.sessions.lock().map_err(|_| "会话暂不可用")?;
-        let session = store.sessions.iter().find(|item| item.id == store.active_id).ok_or("当前会话不存在")?;
-        let limit = session.messages.len().saturating_sub(8);
+        if store.active_id != session_id { return Err("会话已切换，请重新压缩".into()); }
+        let session = store.sessions.iter().find(|item| item.id == session_id).ok_or("当前会话不存在")?;
+        let limit = session.messages.len().saturating_sub(COMPACT_KEEP_RECENT);
         if limit <= session.compacted_count { return Err("目前没有需要压缩的较早对话".into()); }
         let mut input = String::new();
         let mut end = session.compacted_count;
@@ -844,12 +861,12 @@ pub async fn compact_chat_context(app: AppHandle, state: State<'_, AgentState>) 
             input.push_str(&part);
             end += 1;
         }
-        (session.id.clone(), session.compacted_summary.clone(), session.compacted_count, end, input, session.messages[end - 1].id.clone())
+        (session.compacted_summary.clone(), session.compacted_count, end, input, session.messages[end - 1].id.clone())
     };
     let prompt = format!("已有摘要：\n{prior_summary}\n\n本次较早对话：\n{input}");
-    let summary = auxiliary_completion(&state, "请把对话压缩为后续追问所需的背景。区分已确认决定、进行中的事项和未经核实的说法；保留日期和来源线索。不要添加新事实。输出不超过 1500 个汉字的纯文本，不把模型自己的推测写成用户决定。", prompt).await?;
+    let summary = auxiliary_completion_with_timeout(state, "请把对话压缩为后续追问所需的背景。区分已确认决定、进行中的事项和未经核实的说法；保留日期和来源线索。不要添加新事实。输出不超过 1500 个汉字的纯文本，不把模型自己的推测写成用户决定。", prompt, timeout).await?;
     if summary.chars().count() > 1500 { return Err("摘要超过 1500 字，请重试".into()); }
-    mutate_chat(&app, &state, true, true, |store| {
+    mutate_chat(app, state, require_idle, true, |store| {
         if store.active_id != session_id { return Err("会话已切换，请重新压缩".into()); }
         let session = store.sessions.iter_mut().find(|item| item.id == session_id).ok_or("会话不存在")?;
         if session.compacted_count != start || session.messages.get(end - 1).map(|item| &item.id) != Some(&last_id) { return Err("对话已更新，请重新压缩".into()); }
@@ -858,6 +875,14 @@ pub async fn compact_chat_context(app: AppHandle, state: State<'_, AgentState>) 
         session.compacted_at = now_millis()?;
         Ok(true)
     })
+}
+
+#[tauri::command]
+pub async fn compact_chat_context(app: AppHandle, state: State<'_, AgentState>) -> Result<ChatState, String> {
+    let session_id = state.sessions.lock().map_err(|_| "会话暂不可用")?.active_id.clone();
+    let result = compact_session_context(&app, &state, &session_id, true, Duration::from_secs(120)).await?;
+    if let Ok(mut failures) = state.auto_compact_failures.lock() { failures.remove(&session_id); }
+    Ok(result)
 }
 
 #[tauri::command]
@@ -957,12 +982,34 @@ pub async fn ask_agent(app: AppHandle, agent: State<'_, AgentState>, storage: St
     let config = agent.config.lock().map_err(|_| "模型配置暂不可用")?.clone();
     let key = agent.key.lock().map_err(|_| "请先在设置页填写 API 密钥")?.clone().ok_or("请先在设置页填写 API 密钥")?;
     let persona = agent.persona.lock().map_err(|_| "人格文件暂不可用")?.clone();
+    if config.model.is_empty() { return Err("请先在设置页填写模型名称".into()); }
+    let (needs_compaction, message_count) = {
+        let store = agent.sessions.lock().map_err(|_| "会话暂不可用")?;
+        let session = store.sessions.iter().find(|item| item.id == request_session_id).ok_or("发起提问的会话不存在")?;
+        (should_auto_compact(session), session.messages.len())
+    };
+    let recently_failed = agent.auto_compact_failures.lock().ok()
+        .and_then(|failures| failures.get(&request_session_id).copied())
+        .is_some_and(|count| message_count < count.saturating_add(4));
+    if needs_compaction && !recently_failed {
+        let _ = app.emit("knowflow:agent-tool", ToolActivity { request_id: request_id.clone(), message: "正在自动压缩较早对话…".into() });
+        match compact_session_context(&app, &agent, &request_session_id, false, Duration::from_secs(45)).await {
+            Ok(_) => {
+                if let Ok(mut failures) = agent.auto_compact_failures.lock() { failures.remove(&request_session_id); }
+                let _ = app.emit("knowflow:agent-tool", ToolActivity { request_id: request_id.clone(), message: "较早对话已整理，继续回答…".into() });
+            }
+            Err(error) => {
+                if let Ok(mut failures) = agent.auto_compact_failures.lock() { failures.insert(request_session_id.clone(), message_count); }
+                eprintln!("GearNote automatic chat compaction failed: {error}");
+                let _ = app.emit("knowflow:agent-tool", ToolActivity { request_id: request_id.clone(), message: "自动压缩未完成，继续使用近期对话…".into() });
+            }
+        }
+    }
     let (recent_messages, selected, project_memory, working, summary) = {
         let store = agent.sessions.lock().map_err(|_| "会话暂不可用")?;
         let session = store.sessions.iter().find(|item| item.id == request_session_id).ok_or("发起提问的会话不存在")?;
         (session.messages[session.compacted_count.min(session.messages.len())..].to_vec(), selected_messages(session, &message_ids)?, store.project_memory.iter().filter(|entry| memory_is_current(entry)).cloned().collect::<Vec<_>>(), session.working_context.clone(), session.compacted_summary.clone())
     };
-    if config.model.is_empty() { return Err("请先在设置页填写模型名称".into()); }
     let mut image_source = None;
     let attachment = if let Some(image_id) = frame_id {
         if config.base_url.starts_with("https://api.deepseek.com") && config.model.eq_ignore_ascii_case("deepseek-v4-pro") {
@@ -1068,6 +1115,25 @@ pub async fn ask_agent(app: AppHandle, agent: State<'_, AgentState>, storage: St
 mod tests {
     use super::*;
     use crate::{storage::KnowledgeRecord, ProcessStatus};
+    #[test]
+    fn automatic_compaction_waits_for_a_meaningful_batch() {
+        let mut session = new_session().unwrap();
+        for index in 0..15 {
+            session.messages.push(ChatMessage { id: format!("msg-{index}"), role: "user".into(), created_at: "1".into(),
+                paragraphs: vec!["短消息".into()], tool_steps: vec![], citations: vec![], frame: None });
+        }
+        assert!(!should_auto_compact(&session));
+        session.messages.push(ChatMessage { id: "msg-15".into(), role: "user".into(), created_at: "1".into(),
+            paragraphs: vec!["短消息".into()], tool_steps: vec![], citations: vec![], frame: None });
+        assert!(should_auto_compact(&session));
+        session.compacted_count = 8;
+        assert!(!should_auto_compact(&session));
+
+        session.compacted_count = 0;
+        session.messages.truncate(10);
+        for message in &mut session.messages { message.paragraphs = vec!["长内容".repeat(120)]; }
+        assert!(should_auto_compact(&session));
+    }
     #[test]
     fn selected_messages_are_scoped_to_current_session() {
         let mut session = new_session().unwrap();

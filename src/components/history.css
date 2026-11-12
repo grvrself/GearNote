@@ -3,7 +3,6 @@
   flex-direction: column;
   min-width: 0;
   min-height: 0;
-  border: var(--edge) solid var(--line);
   background: var(--panel);
 }
 
@@ -13,7 +12,6 @@
   justify-content: space-between;
   gap: var(--space-2);
   padding: var(--space-5) var(--space-4) var(--space-4);
-  border-bottom: var(--edge) solid var(--line);
 }
 
 .history-collapse { flex: none; padding: var(--space-2) 0; border: 0; color: var(--muted); background: transparent; font: var(--fs-11) var(--font-body); white-space: nowrap; }
@@ -84,6 +82,14 @@
 }
 
 .history-empty { margin: 0; padding: var(--space-6) 0; color: var(--muted); font-size: var(--fs-13); }
+.capture-job-card { display: grid; justify-items: start; gap: var(--space-2); min-width: 0; padding: var(--space-3); border: var(--edge) solid var(--line); border-radius: var(--r); background: var(--panel); }
+.capture-job-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); width: 100%; color: var(--muted); font: var(--fs-11) var(--font-mono); }
+.capture-job-heading button { border: 0; color: var(--muted); background: transparent; cursor: pointer; font: var(--fs-11) var(--font-body); }
+.capture-job-heading button:hover { color: var(--paper); }
+.capture-job-heading button:focus-visible { outline: var(--edge) solid var(--accent); }
+.capture-job-card strong { max-width: 100%; color: var(--paper); font: 600 var(--fs-15)/1.45 var(--font-body); overflow-wrap: anywhere; }
+.capture-job-site { color: var(--muted); font: var(--fs-11) var(--font-mono); }
+.capture-job-wait { color: var(--muted); font: var(--fs-11) var(--font-body); }
 .record-card.is-expanded .chamfer-content { background: var(--panel-2); }
 .record-card.is-referenced .chamfer-border { background: var(--accent); }
 

@@ -1,10 +1,14 @@
 import { isTauri } from '@tauri-apps/api/core'
 import { invoke } from '@tauri-apps/api/core'
-import type { KnowledgeRecord, StoryboardResult } from './data'
+import type { KnowledgeRecord, ProcessStatus, RecordType, StoryboardResult } from './data'
 
 export type BridgeStatus = { pairCode: string; connected: boolean; error: string | null }
 export type RecordPage = { items: KnowledgeRecord[]; total: number; offset: number; limit: number }
 export type RecordSegment = { ordinal: number; atSeconds: number | null; text: string }
+export type CaptureJob = { id: string; type: RecordType; title: string; site: string; status: ProcessStatus; faultReason?: string | null; startedAtMs: number }
+
+export const listCaptureJobs = (): Promise<CaptureJob[]> => invoke<CaptureJob[]>('list_capture_jobs')
+export const dismissCaptureJob = (id: string): Promise<boolean> => invoke<boolean>('dismiss_capture_job', { id })
 
 export const getRecord = (id: string): Promise<KnowledgeRecord> => invoke<KnowledgeRecord>('get_record', { id })
 

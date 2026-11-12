@@ -1,8 +1,8 @@
 [package]
-name = "knowflow"
+name = "gearnote"
 version = "0.1.0"
-description = "KnowFlow desktop knowledge workspace"
-authors = ["KnowFlow"]
+description = "GearNote desktop knowledge workspace"
+authors = ["GearNote"]
 edition = "2021"
 
 [lib]
