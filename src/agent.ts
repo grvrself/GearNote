@@ -2,7 +2,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import type { ChatMessage, ChatSuggestion } from './chat-data'
 
-export type AgentStatus = { baseUrl: string; model: string; exploreReferences: boolean; hasKey: boolean; keyPersistent: boolean; keyWarning: string | null }
+export type AgentStatus = { baseUrl: string; model: string; exploreReferences: boolean; contextTier: 'small' | 'medium'; hasKey: boolean; keyPersistent: boolean; keyWarning: string | null }
 export type ToolProbe = { supported: boolean; searched: boolean; read: boolean; elapsedMs: number; steps: string[]; reason: string }
 export type ChatSessionSummary = { id: string; title: string; updatedAt: string; messageCount: number }
 export type WorkingContext = { goal: string; completed: string; nextStep: string; updatedAt: string }
@@ -18,7 +18,9 @@ export type ContextPreview = {
   projectMemory: ProjectMemory[]
   workingContext: WorkingContext
   compactedSummary: string
-  sources: { index: number; recordId: string; title: string; sourceUrl: string; capturedAt: string; atSeconds?: number; text: string; visual: boolean }[]
+  sources: { index: number; label: string; recordId: string; title: string; sourceUrl: string; capturedAt: string; atSeconds?: number; text: string; visual: boolean; selectionReason: 'search' | 'coverage' }[]
+  explorationMode: boolean
+  directoryText: string
   referencedRecordCount: number
   referencedMessageCount: number
   candidateChunkCount: number
@@ -37,6 +39,7 @@ export const getAgentStatus = () => invoke<AgentStatus>('get_agent_status')
 export const saveAgentConfig = (baseUrl: string, model: string, apiKey?: string) =>
   invoke<AgentStatus>('save_agent_config', { baseUrl, model, apiKey })
 export const saveExploreReferences = (enabled: boolean) => invoke<AgentStatus>('save_explore_references', { enabled })
+export const saveContextTier = (tier: 'small' | 'medium') => invoke<AgentStatus>('save_context_tier', { tier })
 export const testAgentTools = () => invoke<ToolProbe>('test_agent_tools')
 export const listChatMessages = () => invoke<ChatMessage[]>('list_chat_messages')
 export const getChatState = () => invoke<ChatState>('get_chat_state')
@@ -47,9 +50,9 @@ export const switchChatSession = (id: string) => invoke<ChatState>('switch_chat_
 export const renameChatSession = (id: string, title: string) => invoke<ChatState>('rename_chat_session', { id, title })
 export const deleteChatSession = (id: string) => invoke<ChatState>('delete_chat_session', { id })
 export const setChatReferences = (id: string, referencedIds: string[]) => invoke<ChatState>('set_chat_references', { id, referencedIds })
-export const previewAgentContext = (question: string, referencedIds: string[], frameId?: string, messageIds: string[] = []) =>
-  invoke<ContextPreview>('preview_agent_context', { question, referencedIds, frameId: frameId ?? null, messageIds })
-export async function askAgent(question: string, referencedIds: string[], onDelta: (delta: string) => void, frameId?: string, onActivity?: (message: string) => void, messageIds: string[] = [], choiceId?: string) {
+export const previewAgentContext = (question: string, referencedIds: string[], frameId?: string, messageIds: string[] = [], deepMode = false) =>
+  invoke<ContextPreview>('preview_agent_context', { question, referencedIds, frameId: frameId ?? null, messageIds, deepMode })
+export async function askAgent(question: string, referencedIds: string[], onDelta: (delta: string) => void, frameId?: string, onActivity?: (message: string) => void, messageIds: string[] = [], choiceId?: string, deepMode = false) {
   const requestId = crypto.randomUUID()
   const stop = await listen<StreamDelta>('knowflow:agent-stream', event => {
     if (event.payload.requestId === requestId) onDelta(event.payload.delta)
@@ -64,7 +67,7 @@ export async function askAgent(question: string, referencedIds: string[], onDelt
     throw error
   }
   try {
-    return await invoke<ChatMessage>('ask_agent', { question, referencedIds, requestId, frameId: frameId ?? null, messageIds, choiceId: choiceId ?? null })
+    return await invoke<ChatMessage>('ask_agent', { question, referencedIds, requestId, frameId: frameId ?? null, messageIds, choiceId: choiceId ?? null, deepMode })
   } finally {
     stop()
     stopActivity()

@@ -7,7 +7,8 @@ export type NoteSource = NoteSourceInput & { title: string; url: string }
 export type Note = { id: string; title: string; body: string; sources: NoteSource[]; folderId?: string | null; createdAt: number; updatedAt: number }
 export type NoteDraft = { title: string; body: string; sources: NoteSourceInput[]; folderId?: string | null }
 export type NoteFolder = { id: string; name: string; createdAt: string }
-export type NoteEditProposal = { id: string; noteId: string; mode: 'append' | 'replace'; beforeText: string; afterText: string; reason: string; status: string; createdAt: string }
+export type NoteEditItem = { mode: 'append' | 'replace'; beforeText: string; afterText: string; reason: string; sourceIndex?: number; quote?: string }
+export type NoteEditProposal = { id: string; noteId: string; mode: 'append' | 'replace' | 'multi'; beforeText: string; afterText: string; reason: string; edits: NoteEditItem[]; status: string; createdAt: string }
 export type NoteWorkflowEvent = { id: string; proposalId: string; action: string; at: string; detail: string; undoable: boolean }
 
 export const listNotes = () => invoke<Note[]>('list_notes')

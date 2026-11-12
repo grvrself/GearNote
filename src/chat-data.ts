@@ -2,12 +2,13 @@ export type ChatCitation = {
   recordId: string
   atSeconds?: number
   sourceIndex?: number
+  label?: string
   kind?: 'image' | 'chat'
 }
 
 export type ChatFrame = { imageId: string; recordId: string; atSeconds: number }
 
-export type ChatRun = { elapsedMs: number; changedFiles: string[] }
+export type ChatRun = { elapsedMs: number; changedFiles: string[]; readSources?: { sourceIndex: number; recordId: string; title: string; atSeconds?: number | null }[]; readCoverage?: { readUntilSeconds: number; totalSeconds: number; batchCount: number; complete: boolean; reason: string } }
 export type ChatStreaming = { question: string; answer: string; startedAt: number; activity?: string; activities: string[] }
 export type ChatSuggestion = { label: string; prompt: string }
 

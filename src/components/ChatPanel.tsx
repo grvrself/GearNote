@@ -25,10 +25,10 @@ type Props = {
   suggestingMessageId?: string | null
   suggestionErrorId?: string | null
   error?: string
-  onSend?: (question: string, frameId?: string, messageIds?: string[], choiceId?: string) => Promise<boolean>
-  onPreviewContext?: (question: string, frameId?: string, messageIds?: string[]) => Promise<ContextPreview>
+  onSend?: (question: string, frameId?: string, messageIds?: string[], choiceId?: string, deepMode?: boolean) => Promise<boolean>
+  onPreviewContext?: (question: string, frameId?: string, messageIds?: string[], deepMode?: boolean) => Promise<ContextPreview>
   onOpenAgentSetup?: () => void
-  onSummarize?: () => void
+  onSummarize?: (deepMode?: boolean) => void
   onRemoveReference: (id: string) => void
   onRevealRecord: (id: string, atSeconds?: number) => void
   onToggleHistory: () => void
@@ -55,12 +55,16 @@ function formatRunElapsed(milliseconds: number) {
   return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`
 }
 
-function MessageRun({ message }: { message: ChatMessage }) {
+function MessageRun({ message, onRevealRecord }: { message: ChatMessage; onRevealRecord: Props['onRevealRecord'] }) {
   if (!message.run && !message.toolSteps?.length) return null
   const files = message.run?.changedFiles ?? []
+  const readSources = message.run?.readSources ?? []
+  const coverage = message.run?.readCoverage
   return <details className="message-run">
-    <summary>{message.run ? <>用时 {formatRunElapsed(message.run.elapsedMs)} <span>· {files.length ? `修改 ${files.length} 个项目文件` : '未修改项目文件'}</span></> : `资料探索 · ${message.toolSteps?.length} 步`}</summary>
+    <summary>{message.run ? <>用时 {formatRunElapsed(message.run.elapsedMs)} <span>· {coverage ? `深度阅读至 ${formatElapsed(coverage.readUntilSeconds)} / ${formatElapsed(coverage.totalSeconds)}` : readSources.length ? `已读 ${readSources.length} 段资料` : files.length ? `修改 ${files.length} 个项目文件` : '未修改项目文件'}</span></> : `资料探索 · ${message.toolSteps?.length} 步`}</summary>
+    {coverage && <p>字幕已读至 {formatElapsed(coverage.readUntilSeconds)} / {formatElapsed(coverage.totalSeconds)} · {coverage.batchCount} 批 · {coverage.complete ? '已读完' : `未读完：${coverage.reason}`}</p>}
     {Boolean(message.toolSteps?.length) && <ol className="message-run-steps">{message.toolSteps?.map((step, index) => <li key={index}>{step}</li>)}</ol>}
+    {readSources.length > 0 && <div className="message-run-files"><strong>本轮实际读取</strong><ul>{readSources.map(source => <li key={source.sourceIndex}><button type="button" onClick={() => onRevealRecord(source.recordId, source.atSeconds ?? undefined)}>[{source.sourceIndex}] {source.title}{source.atSeconds == null ? '' : ` · ${formatElapsed(source.atSeconds)}`}</button></li>)}</ul></div>}
     {message.frame && <p>已截取视频画面。</p>}
     {message.run && (files.length ? <div className="message-run-files"><strong>修改的文件</strong><ul>{files.map(file => <li key={file}>{file}</li>)}</ul></div> : <p>本轮没有修改项目文件。</p>)}
   </details>
@@ -81,6 +85,7 @@ function StreamingRun({ streaming }: { streaming: ChatStreaming }) {
 
 export function ChatPanel({ records, pendingChoice = null, sessionId, referencedIds, workingContext = { goal: '', completed: '', nextStep: '', updatedAt: '' }, projectMemory = [], compactedSummary = '', compactedCount = 0, historyOpen, agentAvailable, sending = false, streaming = null, suggestingMessageId = null, suggestionErrorId = null, error = '', onSend, onPreviewContext, onOpenAgentSetup, onSummarize, onRemoveReference, onRevealRecord, onToggleHistory, onShowHistory, onCreateNoteDraft, messages = [], compact = false }: Props) {
   const [draft, setDraft] = useState('')
+  const [deepMode, setDeepMode] = useState(false)
   const [choiceSubmitting, setChoiceSubmitting] = useState(false)
   const [attachedFrame, setAttachedFrame] = useState<ChatFrame | null>(null)
   const [selectedMessageIds, setSelectedMessageIds] = useState<string[]>([])
@@ -94,11 +99,13 @@ export function ChatPanel({ records, pendingChoice = null, sessionId, referenced
   const sessionIdRef = useRef(sessionId)
   sessionIdRef.current = sessionId
   const flowRef = useRef<HTMLOListElement>(null)
-  const previewIdentity = `${sessionId ?? ''}\u0000${draft.trim()}\u0000${referencedIds.join('|')}\u0000${selectedMessageIds.join('|')}\u0000${attachedFrame?.imageId ?? ''}\u0000${workingContext.updatedAt}\u0000${projectMemory.map(item => item.id).join('|')}\u0000${compactedCount}`
-  const previewIdentityRef = useRef(previewIdentity)
-  previewIdentityRef.current = previewIdentity
   const referencedRecords = referencedIds.map(id => records.find(record => record.id === id)).filter((record): record is KnowledgeRecord => Boolean(record))
   const selectedMessages = selectedMessageIds.map(id => messages.find(message => message.id === id)).filter((message): message is ChatMessage => Boolean(message))
+  const deepEligible = referencedRecords.length === 1 && referencedRecords[0].type === 'video' && referencedRecords[0].status === 'ready' && !attachedFrame && selectedMessages.length === 0 && pendingChoice?.status !== 'open'
+  const activeDeepMode = deepEligible && deepMode
+  const previewIdentity = `${sessionId ?? ''}\u0000${draft.trim()}\u0000${referencedIds.join('|')}\u0000${selectedMessageIds.join('|')}\u0000${attachedFrame?.imageId ?? ''}\u0000${workingContext.updatedAt}\u0000${projectMemory.map(item => item.id).join('|')}\u0000${compactedCount}\u0000${activeDeepMode}`
+  const previewIdentityRef = useRef(previewIdentity)
+  previewIdentityRef.current = previewIdentity
   const referenceCount = referencedRecords.length + selectedMessages.length
   const referenceLabel = referencedRecords[0]?.title ?? (selectedMessages[0] ? `${selectedMessages[0].role === 'agent' ? 'Agent 回答' : '你的消息'}：${selectedMessages[0].paragraphs.join(' ')}` : '')
   const usableMemory = projectMemory.filter(item => !item.expiresAt || Number(item.expiresAt) > Date.now())
@@ -106,8 +113,8 @@ export function ChatPanel({ records, pendingChoice = null, sessionId, referenced
   const hasReference = referencedRecords.length > 0 || selectedMessages.length > 0 || Boolean(attachedFrame) || hasBackground
   const canSend = agentAvailable || isCaptureCommand(draft)
 
-  useEffect(() => { setDraft(''); setAttachedFrame(null); setSelectedMessageIds([]); setDismissedNotes([]); setContextPreview(null); setContextPreviewOpen(false) }, [sessionId])
-  useEffect(() => { setContextPreview(null); setContextPreviewOpen(false) }, [referencedIds.join('|')])
+  useEffect(() => { setDraft(''); setAttachedFrame(null); setSelectedMessageIds([]); setDeepMode(false); setDismissedNotes([]); setContextPreview(null); setContextPreviewOpen(false) }, [sessionId])
+  useEffect(() => { setDeepMode(false); setContextPreview(null); setContextPreviewOpen(false) }, [referencedIds.join('|')])
   useEffect(() => { setContextPreview(null); setContextPreviewOpen(false) }, [workingContext, projectMemory, compactedSummary])
 
   useEffect(() => {
@@ -129,7 +136,7 @@ export function ChatPanel({ records, pendingChoice = null, sessionId, referenced
     setDraft('')
     setContextPreview(null)
     setContextPreviewOpen(false)
-    const sent = await onSend(question, capture ? undefined : attachedFrame?.imageId, capture ? [] : selectedMessageIds)
+    const sent = await onSend(question, capture ? undefined : attachedFrame?.imageId, capture ? [] : selectedMessageIds, undefined, !capture && activeDeepMode)
     if (sent && !capture) { setAttachedFrame(null); setSelectedMessageIds([]) }
     if (!sent && sessionIdRef.current === sendingSessionId) setDraft(question)
   }
@@ -157,7 +164,7 @@ export function ChatPanel({ records, pendingChoice = null, sessionId, referenced
     setContextPreviewError('')
     const identity = previewIdentity
     try {
-      const result = await onPreviewContext(draft.trim(), attachedFrame?.imageId, selectedMessageIds)
+      const result = await onPreviewContext(draft.trim(), attachedFrame?.imageId, selectedMessageIds, activeDeepMode)
       if (previewIdentityRef.current !== identity) return
       setContextPreview(result)
       setContextPreviewOpen(true)
@@ -182,17 +189,17 @@ export function ChatPanel({ records, pendingChoice = null, sessionId, referenced
       {messages.map(message => <li className="message-row" data-role={message.role} key={message.id}>
         <ChamferCard className={`message-card${selectedMessageIds.includes(message.id) ? ' message-card-referenced' : ''}`} id={message.id}>
           <div className="message-meta"><span>{message.role === 'agent' ? 'GearNote' : '你'}</span><time dateTime={/^\d+$/.test(message.createdAt) ? new Date(Number(message.createdAt)).toISOString() : message.createdAt}>{timeFormatter.format(new Date(/^\d+$/.test(message.createdAt) ? Number(message.createdAt) : message.createdAt))}</time></div>
-          {message.role === 'agent' && <MessageRun message={message} />}
+          {message.role === 'agent' && <MessageRun message={message} onRevealRecord={onRevealRecord} />}
           <div className="message-reference-control"><button type="button" aria-pressed={selectedMessageIds.includes(message.id)} disabled={sending || (!selectedMessageIds.includes(message.id) && selectedMessageIds.length >= 4)} title={selectedMessageIds.includes(message.id) ? '移出本轮参考' : '将这条消息加入本轮参考'} onClick={() => toggleMessageReference(message.id)}>{selectedMessageIds.includes(message.id) ? '✓ 已选为参考 · 移除' : '＋ 选此消息为参考'}</button></div>
           <div className="message-body">{message.paragraphs.map((paragraph, index) => <p key={index}>{paragraph}</p>)}{message.points && <ol>{message.points.map(point => <li key={point}>{point}</li>)}</ol>}{message.frame && <CapturedFrame frame={message.frame} title={records.find(record => record.id === message.frame?.recordId)?.title ?? '视频'} selected={attachedFrame?.imageId === message.frame.imageId} onAttach={() => { setAttachedFrame(message.frame ?? null); setContextPreview(null); setContextPreviewOpen(false); draftRef.current?.focus() }} />}</div>
           {message.citations && <div className="message-citations"><span>引用</span><div>{message.citations.map((citation, index) => {
             const record = records.find(item => item.id === citation.recordId)
             if (citation.kind === 'chat' || citation.recordId.startsWith('chat:')) {
               const cited = messages.find(item => item.id === citation.recordId.slice(5))
-              return cited && <button type="button" key={`${citation.recordId}-${citation.sourceIndex ?? index}`} title={`定位${cited.role === 'agent' ? 'Agent 回答' : '用户消息'}`} onClick={() => document.getElementById(cited.id)?.scrollIntoView({ behavior: 'smooth', block: 'center' })}><span aria-hidden="true">{citation.sourceIndex ? `[${citation.sourceIndex}]` : '↗'}</span>{cited.role === 'agent' ? 'Agent 回答' : '用户消息'}</button>
+              return cited && <button type="button" key={`${citation.recordId}-${citation.sourceIndex ?? index}`} title={`定位${cited.role === 'agent' ? 'Agent 回答' : '用户消息'}`} onClick={() => document.getElementById(cited.id)?.scrollIntoView({ behavior: 'smooth', block: 'center' })}><span aria-hidden="true">{citation.label ?? (citation.sourceIndex ? `[${citation.sourceIndex}]` : '↗')}</span>{cited.role === 'agent' ? 'Agent 回答' : '用户消息'}</button>
             }
             if (!record) return null
-            return <button type="button" key={`${citation.recordId}-${citation.sourceIndex ?? index}`} title={`查看 ${record.title}`} onClick={() => onRevealRecord(citation.recordId, citation.atSeconds)}><span aria-hidden="true">{citation.sourceIndex ? `[${citation.sourceIndex}]` : '↗'}</span>{citation.atSeconds == null ? record.site : `${formatElapsed(citation.atSeconds)} ${citation.kind === 'image' ? '画面' : '字幕'}`}</button>
+            return <button type="button" key={`${citation.recordId}-${citation.sourceIndex ?? index}`} title={`查看 ${record.title}`} onClick={() => onRevealRecord(citation.recordId, citation.atSeconds)}><span aria-hidden="true">{citation.label ?? (citation.sourceIndex ? `[${citation.sourceIndex}]` : '↗')}</span>{citation.atSeconds == null ? record.site : `${formatElapsed(citation.atSeconds)} ${citation.kind === 'image' ? '画面' : '字幕'}`}</button>
           })}</div></div>}
           {message.id === latestAgentId && suggestingMessageId === message.id && <p className="chat-suggestion-status" role="status">正在准备下一步建议…</p>}
           {message.id === latestAgentId && suggestionErrorId === message.id && <p className="chat-suggestion-status">本轮建议暂未生成，回答不受影响。</p>}
@@ -229,10 +236,11 @@ export function ChatPanel({ records, pendingChoice = null, sessionId, referenced
         <small className="message-reference-note">仅引用所选消息的文字。Agent 回答会标明来源于对话，不代表已核实的外部事实。</small></div>}
       </details>}
       <textarea id="agent-draft" ref={draftRef} value={draft} readOnly={sending} onChange={event => { setDraft(event.target.value); setContextPreview(null); setContextPreviewOpen(false) }} onKeyDown={event => { if (event.ctrlKey && event.key === 'Enter') { event.preventDefault(); void send() } }} placeholder="提问，或输入「截取 01:20 的画面」" />
+      {deepEligible && <label className="deep-mode-toggle"><input type="checkbox" checked={deepMode} disabled={sending} onChange={event => { setDeepMode(event.target.checked); setContextPreview(null); setContextPreviewOpen(false) }} /><span>深度模式</span><small>顺序读这条视频的字幕，最多 32 批或 120 秒；可能增加 API 用量</small></label>}
       {contextPreviewError && <p className="chat-error" role="alert">{contextPreviewError}</p>}
       {contextPreviewOpen && contextPreview && <div className="context-inspector" aria-label="本轮上下文预览">
         <div className="context-inspector-head"><strong>本轮上下文 / 发送前预览</strong><span>{contextPreview.textChars.toLocaleString()} / {contextPreview.limitChars.toLocaleString()} 字符{contextPreview.reservedChars > 0 ? ` · 预留 ${contextPreview.reservedChars.toLocaleString()}` : ''}</span></div>
-        <p>参考资料 {contextPreview.referencedRecordCount} 条 · 对话消息 {contextPreview.referencedMessageCount} 条 · 实际片段 {contextPreview.sources.length} / 候选 {contextPreview.candidateChunkCount}{contextPreview.imageAttached ? ' · 附带图片' : ''}</p>
+        <p>参考资料 {contextPreview.referencedRecordCount} 条 · 对话消息 {contextPreview.referencedMessageCount} 条 · {activeDeepMode ? `字幕约 ${contextPreview.candidateChunkCount} 批 · 待逐批读取` : contextPreview.explorationMode ? `目录候选 ${contextPreview.candidateChunkCount} 段 · 正文待工具读取` : `实际片段 ${contextPreview.sources.length} / 候选 ${contextPreview.candidateChunkCount}`}{contextPreview.imageAttached ? ' · 附带图片' : ''}</p>
         {(contextPreview.omittedHistoryCount > 0 || contextPreview.shortenedHistoryCount > 0 || contextPreview.shortenedSourceCount > 0) && <p>较早消息未纳入 {contextPreview.omittedHistoryCount} 条 · 缩短历史 {contextPreview.shortenedHistoryCount} 条 · 缩短片段 {contextPreview.shortenedSourceCount} 条</p>}
         <p>字符上限用于控制文本长度，不等于模型的 token 数；图片另计。</p>
         <details><summary>人格与回答规则</summary><pre>{contextPreview.systemText}</pre></details>
@@ -240,10 +248,10 @@ export function ChatPanel({ records, pendingChoice = null, sessionId, referenced
         <details><summary>项目记忆 · {contextPreview.projectMemory.length} 条</summary>{contextPreview.projectMemory.map(item => <p key={item.id}>{item.content}（用户确认于 {item.confirmedAt}）</p>)}</details>
         <details><summary>会话计划</summary><pre>目标：{contextPreview.workingContext.goal}\n已完成：{contextPreview.workingContext.completed}\n下一步：{contextPreview.workingContext.nextStep}</pre></details>
         <details><summary>较早对话摘要</summary><pre>{contextPreview.compactedSummary || '无'}</pre></details>
-        <details open><summary>资料片段 · {contextPreview.sources.length} 条</summary>{contextPreview.sources.map(source => <div className="context-preview-source" key={source.index}><strong>[{source.index}] {source.title}{source.atSeconds == null ? '' : ` / ${formatElapsed(source.atSeconds)}`}{source.visual ? ' · 图片' : ''}</strong><small>捕获时间：{source.capturedAt || '未知'} · 来源：{source.sourceUrl || '未记录'}</small><pre>{source.text}</pre></div>)}</details>
+        {contextPreview.explorationMode ? <details open><summary>{activeDeepMode ? '深度模式 · 字幕待逐批读取' : '资料目录 · 正文待读取'}</summary><pre>{contextPreview.directoryText}</pre></details> : <details open><summary>资料片段 · {contextPreview.sources.length} 条</summary>{contextPreview.sources.map(source => <div className="context-preview-source" key={source.index}><strong>{source.label} {source.title}{source.atSeconds == null ? '' : ` / ${formatElapsed(source.atSeconds)}`}{source.visual ? ' · 图片' : ''}{source.selectionReason === 'coverage' ? ' · 覆盖式选取' : ''}</strong><small>捕获时间：{source.capturedAt || '未知'} · 来源：{source.sourceUrl || '未记录'}</small><pre>{source.text}</pre></div>)}</details>}
       </div>}
       {error && <p className="chat-error" role="alert">{error}</p>}
-      <div className="composer-foot"><span>{attachedFrame ? '图片已加入本次提问' : selectedMessages.length > 0 ? `${selectedMessages.length} 条对话消息已选中` : referencedRecords.length === 0 ? hasBackground ? '可依据记忆和会话计划提问' : '请先添加资料或选择消息' : `${referencedRecords.length} 条资料已选中`}</span><div><HudButton type="button" onClick={onShowHistory}>＋ 添加参考</HudButton>{onSummarize && <HudButton type="button" disabled={!agentAvailable || sending || referencedRecords.length === 0} onClick={onSummarize}>总结</HudButton>}{!agentAvailable && onOpenAgentSetup && <HudButton type="button" onClick={onOpenAgentSetup}>配置 Agent</HudButton>}<HudButton type="button" variant="primary" disabled={!canSend || sending || !draft.trim() || !hasReference || (isCaptureCommand(draft) && referencedRecords.length === 0)} onClick={() => { void send() }}>{sending ? isCaptureCommand(draft) ? '截取中' : '生成中' : <><span className="mono-send-plane"><PaperPlaneIcon /></span>发送<span className="hud-send-arrow"> →</span></>}</HudButton></div></div>
+      <div className="composer-foot"><span>{attachedFrame ? '图片已加入本次提问' : selectedMessages.length > 0 ? `${selectedMessages.length} 条对话消息已选中` : referencedRecords.length === 0 ? hasBackground ? '可依据记忆和会话计划提问' : '请先添加资料或选择消息' : `${referencedRecords.length} 条资料已选中`}</span><div><HudButton type="button" onClick={onShowHistory}>＋ 添加参考</HudButton>{onSummarize && <HudButton type="button" disabled={!agentAvailable || sending || referencedRecords.length === 0} onClick={() => onSummarize?.(activeDeepMode)}>总结</HudButton>}{!agentAvailable && onOpenAgentSetup && <HudButton type="button" onClick={onOpenAgentSetup}>配置 Agent</HudButton>}<HudButton type="button" variant="primary" disabled={!canSend || sending || !draft.trim() || !hasReference || (isCaptureCommand(draft) && referencedRecords.length === 0)} onClick={() => { void send() }}>{sending ? isCaptureCommand(draft) ? '截取中' : '生成中' : <><span className="mono-send-plane"><PaperPlaneIcon /></span>发送<span className="hud-send-arrow"> →</span></>}</HudButton></div></div>
     </div>
   </section>
 }

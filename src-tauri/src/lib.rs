@@ -1,7 +1,10 @@
 mod bridge;
 mod agent;
 mod context;
+mod deep_video;
 mod read_tools;
+#[cfg(test)]
+mod retrieval_eval;
 mod db;
 mod process_status;
 mod secret;
@@ -24,7 +27,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![storage::list_records, storage::list_capture_jobs, storage::dismiss_capture_job, storage::query_record_page, storage::get_record, storage::query_record_segments, storage::get_bridge_status,
             storyboard::analyze_video_storyboard, storyboard::get_storyboard_image, storyboard::open_video_at,
-            agent::get_agent_status, agent::save_agent_config, agent::save_explore_references, agent::test_agent_tools, agent::list_chat_messages, agent::get_chat_state,
+            agent::get_agent_status, agent::save_agent_config, agent::save_explore_references, agent::save_context_tier, agent::test_agent_tools, agent::list_chat_messages, agent::get_chat_state,
             agent::create_chat_session, agent::switch_chat_session, agent::rename_chat_session,
             agent::delete_chat_session, agent::set_chat_references, agent::save_working_context, agent::confirm_project_memory, agent::revoke_project_memory, agent::compact_chat_context, agent::preview_agent_context, agent::ask_agent,
             agent::get_persona, agent::save_persona, agent::get_default_persona, agent::reload_persona,

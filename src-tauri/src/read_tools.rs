@@ -12,7 +12,8 @@ impl ReadIndex {
         let allowed: HashSet<&str> = referenced_ids.iter().map(String::as_str).collect();
         let mut chunks = Vec::new();
         for record in records.iter().filter(|record| allowed.contains(record.id.as_str())
-            && record.status == ProcessStatus::Ready && !record.content_text.is_empty()) {
+            && record.status == ProcessStatus::Ready
+            && (!record.content_text.is_empty() || record.transcript.as_ref().is_some_and(|cues| !cues.is_empty()))) {
             for (index, chunk) in context::chunks(record).into_iter().enumerate() {
                 if chunks.len() == MAX_INDEX_CHUNKS { return Self { chunks }; }
                 chunks.push((format!("{}:{index}", record.id), chunk));
@@ -23,21 +24,56 @@ impl ReadIndex {
 
     pub fn is_empty(&self) -> bool { self.chunks.is_empty() }
 
+    pub fn len(&self) -> usize { self.chunks.len() }
+
+    pub fn directory(&self, records: &[KnowledgeRecord], referenced_ids: &[String], max_chars: usize) -> String {
+        let mut text = String::from("本轮已选资料目录（预览不是可引用原文）：\n");
+        let chosen = referenced_ids.iter().filter_map(|id| records.iter().find(|record| &record.id == id)).collect::<Vec<_>>();
+        let short = |value: &str, limit: usize| {
+            if value.chars().count() <= limit { value.to_string() }
+            else { format!("{}…", value.chars().take(limit.saturating_sub(1)).collect::<String>()) }
+        };
+        for record in &chosen {
+            let range = record.transcript.as_ref().and_then(|cues| Some((cues.first()?.at_seconds, cues.last()?.at_seconds)))
+                .map(|(start, end)| format!("；字幕范围 {:02}:{:02}–{:02}:{:02}", start / 60, start % 60, end / 60, end % 60)).unwrap_or_default();
+            let available = record.status == ProcessStatus::Ready && self.chunks.iter().any(|(_, chunk)| chunk.record_id == record.id);
+            let line = format!("- 资料 ID={}；标题={}；类型={}；网址={}{}；状态={}\n", short(&record.id, 48),
+                short(&record.title, 60), short(&record.record_type, 12), short(&record.source_url, 90), range,
+                if available { "可读取" } else { "不可读取" });
+            if text.chars().count() + line.chars().count() + 180 > max_chars { break; }
+            text.push_str(&line);
+        }
+        let mut listed = 0;
+        for round in 0..3 {
+            for record in &chosen {
+                let group = self.chunks.iter().filter(|(_, chunk)| chunk.record_id == record.id).collect::<Vec<_>>();
+                let Some((id, chunk)) = group.get(round).copied() else { continue; };
+                let preview = short(&chunk.search_text.replace('\n', " "), 80);
+                let line = format!("  chunk_id={}；预览={}\n", id, preview);
+                if text.chars().count() + line.chars().count() + 180 > max_chars { break; }
+                text.push_str(&line);
+                listed += 1;
+            }
+        }
+        let omitted = self.chunks.len().saturating_sub(listed);
+        if omitted > 0 { text.push_str(&format!("另有 {omitted} 个片段未列在目录中，可用 search_references 定位。\n")); }
+        text.push_str("正文以 read_reference 返回为准；回答编号只使用其返回的 source_index。目录预览不能作为事实引用。");
+        text
+    }
+
     pub fn search(&self, query: &str) -> Value {
         let query = query.trim();
         if query.is_empty() || query.chars().count() > 200 {
             return json!({"error":"检索词需为 1–200 字"});
         }
-        let terms = context::terms(query);
-        let mut ranked = self.chunks.iter().filter_map(|(id, chunk)| {
-            let score = context::terms(&chunk.text).intersection(&terms).count()
-                + context::terms(&chunk.title).intersection(&terms).count() * 2;
+        let scores = context::score_chunks(query, &self.chunks.iter().map(|(_, chunk)| chunk).collect::<Vec<_>>());
+        let mut ranked = self.chunks.iter().zip(scores).filter_map(|((id, chunk), score)| {
             (score > 0).then_some((score, id, chunk))
         }).collect::<Vec<_>>();
         ranked.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(b.1)));
         let matches = ranked.into_iter().take(MAX_SEARCH_RESULTS).map(|(score, id, chunk)| json!({
             "chunk_id": id, "title": chunk.title, "at_seconds": chunk.at_seconds,
-            "snippet": chunk.text.chars().take(180).collect::<String>(), "score": score
+            "snippet": chunk.search_text.chars().take(160).collect::<String>(), "score": score
         })).collect::<Vec<_>>();
         json!({"matches": matches, "scope": "本轮已选且可用的资料"})
     }
@@ -85,5 +121,33 @@ mod tests {
         assert_eq!(index.read("selected:0").unwrap().record_id, "selected");
         assert!(index.read("other:0").is_err());
         assert!(index.read("failed:0").is_err());
+    }
+
+    #[test]
+    fn video_search_points_to_the_exact_matching_cue() {
+        let cues = (0..20).map(|index| json!({"atSeconds":index * 17 + 10,
+            "text":if index == 13 { "蓝色按钮按下后保存草稿" } else { "普通字幕" }})).collect::<Vec<_>>();
+        let video: KnowledgeRecord = serde_json::from_value(json!({"id":"video","type":"video","title":"演示",
+            "site":"example.com","savedAt":"1","status":"ready","sourceUrl":"https://example.com",
+            "contentText":"字幕已提取","excerpt":[],"transcript":cues})).unwrap();
+        let index = ReadIndex::new(&[video], &["video".into()]);
+        let result = index.search("蓝色按钮保存草稿");
+        assert_eq!(result["matches"][0]["chunk_id"], "video:13");
+        assert_eq!(result["matches"][0]["at_seconds"], 231);
+        assert_eq!(index.read("video:13").unwrap().at_seconds, Some(231));
+    }
+
+    #[test]
+    fn directory_is_bounded_and_does_not_expose_unread_body() {
+        let record = record("selected", ProcessStatus::Ready,
+            &format!("{}末尾只能读取工具看到的事实。", "普通资料说明。".repeat(300)));
+        let ids = vec![record.id.clone()];
+        let index = ReadIndex::new(&[record.clone()], &ids);
+        let directory = index.directory(&[record], &ids, 6_000);
+        assert!(directory.chars().count() <= 6_000);
+        assert!(directory.contains("chunk_id=selected:0"));
+        assert!(!directory.contains("末尾只能读取工具看到的事实"));
+        assert!(directory.contains("read_reference"));
+        assert!(directory.contains("source_index"));
     }
 }

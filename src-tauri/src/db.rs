@@ -81,7 +81,7 @@ pub(crate) fn open(path: &Path) -> Result<Connection, String> {
             before_json TEXT NOT NULL, after_json TEXT NOT NULL,
             mode TEXT NOT NULL, before_text TEXT NOT NULL, after_text TEXT NOT NULL,
             reason TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL,
-            applied_at TEXT NOT NULL DEFAULT ''
+            applied_at TEXT NOT NULL DEFAULT '', edits_json TEXT NOT NULL DEFAULT '[]'
         );
         CREATE INDEX IF NOT EXISTS idx_workflow_proposals_target ON workflow_proposals(target_id,created_at DESC);
         CREATE TABLE IF NOT EXISTS workflow_events (
@@ -90,6 +90,15 @@ pub(crate) fn open(path: &Path) -> Result<Connection, String> {
         );
         CREATE INDEX IF NOT EXISTS idx_workflow_events_target ON workflow_events(target_id,at DESC);")
         .map_err(|error| format!("数据库初始化失败：{error}"))?;
+    let has_edits = connection.prepare("PRAGMA table_info(workflow_proposals)")
+        .and_then(|mut query| query.query_map([], |row| row.get::<_, String>(1))
+            .and_then(|rows| rows.collect::<Result<Vec<_>, _>>()))
+        .map_err(|error| format!("操作建议结构检查失败：{error}"))?
+        .iter().any(|name| name == "edits_json");
+    if !has_edits {
+        connection.execute("ALTER TABLE workflow_proposals ADD COLUMN edits_json TEXT NOT NULL DEFAULT '[]'", [])
+            .map_err(|error| format!("操作建议结构升级失败：{error}"))?;
+    }
     Ok(connection)
 }
 
@@ -1017,7 +1026,7 @@ mod tests {
         let mut linked_chat = chat_store();
         linked_chat.sessions[0].referenced_ids.push(source.id.clone());
         linked_chat.sessions[0].messages[0].citations.push(crate::agent::ChatCitation {
-            record_id: source.id.clone(), at_seconds: None, source_index: Some(1), kind: None,
+            record_id: source.id.clone(), at_seconds: None, source_index: Some(1), label: None, kind: None,
         });
         write(&path, "records", &vec![source]).unwrap();
         write(&path, "notes", &vec![linked_note]).unwrap();
