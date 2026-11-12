@@ -57,8 +57,8 @@ export function WorkingSuggestionPanel({ sessionId, workingContext, messageCount
     finally { onBusyChange(false) }
   }
 
-  return <details className="working-flow"><summary>工作状态建议</summary>
-    <p>模型根据近期对话提出建议。逐项核对后确认，才会修改当前会话的工作状态。</p>
+  return <details className="working-flow"><summary>会话计划建议</summary>
+    <p>模型根据近期对话提出建议。逐项核对后确认，才会修改当前会话的计划。</p>
     <button type="button" disabled={sending || busy || !!visibleProposal || !agentAvailable || messageCount === 0 || !onSuggest}
       onClick={() => { void run(async () => { if (!onSuggest) return; setProposal(await onSuggest()); await refresh() }) }}>
       {busy ? '处理中' : '生成建议'}
@@ -66,14 +66,14 @@ export function WorkingSuggestionPanel({ sessionId, workingContext, messageCount
     {visibleProposal && <div className="working-suggestion">
       {fields.filter(field => visibleProposal.before[field.key] !== visibleProposal.after[field.key]).map(field =>
         <div className="working-diff" key={field.key}><strong>{field.label}</strong><small>原内容</small><pre>{visibleProposal.before[field.key] || '（空）'}</pre><small>建议改为</small><pre>{visibleProposal.after[field.key] || '（空）'}</pre></div>)}
-      {workingContext.updatedAt !== visibleProposal.before.updatedAt && <p>工作状态已变化，这条建议不能直接确认。</p>}
+      {workingContext.updatedAt !== visibleProposal.before.updatedAt && <p>会话计划已变化，这条建议不能直接确认。</p>}
       <button type="button" disabled={sending || busy || !onApply || workingContext.updatedAt !== visibleProposal.before.updatedAt}
-        onClick={() => { void run(async () => { await onApply?.(visibleProposal.id); setProposal(null); setNotice('已确认并更新工作状态。'); await refresh() }) }}>确认更新</button>
+        onClick={() => { void run(async () => { await onApply?.(visibleProposal.id); setProposal(null); setNotice('已确认并更新会话计划。'); await refresh() }) }}>确认更新</button>
       <button type="button" disabled={sending || busy || !onReject}
         onClick={() => { void run(async () => { await onReject?.(visibleProposal.id); setProposal(null); setNotice('已放弃建议。'); await refresh() }) }}>放弃建议</button>
     </div>}
     {undoable && <button type="button" disabled={sending || busy || !onUndo}
-      onClick={() => { void run(async () => { await onUndo?.(undoable); setNotice('已撤销这次工作状态修改。'); await refresh() }) }}>撤销上次确认的修改</button>}
+      onClick={() => { void run(async () => { await onUndo?.(undoable); setNotice('已撤销这次会话计划修改。'); await refresh() }) }}>撤销上次确认的修改</button>}
     <div className="working-history"><strong>最近操作</strong>{events.length === 0 ? <p>暂无记录</p> : events.map(event =>
       <p key={event.id}><time>{new Date(Number(event.at)).toLocaleString('zh-CN')}</time> · {event.detail}</p>)}</div>
     {notice && <p role="status">{notice}</p>}

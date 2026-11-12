@@ -7,12 +7,16 @@ export type ChatCitation = {
 
 export type ChatFrame = { imageId: string; recordId: string; atSeconds: number }
 
+export type ChatRun = { elapsedMs: number; changedFiles: string[] }
+export type ChatStreaming = { question: string; answer: string; startedAt: number; activity?: string; activities: string[] }
+
 export type ChatMessage = {
   id: string
   role: 'user' | 'agent'
   createdAt: string
   paragraphs: string[]
   toolSteps?: string[]
+  run?: ChatRun
   points?: string[]
   citations?: ChatCitation[]
   frame?: ChatFrame

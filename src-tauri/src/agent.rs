@@ -15,6 +15,14 @@ pub struct ChatFrame { pub image_id: String, pub record_id: String, pub at_secon
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ChatRun {
+    pub elapsed_ms: u64,
+    #[serde(default)]
+    pub changed_files: Vec<String>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ChatMessage {
     pub id: String,
     pub role: String,
@@ -26,6 +34,8 @@ pub struct ChatMessage {
     pub citations: Vec<ChatCitation>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub frame: Option<ChatFrame>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run: Option<ChatRun>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -933,6 +943,7 @@ pub async fn ask_agent(app: AppHandle, agent: State<'_, AgentState>, storage: St
         *busy = true;
     }
     let _guard = BusyGuard(&agent.busy);
+    let started_at = Instant::now();
     let request_session_id = agent.sessions.lock().map_err(|_| "会话暂不可用")?.active_id.clone();
     if let Some(parsed) = capture_time(question) {
         let seconds = parsed?;
@@ -956,12 +967,13 @@ pub async fn ask_agent(app: AppHandle, agent: State<'_, AgentState>, storage: St
             format!("{:02}:{:02}:{:02}", seconds / 3600, seconds / 60 % 60, seconds % 60)
         } else { format!("{:02}:{:02}", seconds / 60, seconds % 60) };
         let user = ChatMessage { id: format!("msg-{}", Uuid::new_v4()), role: "user".into(), created_at: now.clone(),
-            paragraphs: vec![question.into()], tool_steps: Vec::new(), citations: Vec::new(), frame: None };
+            paragraphs: vec![question.into()], tool_steps: Vec::new(), citations: Vec::new(), frame: None, run: None };
         let assistant = ChatMessage { id: format!("msg-{}", Uuid::new_v4()), role: "agent".into(), created_at: now.clone(),
             paragraphs: vec![format!("已截取《{}》在 {label} 的画面。", video.title)],
             tool_steps: Vec::new(),
             citations: vec![ChatCitation { record_id: video.id.clone(), at_seconds: Some(seconds), source_index: None, kind: Some("image".into()) }],
-            frame: Some(ChatFrame { image_id, record_id: video.id.clone(), at_seconds: seconds }) };
+            frame: Some(ChatFrame { image_id, record_id: video.id.clone(), at_seconds: seconds }),
+            run: Some(ChatRun { elapsed_ms: started_at.elapsed().as_millis().min(u64::MAX as u128) as u64, changed_files: Vec::new() }) };
         let saved = (|| {
             let mut store = agent.sessions.lock().map_err(|_| "会话暂不可用")?;
             let mut next = store.clone();
@@ -1093,8 +1105,9 @@ pub async fn ask_agent(app: AppHandle, agent: State<'_, AgentState>, storage: St
         return Err("模型回答没有有效资料编号，未保存；请重试或更换模型".into());
     }
     let now = now_millis()?;
-    let user = ChatMessage { id: format!("msg-{}", Uuid::new_v4()), role: "user".into(), created_at: now.to_string(), paragraphs: vec![question.into()], tool_steps: Vec::new(), citations: Vec::new(), frame: attachment.as_ref().map(|(frame, _)| frame.clone()) };
-    let assistant = ChatMessage { id: format!("msg-{}", Uuid::new_v4()), role: "agent".into(), created_at: now.to_string(), paragraphs: vec![answer.into()], tool_steps, citations, frame: None };
+    let user = ChatMessage { id: format!("msg-{}", Uuid::new_v4()), role: "user".into(), created_at: now.to_string(), paragraphs: vec![question.into()], tool_steps: Vec::new(), citations: Vec::new(), frame: attachment.as_ref().map(|(frame, _)| frame.clone()), run: None };
+    let assistant = ChatMessage { id: format!("msg-{}", Uuid::new_v4()), role: "agent".into(), created_at: now.to_string(), paragraphs: vec![answer.into()], tool_steps, citations, frame: None,
+        run: Some(ChatRun { elapsed_ms: started_at.elapsed().as_millis().min(u64::MAX as u128) as u64, changed_files: Vec::new() }) };
     {
         let mut store = agent.sessions.lock().map_err(|_| "会话暂不可用")?;
         let mut next = store.clone();
@@ -1120,11 +1133,11 @@ mod tests {
         let mut session = new_session().unwrap();
         for index in 0..15 {
             session.messages.push(ChatMessage { id: format!("msg-{index}"), role: "user".into(), created_at: "1".into(),
-                paragraphs: vec!["短消息".into()], tool_steps: vec![], citations: vec![], frame: None });
+                paragraphs: vec!["短消息".into()], tool_steps: vec![], citations: vec![], frame: None, run: None });
         }
         assert!(!should_auto_compact(&session));
         session.messages.push(ChatMessage { id: "msg-15".into(), role: "user".into(), created_at: "1".into(),
-            paragraphs: vec!["短消息".into()], tool_steps: vec![], citations: vec![], frame: None });
+            paragraphs: vec!["短消息".into()], tool_steps: vec![], citations: vec![], frame: None, run: None });
         assert!(should_auto_compact(&session));
         session.compacted_count = 8;
         assert!(!should_auto_compact(&session));
@@ -1137,7 +1150,7 @@ mod tests {
     #[test]
     fn selected_messages_are_scoped_to_current_session() {
         let mut session = new_session().unwrap();
-        session.messages.push(ChatMessage { id: "msg-1".into(), role: "user".into(), created_at: "1".into(), paragraphs: vec!["原话".into()], tool_steps: vec![], citations: vec![], frame: None });
+        session.messages.push(ChatMessage { id: "msg-1".into(), role: "user".into(), created_at: "1".into(), paragraphs: vec!["原话".into()], tool_steps: vec![], citations: vec![], frame: None, run: None });
         assert_eq!(selected_messages(&session, &["msg-1".into()]).unwrap().len(), 1);
         assert!(selected_messages(&session, &["msg-other-session".into()]).is_err());
         assert!(selected_messages(&session, &["msg-1".into(), "msg-1".into()]).is_err());
@@ -1170,7 +1183,7 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         let legacy = dir.join("chat.json");
         let sessions = dir.join("chat-sessions.json");
-        let old = ChatMessage { id: "msg-old".into(), role: "user".into(), created_at: "1".into(), paragraphs: vec!["旧对话问题".into()], tool_steps: vec![], citations: vec![], frame: None };
+        let old = ChatMessage { id: "msg-old".into(), role: "user".into(), created_at: "1".into(), paragraphs: vec!["旧对话问题".into()], tool_steps: vec![], citations: vec![], frame: None, run: None };
         fs::write(&legacy, serde_json::to_vec(&vec![old]).unwrap()).unwrap();
         let store = load_chat_store(&sessions, &legacy).unwrap();
         assert_eq!(store.sessions.len(), 1);
@@ -1195,7 +1208,7 @@ mod tests {
         let legacy = dir.join("chat.json");
         let database = dir.join(crate::db::FILE_NAME);
         let mut old = new_session().unwrap();
-        old.messages.push(ChatMessage { id: "kept".into(), role: "user".into(), created_at: "1".into(), paragraphs: vec!["旧问题".into()], tool_steps: vec![], citations: vec![], frame: None });
+        old.messages.push(ChatMessage { id: "kept".into(), role: "user".into(), created_at: "1".into(), paragraphs: vec!["旧问题".into()], tool_steps: vec![], citations: vec![], frame: None, run: None });
         let store = ChatStore { active_id: old.id.clone(), sessions: vec![old], project_memory: Vec::new() };
         fs::write(&sessions, serde_json::to_vec(&store).unwrap()).unwrap();
         let loaded = load_chat_store(&database, &legacy).unwrap();
@@ -1211,9 +1224,9 @@ mod tests {
     #[test]
     fn recent_context_uses_only_active_session() {
         let mut first = new_session().unwrap();
-        first.messages.push(ChatMessage { id: "first".into(), role: "user".into(), created_at: "1".into(), paragraphs: vec!["只属于会话甲".into()], tool_steps: vec![], citations: vec![], frame: None });
+        first.messages.push(ChatMessage { id: "first".into(), role: "user".into(), created_at: "1".into(), paragraphs: vec!["只属于会话甲".into()], tool_steps: vec![], citations: vec![], frame: None, run: None });
         let mut second = new_session().unwrap();
-        second.messages.push(ChatMessage { id: "second".into(), role: "user".into(), created_at: "2".into(), paragraphs: vec!["只属于会话乙".into()], tool_steps: vec![], citations: vec![], frame: None });
+        second.messages.push(ChatMessage { id: "second".into(), role: "user".into(), created_at: "2".into(), paragraphs: vec!["只属于会话乙".into()], tool_steps: vec![], citations: vec![], frame: None, run: None });
         let store = ChatStore { active_id: second.id.clone(), sessions: vec![first, second], project_memory: Vec::new() };
         let active = store.sessions.iter().find(|item| item.id == store.active_id).unwrap();
         let context = context::build("人格", "问题", &active.messages, &[], &[], None, &[], &WorkingContext::default(), "").user_text;

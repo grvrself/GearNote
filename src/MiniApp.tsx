@@ -3,7 +3,7 @@ import { emitTo, listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { useEffect, useRef, useState } from 'react'
 import { askAgent, getAgentStatus, getChatState, setChatReferences, type AgentStatus } from './agent'
-import type { ChatMessage } from './chat-data'
+import type { ChatMessage, ChatStreaming } from './chat-data'
 import { ChatPanel } from './components/ChatPanel'
 import { recordFixtures } from './data'
 import type { KnowledgeRecord } from './data'
@@ -23,7 +23,7 @@ export default function MiniApp() {
   const [activeSessionId, setActiveSessionId] = useState('')
   const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null)
   const [sending, setSending] = useState(false)
-  const [streaming, setStreaming] = useState<{ question: string; answer: string; activity?: string } | null>(null)
+  const [streaming, setStreaming] = useState<ChatStreaming | null>(null)
   const sendingRef = useRef(false)
   const desktop = isTauri()
   const records = desktop ? savedRecords : recordFixtures.map(record => ({ ...record, demo: true }))
@@ -45,11 +45,11 @@ export default function MiniApp() {
     if (sendingRef.current) return false
     sendingRef.current = true
     setSending(true)
-    setStreaming({ question, answer: '' })
+    setStreaming({ question, answer: '', startedAt: Date.now(), activities: [] })
     setError('')
     try {
       await askAgent(question, referencedIds, delta => setStreaming(current => current && { ...current, answer: current.answer + delta }), frameId,
-        activity => setStreaming(current => current && { ...current, activity }), messageIds)
+        activity => setStreaming(current => current && { ...current, activity, activities: [...current.activities, activity] }), messageIds)
       const chat = await getChatState()
       setActiveSessionId(chat.activeId)
       setMessages(chat.messages)

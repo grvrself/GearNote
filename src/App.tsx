@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { isTauri } from '@tauri-apps/api/core'
 import { askAgent, compactChatContext, suggestWorkingContext, applyWorkingSuggestion, undoWorkingSuggestion, rejectWorkingSuggestion, getPendingWorkingSuggestion, listWorkingWorkflowEvents, confirmProjectMemory, revokeProjectMemory, saveWorkingContext, createChatSession, deleteChatSession, getAgentStatus, getChatState, previewAgentContext, setChatReferences, switchChatSession, type AgentStatus, type ChatSessionSummary, type ChatState } from './agent'
-import type { ChatMessage } from './chat-data'
+import type { ChatMessage, ChatStreaming } from './chat-data'
 import { AgentSetup } from './components/AgentSetup'
 import { PersonaSetup } from './components/PersonaSetup'
 import { ThemeSettings } from './components/ThemeSettings'
@@ -53,7 +53,7 @@ export default function App() {
   const [compactedSummary, setCompactedSummary] = useState('')
   const [compactedCount, setCompactedCount] = useState(0)
   const [sending, setSending] = useState(false)
-  const [streaming, setStreaming] = useState<{ question: string; answer: string; activity?: string } | null>(null)
+  const [streaming, setStreaming] = useState<ChatStreaming | null>(null)
   const [agentError, setAgentError] = useState('')
   const searchRef = useRef<HTMLInputElement>(null)
   const sendingRef = useRef(false)
@@ -142,11 +142,11 @@ export default function App() {
     if (sendingRef.current) return false
     sendingRef.current = true
     setSending(true)
-    setStreaming({ question, answer: '' })
+    setStreaming({ question, answer: '', startedAt: Date.now(), activities: [] })
     setAgentError('')
     try {
       await askAgent(question, referencedIds, delta => setStreaming(current => current && { ...current, answer: current.answer + delta }), frameId,
-        activity => setStreaming(current => current && { ...current, activity }), messageIds)
+        activity => setStreaming(current => current && { ...current, activity, activities: [...current.activities, activity] }), messageIds)
       applyChatState(await getChatState())
       setStreaming(null)
       return true

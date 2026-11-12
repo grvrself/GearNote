@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { ChatFrame, ChatMessage } from '../chat-data'
+import type { ChatFrame, ChatMessage, ChatStreaming } from '../chat-data'
 import type { KnowledgeRecord } from '../data'
 import type { ContextPreview, ProjectMemory, WorkingContext, WorkingSuggestion, WorkingWorkflowEvent } from '../agent'
 import { isCaptureCommand } from '../capture-command'
@@ -31,7 +31,7 @@ type Props = {
   historyOpen: boolean
   agentAvailable: boolean
   sending?: boolean
-  streaming?: { question: string; answer: string; activity?: string } | null
+  streaming?: ChatStreaming | null
   error?: string
   onSend?: (question: string, frameId?: string, messageIds?: string[]) => Promise<boolean>
   onPreviewContext?: (question: string, frameId?: string, messageIds?: string[]) => Promise<ContextPreview>
@@ -55,6 +55,36 @@ function formatElapsed(seconds: number) {
   return hours > 0
     ? `${String(hours).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}:${String(remainder).padStart(2, '0')}`
     : `${String(minutes).padStart(2, '0')}:${String(remainder).padStart(2, '0')}`
+}
+
+function formatRunElapsed(milliseconds: number) {
+  if (milliseconds < 1000) return `${milliseconds}ms`
+  const seconds = Math.floor(milliseconds / 1000)
+  return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`
+}
+
+function MessageRun({ message }: { message: ChatMessage }) {
+  if (!message.run && !message.toolSteps?.length) return null
+  const files = message.run?.changedFiles ?? []
+  return <details className="message-run">
+    <summary>{message.run ? <>用时 {formatRunElapsed(message.run.elapsedMs)} <span>· {files.length ? `修改 ${files.length} 个项目文件` : '未修改项目文件'}</span></> : `资料探索 · ${message.toolSteps?.length} 步`}</summary>
+    {Boolean(message.toolSteps?.length) && <ol className="message-run-steps">{message.toolSteps?.map((step, index) => <li key={index}>{step}</li>)}</ol>}
+    {message.frame && <p>已截取视频画面。</p>}
+    {message.run && (files.length ? <div className="message-run-files"><strong>修改的文件</strong><ul>{files.map(file => <li key={file}>{file}</li>)}</ul></div> : <p>本轮没有修改项目文件。</p>)}
+  </details>
+}
+
+function StreamingRun({ streaming }: { streaming: ChatStreaming }) {
+  const [now, setNow] = useState(Date.now())
+  useEffect(() => {
+    setNow(Date.now())
+    const timer = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(timer)
+  }, [streaming.startedAt])
+  return <div className="message-run-live">
+    <span>已用时 {formatRunElapsed(Math.max(0, now - streaming.startedAt))}</span>
+    {streaming.activities.length > 0 && <ol className="message-run-steps">{streaming.activities.map((step, index) => <li key={index}>{step}</li>)}</ol>}
+  </div>
 }
 
 export function ChatPanel({ records, sessionId, referencedIds, workingContext = { goal: '', completed: '', nextStep: '', updatedAt: '' }, projectMemory = [], compactedSummary = '', compactedCount = 0, onCompactContext, onSuggestWorkingContext, onApplyWorkingSuggestion, onUndoWorkingSuggestion, onRejectWorkingSuggestion, onGetPendingWorkingSuggestion, onListWorkingWorkflowEvents, onSaveWorkingContext = async () => {}, onConfirmMemory = async () => {}, onRevokeMemory = async () => {}, historyOpen, agentAvailable, sending = false, streaming = null, error = '', onSend, onPreviewContext, onOpenAgentSetup, onSummarize, onRemoveReference, onRevealRecord, onToggleHistory, onShowHistory, onCreateNoteDraft, messages = [], compact = false }: Props) {
@@ -153,9 +183,9 @@ export function ChatPanel({ records, sessionId, referencedIds, workingContext = 
       {messages.map(message => <li className="message-row" data-role={message.role} key={message.id}>
         <ChamferCard className={`message-card${selectedMessageIds.includes(message.id) ? ' message-card-referenced' : ''}`} id={message.id}>
           <div className="message-meta"><span>{message.role === 'agent' ? 'GearNote' : '你'}</span><time dateTime={/^\d+$/.test(message.createdAt) ? new Date(Number(message.createdAt)).toISOString() : message.createdAt}>{timeFormatter.format(new Date(/^\d+$/.test(message.createdAt) ? Number(message.createdAt) : message.createdAt))}</time></div>
+          {message.role === 'agent' && <MessageRun message={message} />}
           <div className="message-reference-control"><button type="button" aria-pressed={selectedMessageIds.includes(message.id)} disabled={sending || (!selectedMessageIds.includes(message.id) && selectedMessageIds.length >= 4)} title={selectedMessageIds.includes(message.id) ? '移出本轮参考' : '将这条消息加入本轮参考'} onClick={() => toggleMessageReference(message.id)}>{selectedMessageIds.includes(message.id) ? '✓ 已选为参考 · 移除' : '＋ 选此消息为参考'}</button></div>
           <div className="message-body">{message.paragraphs.map((paragraph, index) => <p key={index}>{paragraph}</p>)}{message.points && <ol>{message.points.map(point => <li key={point}>{point}</li>)}</ol>}{message.frame && <CapturedFrame frame={message.frame} title={records.find(record => record.id === message.frame?.recordId)?.title ?? '视频'} selected={attachedFrame?.imageId === message.frame.imageId} onAttach={() => { setAttachedFrame(message.frame ?? null); setContextPreview(null); setContextPreviewOpen(false); draftRef.current?.focus() }} />}</div>
-          {Boolean(message.toolSteps?.length) && <details className="tool-steps"><summary>资料探索 · {message.toolSteps?.length} 步</summary><ol>{message.toolSteps?.map((step, index) => <li key={index}>{step}</li>)}</ol></details>}
           {message.citations && <div className="message-citations"><span>引用</span><div>{message.citations.map((citation, index) => {
             const record = records.find(item => item.id === citation.recordId)
             if (citation.kind === 'chat' || citation.recordId.startsWith('chat:')) {
@@ -170,7 +200,7 @@ export function ChatPanel({ records, sessionId, referencedIds, workingContext = 
       </li>)}
       {streaming && <>
         <li className="message-row" data-role="user" data-streaming="true"><ChamferCard className="message-card"><div className="message-meta"><span>你</span><span>刚刚</span></div><div className="message-body"><p>{streaming.question}</p></div></ChamferCard></li>
-        <li className="message-row" data-role="agent" data-streaming="true"><ChamferCard className="message-card"><div className="message-meta"><span>GearNote</span><span role="status">{isCaptureCommand(streaming.question) ? '正在截取' : streaming.answer ? '正在回答' : streaming.activity || '等待回复'}</span></div><div className="message-body"><p>{isCaptureCommand(streaming.question) ? '正在从视频取帧…' : streaming.answer || streaming.activity || '等待模型正文…'}</p></div>{!isCaptureCommand(streaming.question) && !streaming.answer && <div className="mono-thinking-gear" aria-hidden="true"><GearIcon kind="center" size={20} /></div>}</ChamferCard></li>
+        <li className="message-row" data-role="agent" data-streaming="true"><ChamferCard className="message-card"><div className="message-meta"><span>GearNote</span><span role="status">{isCaptureCommand(streaming.question) ? '正在截取' : streaming.answer ? '正在回答' : streaming.activity || '等待回复'}</span></div><StreamingRun streaming={streaming} /><div className="message-body"><p>{isCaptureCommand(streaming.question) ? '正在从视频取帧…' : streaming.answer || streaming.activity || '等待模型正文…'}</p></div>{!isCaptureCommand(streaming.question) && !streaming.answer && <div className="mono-thinking-gear" aria-hidden="true"><GearIcon kind="center" size={20} /></div>}</ChamferCard></li>
       </>}
     </ol>
 
@@ -183,7 +213,7 @@ export function ChatPanel({ records, sessionId, referencedIds, workingContext = 
         <div className="memory-controls">
         <details><summary>对话压缩 · 自动开启 · 已覆盖 {compactedCount} 条</summary><p>发送新问题前，较早对话积累较多时会自动压缩，并调用当前配置的模型。原消息仍保存在会话中；若自动压缩失败，本轮提问会继续使用近期对话。</p>{compactedSummary && <pre>{compactedSummary}</pre>}<button type="button" disabled={sending || contextBusy || !agentAvailable || messages.length - compactedCount <= 8 || !onCompactContext} onClick={() => { setMemoryError(''); setContextBusy(true); void onCompactContext?.().catch(cause => setMemoryError(String(cause))).finally(() => setContextBusy(false)) }}>{contextBusy ? '处理中' : '立即压缩较早对话'}</button></details>
         <WorkingSuggestionPanel sessionId={sessionId} workingContext={workingContext} messageCount={messages.length} agentAvailable={agentAvailable} sending={sending} busy={contextBusy} onBusyChange={setContextBusy} onSuggest={onSuggestWorkingContext} onApply={onApplyWorkingSuggestion} onUndo={onUndoWorkingSuggestion} onReject={onRejectWorkingSuggestion} onGetPending={onGetPendingWorkingSuggestion} onListEvents={onListWorkingWorkflowEvents} />
-        <details><summary>当前会话工作状态</summary><label>目标<textarea value={goal} maxLength={1200} onChange={event => setGoal(event.target.value)} /></label><label>已完成<textarea value={completed} maxLength={1200} onChange={event => setCompleted(event.target.value)} /></label><label>下一步<textarea value={nextStep} maxLength={1200} onChange={event => setNextStep(event.target.value)} /></label><button type="button" disabled={sending} onClick={() => { setMemoryError(''); void onSaveWorkingContext(goal, completed, nextStep).catch(cause => setMemoryError(String(cause))) }}>保存工作状态</button></details>
+        <details><summary>会话计划（目标 / 已完成 / 下一步）</summary><label>目标<textarea value={goal} maxLength={1200} onChange={event => setGoal(event.target.value)} /></label><label>已完成<textarea value={completed} maxLength={1200} onChange={event => setCompleted(event.target.value)} /></label><label>下一步<textarea value={nextStep} maxLength={1200} onChange={event => setNextStep(event.target.value)} /></label><button type="button" disabled={sending} onClick={() => { setMemoryError(''); void onSaveWorkingContext(goal, completed, nextStep).catch(cause => setMemoryError(String(cause))) }}>保存会话计划</button></details>
         <details><summary>默认项目记忆 · {projectMemory.length} 条</summary><p>只有点击“确认保存”才会作为已确认记忆供其他会话使用。</p><textarea value={memoryDraft} maxLength={1000} placeholder="例如：GearNote 使用 Tauri 2，前端采用 React + TypeScript。" onChange={event => setMemoryDraft(event.target.value)} /><input value={memorySource} maxLength={500} placeholder="来源或说明（可选）" onChange={event => setMemorySource(event.target.value)} /><label>到期日（可选）<input type="date" value={memoryExpiry} onChange={event => setMemoryExpiry(event.target.value)} /></label><button type="button" disabled={!memoryDraft.trim() || sending} onClick={() => { setMemoryError(''); const expiresAt = memoryExpiry ? new Date(`${memoryExpiry}T23:59:59.999`).getTime().toString() : undefined; void onConfirmMemory(memoryDraft, memorySource, expiresAt).then(() => { setMemoryDraft(''); setMemorySource(''); setMemoryExpiry('') }).catch(cause => setMemoryError(String(cause))) }}>确认保存记忆</button>{projectMemory.map(item => <p key={item.id}><span>{item.content} · 用户确认于 {new Date(Number(item.confirmedAt)).toLocaleString('zh-CN')}{item.expiresAt ? ` · 到期 ${new Date(Number(item.expiresAt)).toLocaleDateString('zh-CN')}${Number(item.expiresAt) <= Date.now() ? '（已过期）' : ''}` : ''}</span><button type="button" disabled={sending} onClick={() => { setMemoryError(''); void onRevokeMemory(item.id).catch(cause => setMemoryError(String(cause))) }}>撤销</button></p>)}</details>
         </div>
         {memoryError && <p className="chat-error" role="alert">{memoryError}</p>}
@@ -212,12 +242,12 @@ export function ChatPanel({ records, sessionId, referencedIds, workingContext = 
         <details><summary>人格与回答规则</summary><pre>{contextPreview.systemText}</pre></details>
         <details><summary>近期对话 · {contextPreview.history.length} 条</summary>{contextPreview.history.length === 0 ? <p>无近期对话</p> : contextPreview.history.map((item, index) => <p key={index}><strong>{item.role}</strong>（{item.createdAt}）：{item.text}</p>)}</details>
         <details><summary>项目记忆 · {contextPreview.projectMemory.length} 条</summary>{contextPreview.projectMemory.map(item => <p key={item.id}>{item.content}（用户确认于 {item.confirmedAt}）</p>)}</details>
-        <details><summary>会话工作状态</summary><pre>目标：{contextPreview.workingContext.goal}\n已完成：{contextPreview.workingContext.completed}\n下一步：{contextPreview.workingContext.nextStep}</pre></details>
+        <details><summary>会话计划</summary><pre>目标：{contextPreview.workingContext.goal}\n已完成：{contextPreview.workingContext.completed}\n下一步：{contextPreview.workingContext.nextStep}</pre></details>
         <details><summary>较早对话摘要</summary><pre>{contextPreview.compactedSummary || '无'}</pre></details>
         <details open><summary>资料片段 · {contextPreview.sources.length} 条</summary>{contextPreview.sources.map(source => <div className="context-preview-source" key={source.index}><strong>[{source.index}] {source.title}{source.atSeconds == null ? '' : ` / ${formatElapsed(source.atSeconds)}`}{source.visual ? ' · 图片' : ''}</strong><small>捕获时间：{source.capturedAt || '未知'} · 来源：{source.sourceUrl || '未记录'}</small><pre>{source.text}</pre></div>)}</details>
       </div>}
       {error && <p className="chat-error" role="alert">{error}</p>}
-      <div className="composer-foot"><span>{attachedFrame ? '图片已加入本次提问' : selectedMessages.length > 0 ? `${selectedMessages.length} 条对话消息已选中` : referencedRecords.length === 0 ? hasBackground ? '可依据记忆和工作状态提问' : '请先添加资料或选择消息' : `${referencedRecords.length} 条资料已选中`}</span><div><HudButton type="button" onClick={onShowHistory}>＋ 添加参考</HudButton>{onSummarize && <HudButton type="button" disabled={!agentAvailable || sending || referencedRecords.length === 0} onClick={onSummarize}>总结</HudButton>}{!agentAvailable && onOpenAgentSetup && <HudButton type="button" onClick={onOpenAgentSetup}>配置 Agent</HudButton>}<HudButton type="button" variant="primary" disabled={!canSend || sending || !draft.trim() || !hasReference || (isCaptureCommand(draft) && referencedRecords.length === 0)} onClick={() => { void send() }}>{sending ? isCaptureCommand(draft) ? '截取中' : '生成中' : <><span className="mono-send-plane"><PaperPlaneIcon /></span>发送<span className="hud-send-arrow"> →</span></>}</HudButton></div></div>
+      <div className="composer-foot"><span>{attachedFrame ? '图片已加入本次提问' : selectedMessages.length > 0 ? `${selectedMessages.length} 条对话消息已选中` : referencedRecords.length === 0 ? hasBackground ? '可依据记忆和会话计划提问' : '请先添加资料或选择消息' : `${referencedRecords.length} 条资料已选中`}</span><div><HudButton type="button" onClick={onShowHistory}>＋ 添加参考</HudButton>{onSummarize && <HudButton type="button" disabled={!agentAvailable || sending || referencedRecords.length === 0} onClick={onSummarize}>总结</HudButton>}{!agentAvailable && onOpenAgentSetup && <HudButton type="button" onClick={onOpenAgentSetup}>配置 Agent</HudButton>}<HudButton type="button" variant="primary" disabled={!canSend || sending || !draft.trim() || !hasReference || (isCaptureCommand(draft) && referencedRecords.length === 0)} onClick={() => { void send() }}>{sending ? isCaptureCommand(draft) ? '截取中' : '生成中' : <><span className="mono-send-plane"><PaperPlaneIcon /></span>发送<span className="hud-send-arrow"> →</span></>}</HudButton></div></div>
     </div>
   </section>
 }
