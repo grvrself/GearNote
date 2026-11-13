@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { isTauri } from '@tauri-apps/api/core'
-import { askAgent, suggestChatFollowups, createChatSession, deleteChatSession, getAgentStatus, getChatState, previewAgentContext, resolveLibrarySearch, setChatReferences, switchChatSession, type AgentStatus, type ChatSessionSummary, type ChatState } from './agent'
+import { askAgent, suggestChatFollowups, createChatSession, deleteChatSession, getAgentStatus, getChatState, previewAgentContext, resolveCommandProposal, resolveLibrarySearch, setChatReferences, switchChatSession, type AgentStatus, type ChatSessionSummary, type ChatState } from './agent'
 import type { ChatMessage, ChatStreaming } from './chat-data'
 import { AgentSetup } from './components/AgentSetup'
 import { PersonaSetup } from './components/PersonaSetup'
@@ -45,6 +45,7 @@ export default function App() {
   const [pendingChoice, setPendingChoice] = useState<ChatState['pendingChoice']>(null)
   const [pendingLibrarySearch, setPendingLibrarySearch] = useState<ChatState['pendingLibrarySearch']>(null)
   const [pendingChatNoteEdit, setPendingChatNoteEdit] = useState<ChatState['pendingChatNoteEdit']>(null)
+  const [pendingCommand, setPendingCommand] = useState<ChatState['pendingCommand']>(null)
   const [notes, setNotes] = useState<Note[]>([])
   const [noteFolders, setNoteFolders] = useState<NoteFolder[]>([])
   const [noteDraft, setNoteDraft] = useState<NoteDraft | null>(null)
@@ -71,6 +72,7 @@ export default function App() {
     setPendingChoice(state.pendingChoice)
     setPendingLibrarySearch(state.pendingLibrarySearch)
     setPendingChatNoteEdit(state.pendingChatNoteEdit)
+    setPendingCommand(state.pendingCommand)
     setReferencedIds(state.referencedIds)
     setWorkingContext(state.workingContext)
     setProjectMemory(state.projectMemory)
@@ -159,7 +161,7 @@ export default function App() {
       const saved = await getChatState()
       applyChatState(saved)
       setStreaming(null)
-      if (!reply.frame && !(saved.pendingChoice?.status === 'open' && saved.pendingChoice.messageId === reply.id) && !(saved.pendingLibrarySearch?.status === 'open' && saved.pendingLibrarySearch.messageId === reply.id) && !(saved.pendingChatNoteEdit?.proposal.status === 'pending' && saved.pendingChatNoteEdit.messageId === reply.id)) {
+      if (!reply.frame && !(saved.pendingChoice?.status === 'open' && saved.pendingChoice.messageId === reply.id) && !(saved.pendingLibrarySearch?.status === 'open' && saved.pendingLibrarySearch.messageId === reply.id) && !(saved.pendingChatNoteEdit?.proposal.status === 'pending' && saved.pendingChatNoteEdit.messageId === reply.id) && !(saved.pendingCommand?.status === 'open' && saved.pendingCommand.messageId === reply.id)) {
         setSuggestingMessageId(reply.id)
         void suggestChatFollowups(saved.activeId, reply.id)
           .then(async () => applyChatState(await getChatState()))
@@ -191,6 +193,10 @@ export default function App() {
       else await rejectNoteEdit(proposalId)
       applyChatState(await getChatState())
     } catch (cause) { setAgentError(String(cause)) }
+  }
+  const decideCommand = async (proposalId: string, accept: boolean) => {
+    try { applyChatState(await resolveCommandProposal(proposalId, accept)) }
+    catch (cause) { setAgentError(String(cause)); try { applyChatState(await getChatState()) } catch { /* Preserve command error. */ } }
   }
 
   const manageSession = async (action: () => Promise<ChatState>) => {
@@ -341,7 +347,7 @@ export default function App() {
       <Sidebar view={view} sessions={sessions} activeSessionId={activeSessionId} sessionBusy={sending} sessionError={sessionError} onViewChange={changeView} onCreateSession={() => { void manageSession(createChatSession) }} onSwitchSession={id => { void manageSession(() => switchChatSession(id)) }} onDeleteSession={id => { void manageSession(() => deleteChatSession(id)) }} />
 
       <main className="main-panel" id="sec-01">
-        {view === 'chat' ? <ChatPanel records={records} pendingChoice={pendingChoice} pendingLibrarySearch={pendingLibrarySearch} onResolveLibrarySearch={decideLibrarySearch} pendingChatNoteEdit={pendingChatNoteEdit} onResolveChatNoteEdit={decideChatNoteEdit} sessionId={activeSessionId} referencedIds={referencedIds} historyOpen={showHistory} agentAvailable={agentAvailable} sending={sending} streaming={streaming} suggestingMessageId={suggestingMessageId} suggestionErrorId={suggestionErrorId} error={agentError} messages={messages} workingContext={workingContext} projectMemory={projectMemory} compactedSummary={compactedSummary} compactedCount={compactedCount} onSend={sendQuestion} onPreviewContext={(question, frameId, messageIds, deepMode) => previewAgentContext(question, referencedIds, frameId, messageIds, deepMode)} onOpenAgentSetup={() => { setView('settings'); setSettingsSection('overview') }} onCreateNoteDraft={createNoteDraft} onSummarize={deepMode => { void sendQuestion('请总结本轮参考资料的核心内容，并标注来源。', undefined, [], undefined, deepMode) }} onRemoveReference={id => setReferencedIds(current => current.filter(value => value !== id))} onRevealRecord={revealRecord} onToggleHistory={() => setRightOpen(current => !current)} onShowHistory={() => setRightOpen(true)}  /> : view === 'library' ? null : <div className="pending-view"><PanelHeading id={`sec-01-${view}${settingsSection === 'shortcuts' ? '-shortcuts' : ''}`} serial="SEC-01" overline={settingsSection === 'shortcuts' ? 'shortcuts' : view} title={pendingTitle} />{view === 'settings' && settingsSection === 'shortcuts' ? <div className="shortcut-preview"><p>当前已启用的应用内快捷键</p><div><span>查找记录</span><kbd>CTRL K</kbd></div><HudButton type="button" onClick={() => setSettingsSection('overview')}>返回设置</HudButton></div> : view === 'plugins' ? <ExtensionSetup status={bridgeStatus} /> : view === 'settings' ? <><div className="settings-actions"><HudButton type="button" onClick={() => setSettingsSection('shortcuts')}>快捷键设置</HudButton></div><ThemeSettings /><AgentSetup onStatusChange={setAgentStatus} /><PersonaSetup /></> : <SkillsPanel />}</div>}
+        {view === 'chat' ? <ChatPanel records={records} pendingChoice={pendingChoice} pendingLibrarySearch={pendingLibrarySearch} onResolveLibrarySearch={decideLibrarySearch} pendingChatNoteEdit={pendingChatNoteEdit} onResolveChatNoteEdit={decideChatNoteEdit} pendingCommand={pendingCommand} onResolveCommand={decideCommand} sessionId={activeSessionId} referencedIds={referencedIds} historyOpen={showHistory} agentAvailable={agentAvailable} sending={sending} streaming={streaming} suggestingMessageId={suggestingMessageId} suggestionErrorId={suggestionErrorId} error={agentError} messages={messages} workingContext={workingContext} projectMemory={projectMemory} compactedSummary={compactedSummary} compactedCount={compactedCount} onSend={sendQuestion} onPreviewContext={(question, frameId, messageIds, deepMode) => previewAgentContext(question, referencedIds, frameId, messageIds, deepMode)} onOpenAgentSetup={() => { setView('settings'); setSettingsSection('overview') }} onCreateNoteDraft={createNoteDraft} onSummarize={deepMode => { void sendQuestion('请总结本轮参考资料的核心内容，并标注来源。', undefined, [], undefined, deepMode) }} onRemoveReference={id => setReferencedIds(current => current.filter(value => value !== id))} onRevealRecord={revealRecord} onToggleHistory={() => setRightOpen(current => !current)} onShowHistory={() => setRightOpen(true)}  /> : view === 'library' ? null : <div className="pending-view"><PanelHeading id={`sec-01-${view}${settingsSection === 'shortcuts' ? '-shortcuts' : ''}`} serial="SEC-01" overline={settingsSection === 'shortcuts' ? 'shortcuts' : view} title={pendingTitle} />{view === 'settings' && settingsSection === 'shortcuts' ? <div className="shortcut-preview"><p>当前已启用的应用内快捷键</p><div><span>查找记录</span><kbd>CTRL K</kbd></div><HudButton type="button" onClick={() => setSettingsSection('overview')}>返回设置</HudButton></div> : view === 'plugins' ? <ExtensionSetup status={bridgeStatus} /> : view === 'settings' ? <><div className="settings-actions"><HudButton type="button" onClick={() => setSettingsSection('shortcuts')}>快捷键设置</HudButton></div><ThemeSettings /><AgentSetup onStatusChange={setAgentStatus} /><PersonaSetup /></> : <SkillsPanel />}</div>}
         <div className="notes-host" hidden={view !== 'library'}><NotesPanel notes={notes} folders={noteFolders} onCreateFolder={addNoteFolder} onRenameFolder={changeNoteFolderName} onDeleteFolder={removeNoteFolder} records={records} incomingDraft={noteDraft} onDraftConsumed={() => setNoteDraft(null)} onSave={persistNote} onExport={exportNote} onRevealRecord={revealRecord} onProposeEdit={proposeNoteEdit} onApplyEdit={applyNoteEditAndRefresh} onUndoEdit={undoNoteEditAndRefresh} onRejectEdit={rejectNoteEdit} onListWorkflowEvents={listNoteWorkflowEvents} onGetPendingEdit={getPendingNoteEdit} /></div>
       </main>
 

@@ -2,7 +2,7 @@ import { isTauri } from '@tauri-apps/api/core'
 import { emitTo, listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { useEffect, useRef, useState } from 'react'
-import { askAgent, getAgentStatus, getChatState, resolveLibrarySearch, setChatReferences, suggestChatFollowups, type AgentStatus, type PendingChoice, type PendingLibrarySearch, type PendingChatNoteEdit } from './agent'
+import { askAgent, getAgentStatus, getChatState, resolveCommandProposal, resolveLibrarySearch, setChatReferences, suggestChatFollowups, type AgentStatus, type PendingChoice, type PendingLibrarySearch, type PendingChatNoteEdit, type PendingCommand } from './agent'
 import { applyNoteEdit, rejectNoteEdit } from './notes'
 import type { ChatMessage, ChatStreaming } from './chat-data'
 import { ChatPanel } from './components/ChatPanel'
@@ -30,6 +30,7 @@ export default function MiniApp() {
   const [pendingChoice, setPendingChoice] = useState<PendingChoice | null>(null)
   const [pendingLibrarySearch, setPendingLibrarySearch] = useState<PendingLibrarySearch | null>(null)
   const [pendingChatNoteEdit, setPendingChatNoteEdit] = useState<PendingChatNoteEdit | null>(null)
+  const [pendingCommand, setPendingCommand] = useState<PendingCommand | null>(null)
   const sendingRef = useRef(false)
   const desktop = isTauri()
   const records = desktop ? savedRecords : recordFixtures.map(record => ({ ...record, demo: true }))
@@ -39,10 +40,10 @@ export default function MiniApp() {
     let disposed = false
     let stop: UnlistenFn | undefined
     void Promise.all([getAgentStatus(), getChatState()]).then(([status, chat]) => {
-      if (!disposed) { setAgentStatus(status); setActiveSessionId(chat.activeId); setMessages(chat.messages); setPendingChoice(chat.pendingChoice); setPendingLibrarySearch(chat.pendingLibrarySearch); setPendingChatNoteEdit(chat.pendingChatNoteEdit); setReferencedIds(chat.referencedIds) }
+      if (!disposed) { setAgentStatus(status); setActiveSessionId(chat.activeId); setMessages(chat.messages); setPendingChoice(chat.pendingChoice); setPendingLibrarySearch(chat.pendingLibrarySearch); setPendingChatNoteEdit(chat.pendingChatNoteEdit); setPendingCommand(chat.pendingCommand); setReferencedIds(chat.referencedIds) }
     }).catch(() => { if (!disposed) setError('对话或模型配置读取失败') })
     void listen('knowflow:chat-changed', () => {
-      if (!sendingRef.current) void getChatState().then(chat => { if (!disposed) { setActiveSessionId(chat.activeId); setMessages(chat.messages); setPendingChoice(chat.pendingChoice); setPendingLibrarySearch(chat.pendingLibrarySearch); setPendingChatNoteEdit(chat.pendingChatNoteEdit); setReferencedIds(chat.referencedIds) } })
+      if (!sendingRef.current) void getChatState().then(chat => { if (!disposed) { setActiveSessionId(chat.activeId); setMessages(chat.messages); setPendingChoice(chat.pendingChoice); setPendingLibrarySearch(chat.pendingLibrarySearch); setPendingChatNoteEdit(chat.pendingChatNoteEdit); setPendingCommand(chat.pendingCommand); setReferencedIds(chat.referencedIds) } })
     }).then(unlisten => { if (disposed) unlisten(); else stop = unlisten })
     return () => { disposed = true; stop?.() }
   }, [desktop])
@@ -63,9 +64,10 @@ export default function MiniApp() {
       setPendingChoice(chat.pendingChoice)
       setPendingLibrarySearch(chat.pendingLibrarySearch)
       setPendingChatNoteEdit(chat.pendingChatNoteEdit)
+      setPendingCommand(chat.pendingCommand)
       setReferencedIds(chat.referencedIds)
       setStreaming(null)
-      if (!reply.frame && !(chat.pendingChoice?.status === 'open' && chat.pendingChoice.messageId === reply.id) && !(chat.pendingLibrarySearch?.status === 'open' && chat.pendingLibrarySearch.messageId === reply.id) && !(chat.pendingChatNoteEdit?.proposal.status === 'pending' && chat.pendingChatNoteEdit.messageId === reply.id)) {
+      if (!reply.frame && !(chat.pendingChoice?.status === 'open' && chat.pendingChoice.messageId === reply.id) && !(chat.pendingLibrarySearch?.status === 'open' && chat.pendingLibrarySearch.messageId === reply.id) && !(chat.pendingChatNoteEdit?.proposal.status === 'pending' && chat.pendingChatNoteEdit.messageId === reply.id) && !(chat.pendingCommand?.status === 'open' && chat.pendingCommand.messageId === reply.id)) {
         setSuggestingMessageId(reply.id)
         void suggestChatFollowups(chat.activeId, reply.id)
           .then(async () => {
@@ -75,6 +77,7 @@ export default function MiniApp() {
             setPendingChoice(updated.pendingChoice)
             setPendingLibrarySearch(updated.pendingLibrarySearch)
             setPendingChatNoteEdit(updated.pendingChatNoteEdit)
+            setPendingCommand(updated.pendingCommand)
             setReferencedIds(updated.referencedIds)
           })
           .catch(() => setSuggestionErrorId(reply.id))
@@ -96,6 +99,7 @@ export default function MiniApp() {
       setPendingChoice(chat.pendingChoice)
       setPendingLibrarySearch(chat.pendingLibrarySearch)
       setPendingChatNoteEdit(chat.pendingChatNoteEdit)
+      setPendingCommand(chat.pendingCommand)
       setReferencedIds(chat.referencedIds)
       if (accept) await sendQuestion(question, undefined, [], undefined, false, chat.referencedIds)
     } catch (cause) { setError(String(cause)) }
@@ -107,6 +111,13 @@ export default function MiniApp() {
       const chat = await getChatState()
       setMessages(chat.messages)
       setPendingChatNoteEdit(chat.pendingChatNoteEdit)
+    } catch (cause) { setError(String(cause)) }
+  }
+  const decideCommand = async (proposalId: string, accept: boolean) => {
+    try {
+      const chat = await resolveCommandProposal(proposalId, accept)
+      setMessages(chat.messages)
+      setPendingCommand(chat.pendingCommand)
     } catch (cause) { setError(String(cause)) }
   }
 
@@ -182,6 +193,6 @@ export default function MiniApp() {
       </div>
     </header>
     {error && <div className="mini-error" role="alert"><span>{error}</span><button type="button" aria-label="关闭错误提示" onClick={() => setError('')}>×</button></div>}
-    <ChatPanel compact records={records} pendingChoice={pendingChoice} pendingLibrarySearch={pendingLibrarySearch} onResolveLibrarySearch={decideLibrarySearch} pendingChatNoteEdit={pendingChatNoteEdit} onResolveChatNoteEdit={decideChatNoteEdit} sessionId={activeSessionId} referencedIds={referencedIds} historyOpen={false} agentAvailable={Boolean(agentStatus?.hasKey && agentStatus.model)} sending={sending} streaming={streaming} suggestingMessageId={suggestingMessageId} suggestionErrorId={suggestionErrorId} onSend={sendQuestion} onOpenAgentSetup={() => { void showMain() }} onRemoveReference={removeReference} onRevealRecord={revealRecord} onToggleHistory={() => { void showMain() }} onShowHistory={() => { void showMain() }} messages={messages} />
+    <ChatPanel compact records={records} pendingChoice={pendingChoice} pendingLibrarySearch={pendingLibrarySearch} onResolveLibrarySearch={decideLibrarySearch} pendingChatNoteEdit={pendingChatNoteEdit} onResolveChatNoteEdit={decideChatNoteEdit} pendingCommand={pendingCommand} onResolveCommand={decideCommand} sessionId={activeSessionId} referencedIds={referencedIds} historyOpen={false} agentAvailable={Boolean(agentStatus?.hasKey && agentStatus.model)} sending={sending} streaming={streaming} suggestingMessageId={suggestingMessageId} suggestionErrorId={suggestionErrorId} onSend={sendQuestion} onOpenAgentSetup={() => { void showMain() }} onRemoveReference={removeReference} onRevealRecord={revealRecord} onToggleHistory={() => { void showMain() }} onShowHistory={() => { void showMain() }} messages={messages} />
   </div>
 }

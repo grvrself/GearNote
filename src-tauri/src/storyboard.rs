@@ -73,7 +73,7 @@ fn engine_path(app: &AppHandle) -> Result<PathBuf, String> {
     Err("分镜引擎文件缺失，请重新安装 GearNote。".into())
 }
 
-fn tool_path(app: &AppHandle, program: &str) -> PathBuf {
+pub(crate) fn tool_path(app: &AppHandle, program: &str) -> PathBuf {
     if let Ok(resources) = app.path().resource_dir() {
         let bundled = resources.join("tools").join(format!("{program}.exe"));
         if bundled.is_file() { return bundled; }

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ChatFrame, ChatMessage, ChatStreaming } from '../chat-data'
 import type { KnowledgeRecord } from '../data'
-import type { ContextPreview, PendingChoice, PendingLibrarySearch, PendingChatNoteEdit, ProjectMemory, WorkingContext } from '../agent'
+import type { ContextPreview, PendingChoice, PendingLibrarySearch, PendingChatNoteEdit, PendingCommand, ProjectMemory, WorkingContext } from '../agent'
 import { isCaptureCommand } from '../capture-command'
 import { CapturedFrame } from './CapturedFrame'
 import { ChamferCard } from './ChamferCard'
@@ -15,6 +15,8 @@ type Props = {
   onResolveLibrarySearch?: (proposalId: string, accept: boolean, question: string) => Promise<void>
   pendingChatNoteEdit?: PendingChatNoteEdit | null
   onResolveChatNoteEdit?: (proposalId: string, accept: boolean) => Promise<void>
+  pendingCommand?: PendingCommand | null
+  onResolveCommand?: (proposalId: string, accept: boolean) => Promise<void>
   records: KnowledgeRecord[]
   sessionId?: string
   referencedIds: string[]
@@ -87,12 +89,13 @@ function StreamingRun({ streaming }: { streaming: ChatStreaming }) {
   </div>
 }
 
-export function ChatPanel({ records, pendingChoice = null, pendingLibrarySearch = null, onResolveLibrarySearch, pendingChatNoteEdit = null, onResolveChatNoteEdit, sessionId, referencedIds, workingContext = { goal: '', completed: '', nextStep: '', updatedAt: '' }, projectMemory = [], compactedSummary = '', compactedCount = 0, historyOpen, agentAvailable, sending = false, streaming = null, suggestingMessageId = null, suggestionErrorId = null, error = '', onSend, onPreviewContext, onOpenAgentSetup, onSummarize, onRemoveReference, onRevealRecord, onToggleHistory, onShowHistory, onCreateNoteDraft, messages = [], compact = false }: Props) {
+export function ChatPanel({ records, pendingChoice = null, pendingLibrarySearch = null, onResolveLibrarySearch, pendingChatNoteEdit = null, onResolveChatNoteEdit, pendingCommand = null, onResolveCommand, sessionId, referencedIds, workingContext = { goal: '', completed: '', nextStep: '', updatedAt: '' }, projectMemory = [], compactedSummary = '', compactedCount = 0, historyOpen, agentAvailable, sending = false, streaming = null, suggestingMessageId = null, suggestionErrorId = null, error = '', onSend, onPreviewContext, onOpenAgentSetup, onSummarize, onRemoveReference, onRevealRecord, onToggleHistory, onShowHistory, onCreateNoteDraft, messages = [], compact = false }: Props) {
   const [draft, setDraft] = useState('')
   const [deepMode, setDeepMode] = useState(false)
   const [choiceSubmitting, setChoiceSubmitting] = useState(false)
   const [librarySubmitting, setLibrarySubmitting] = useState(false)
   const [noteSubmitting, setNoteSubmitting] = useState(false)
+  const [commandSubmitting, setCommandSubmitting] = useState(false)
   const [attachedFrame, setAttachedFrame] = useState<ChatFrame | null>(null)
   const [selectedMessageIds, setSelectedMessageIds] = useState<string[]>([])
   const [dismissedNotes, setDismissedNotes] = useState<string[]>([])
@@ -230,6 +233,14 @@ export function ChatPanel({ records, pendingChoice = null, pendingLibrarySearch 
             <div><button type="button" disabled={sending || Boolean(streaming) || noteSubmitting} onClick={() => { if (!onResolveChatNoteEdit) return; setNoteSubmitting(true); void onResolveChatNoteEdit(pendingChatNoteEdit.proposal.id, true).finally(() => setNoteSubmitting(false)) }}>确认并写入</button>
               <button type="button" disabled={sending || Boolean(streaming) || noteSubmitting} onClick={() => { if (!onResolveChatNoteEdit) return; setNoteSubmitting(true); void onResolveChatNoteEdit(pendingChatNoteEdit.proposal.id, false).finally(() => setNoteSubmitting(false)) }}>放弃</button></div>
             <small>确认前不会修改笔记。</small>
+          </div>}
+          {pendingCommand && pendingCommand.messageId === message.id && (pendingCommand.status === 'open' || pendingCommand.status === 'running') && <div className="chat-command-proposal" role="group" aria-label="待确认的命令">
+            <strong>{pendingCommand.status === 'running' ? '命令正在运行' : '确认后运行命令'}</strong>
+            <p>程序：<code>{pendingCommand.program}</code></p>
+            <ol>{pendingCommand.effectiveArgs.map((arg, index) => <li key={index}><code>{arg}</code></li>)}</ol>
+            <small>工作目录：应用命令缓存。最长运行 30 秒，聊天只保留前 8192 字节输出。</small>
+            {pendingCommand.status === 'open' && <div><button type="button" disabled={sending || Boolean(streaming) || commandSubmitting} onClick={() => { if (!onResolveCommand) return; setCommandSubmitting(true); void onResolveCommand(pendingCommand.id, true).finally(() => setCommandSubmitting(false)) }}>确认运行</button>
+              <button type="button" disabled={sending || Boolean(streaming) || commandSubmitting} onClick={() => { if (!onResolveCommand) return; setCommandSubmitting(true); void onResolveCommand(pendingCommand.id, false).finally(() => setCommandSubmitting(false)) }}>拒绝</button></div>}
           </div>}
           {!compact && onCreateNoteDraft && message.role === 'agent' && !message.frame && Boolean(message.citations?.some(citation => records.some(record => record.id === citation.recordId && !record.demo))) && !dismissedNotes.includes(message.id) && <div className="message-note-offer"><span>将这次分析整理成笔记？</span><div><button type="button" onClick={() => onCreateNoteDraft(message)}>整理为笔记<span className="mono-note-gear"><GearIcon kind="center" /></span></button><button type="button" onClick={() => setDismissedNotes(current => [...current, message.id])}>暂不整理</button></div></div>}
         </ChamferCard>
