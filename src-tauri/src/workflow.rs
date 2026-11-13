@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 const MAX_NOTE_FOR_MODEL: usize = 12_000;
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NoteEditProposal {
     pub id: String,
@@ -73,7 +73,7 @@ fn parse_model_edit(answer: &str, note: &Note) -> Result<(NoteEditProposal, Note
     parse_model_edit_with_sources(answer, note, &[], false)
 }
 
-fn parse_model_edit_with_sources(answer: &str, note: &Note, sources: &[SourceChunk], evidence_required: bool) -> Result<(NoteEditProposal, Note), String> {
+pub(crate) fn parse_model_edit_with_sources(answer: &str, note: &Note, sources: &[SourceChunk], evidence_required: bool) -> Result<(NoteEditProposal, Note), String> {
     let raw: serde_json::Value = serde_json::from_str(answer.trim()).map_err(|_| "修改建议必须是完整 JSON 对象")?;
     let object = raw.as_object().ok_or("修改建议必须是完整 JSON 对象")?;
     let edits: Vec<ModelEdit> = if object.contains_key("edits") {
@@ -163,7 +163,7 @@ fn update_note_row(transaction: &Transaction<'_>, before: &Note, after: &Note) -
     Ok(())
 }
 
-fn store_note_proposal(path: &Path, note: &Note, after: &Note, proposal: &NoteEditProposal) -> Result<(), String> {
+pub(crate) fn store_note_proposal(path: &Path, note: &Note, after: &Note, proposal: &NoteEditProposal) -> Result<(), String> {
     let before_json = note_json(note)?;
     let mut connection = db::open(path)?;
     let transaction = connection.transaction().map_err(|error| format!("操作建议事务启动失败：{error}"))?;
@@ -212,9 +212,17 @@ pub async fn propose_note_edit(agent: State<'_, AgentState>, notes: State<'_, No
 }
 
 #[tauri::command]
-pub fn apply_note_edit(notes: State<'_, NotesState>, proposal_id: String) -> Result<Note, String> {
+pub fn apply_note_edit(app: AppHandle, notes: State<'_, NotesState>, proposal_id: String) -> Result<Note, String> {
     let mut guard = notes.notes.lock().map_err(|_| "笔记暂不可用")?;
-    apply_note_edit_inner(&notes.path, &mut guard, &proposal_id)
+    let note = match apply_note_edit_inner(&notes.path, &mut guard, &proposal_id) {
+        Ok(note) => note,
+        Err(error) => {
+            if error.contains("笔记已修改") { agent::mark_chat_note_edit(&app, &proposal_id, "stale"); }
+            return Err(error);
+        }
+    };
+    agent::mark_chat_note_edit(&app, &proposal_id, "applied");
+    Ok(note)
 }
 
 fn apply_note_edit_inner(path: &Path, notes: &mut [Note], proposal_id: &str) -> Result<Note, String> {
@@ -269,8 +277,10 @@ fn undo_note_edit_inner(path: &Path, notes: &mut [Note], proposal_id: &str) -> R
 }
 
 #[tauri::command]
-pub fn reject_note_edit(notes: State<'_, NotesState>, proposal_id: String) -> Result<(), String> {
-    reject_note_edit_inner(&notes.path, &proposal_id)
+pub fn reject_note_edit(app: AppHandle, notes: State<'_, NotesState>, proposal_id: String) -> Result<(), String> {
+    reject_note_edit_inner(&notes.path, &proposal_id)?;
+    agent::mark_chat_note_edit(&app, &proposal_id, "rejected");
+    Ok(())
 }
 
 fn reject_note_edit_inner(path: &Path, proposal_id: &str) -> Result<(), String> {
@@ -689,7 +699,7 @@ mod tests {
             project_id: "project-default".into(),
             working_context: WorkingContext { goal: "完成阶段五".into(), completed: "".into(), next_step: "验证流程".into(), updated_at: "200".into() },
             compacted_summary: String::new(), compacted_count: 0, compacted_at: String::new(),
-            referenced_ids: vec![], messages: vec![], pending_choice: None, pending_library_search: None,
+            referenced_ids: vec![], messages: vec![], pending_choice: None, pending_library_search: None, pending_chat_note_edit: None,
         }] }
     }
 

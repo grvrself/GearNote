@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import type { ChatMessage, ChatSuggestion } from './chat-data'
+import type { NoteEditProposal } from './notes'
 
 export type AgentStatus = { baseUrl: string; model: string; exploreReferences: boolean; contextTier: 'small' | 'medium'; hasKey: boolean; keyPersistent: boolean; keyWarning: string | null }
 export type ToolProbe = { supported: boolean; searched: boolean; read: boolean; elapsedMs: number; steps: string[]; reason: string }
@@ -10,7 +11,8 @@ export type ProjectMemory = { id: string; content: string; source: string; creat
 export type ChoiceOption = { id: string; label: string; detail: string }
 export type PendingChoice = { id: string; messageId: string; prompt: string; why: string; options: ChoiceOption[]; recommended: string | null; status: 'open' | 'answered' | 'dismissed'; selectedId: string | null; customText: string | null; answeredAt: string | null }
 export type PendingLibrarySearch = { id: string; messageId: string; question: string; records: { id: string; title: string }[]; status: 'open' | 'accepted' | 'dismissed' }
-export type ChatState = { activeId: string; sessions: ChatSessionSummary[]; messages: ChatMessage[]; referencedIds: string[]; workingContext: WorkingContext; projectMemory: ProjectMemory[]; compactedSummary: string; compactedCount: number; pendingChoice: PendingChoice | null; pendingLibrarySearch: PendingLibrarySearch | null }
+export type PendingChatNoteEdit = { messageId: string; noteTitle: string; proposal: NoteEditProposal }
+export type ChatState = { activeId: string; sessions: ChatSessionSummary[]; messages: ChatMessage[]; referencedIds: string[]; workingContext: WorkingContext; projectMemory: ProjectMemory[]; compactedSummary: string; compactedCount: number; pendingChoice: PendingChoice | null; pendingLibrarySearch: PendingLibrarySearch | null; pendingChatNoteEdit: PendingChatNoteEdit | null }
 export type PersonaInfo = { content: string; path: string; isDefault: boolean }
 export type ContextPreview = {
   systemText: string
