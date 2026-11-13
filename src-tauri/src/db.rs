@@ -356,6 +356,43 @@ pub fn query_record_page(path: &Path, record_type: &str, search: &str, offset: u
     Ok(RecordPage { items, total: total as u64, offset: offset as u64, limit: limit as u64 })
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryTitle { pub id: String, pub title: String }
+
+/// Search the existing full-text index without loading record JSON or segment bodies.
+pub fn search_library_titles(path: &Path, search: &str, limit: usize) -> Result<Vec<LibraryTitle>, String> {
+    let search = search.trim();
+    if search.is_empty() || search.chars().count() > 200 || !(1..=20).contains(&limit) {
+        return Err("资料库搜索词或数量无效".into());
+    }
+    let connection = open(path)?;
+    let scan_short = search.chars().count() < 3 || search.contains('"');
+    let fts_query = if scan_short { "\"knowflowfallback\"".to_owned() } else { format!("\"{}\"", search) };
+    let mut query = connection.prepare("SELECT id,title FROM record_rows WHERE status='ready'
+        AND COALESCE(json_extract(json,'$.demo'),0)=0
+        AND (instr(lower(title),lower(?1))>0 OR id IN
+          (SELECT segment.record_id FROM segment_fts JOIN record_segments AS segment
+           ON segment.rowid=segment_fts.rowid WHERE segment_fts MATCH ?2)
+          OR (?3=1 AND id IN (SELECT record_id FROM record_segments WHERE instr(lower(body),lower(?1))>0)))
+        ORDER BY ordinal ASC LIMIT ?4")
+        .map_err(|error| format!("资料库搜索准备失败：{error}"))?;
+    let rows = query.query_map(params![search, fts_query, scan_short, limit as i64], |row| {
+        Ok(LibraryTitle { id: row.get(0)?, title: row.get(1)? })
+    }).map_err(|error| format!("资料库搜索失败：{error}"))?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(|error| format!("资料库搜索失败：{error}"))
+}
+
+pub fn ready_library_titles(path: &Path, ids: &[String]) -> Result<Vec<LibraryTitle>, String> {
+    let connection = open(path)?;
+    let mut query = connection.prepare("SELECT id,title FROM record_rows WHERE id=?1 AND status='ready'
+        AND COALESCE(json_extract(json,'$.demo'),0)=0")
+        .map_err(|error| format!("资料检查失败：{error}"))?;
+    ids.iter().map(|id| query.query_row([id], |row| Ok(LibraryTitle { id: row.get(0)?, title: row.get(1)? }))
+        .optional().map_err(|error| format!("资料检查失败：{error}"))?
+        .ok_or_else(|| "待打开资料已失效，请重新搜索".into())).collect()
+}
+
 pub fn get_record(path: &Path, id: &str) -> Result<KnowledgeRecord, String> {
     let connection = open(path)?;
     let json: String = connection.query_row("SELECT json FROM record_rows WHERE id=?1", [id], |row| row.get(0))
@@ -757,6 +794,29 @@ mod tests {
         serde_json::from_value(json!({"id":id,"type":"article","title":title,"site":"example.com",
             "savedAt":"2026-11-11T00:00:00Z","status":"ready","sourceUrl":"https://example.com",
             "contentText":"测试正文","excerpt":[]})).unwrap()
+    }
+
+    #[test]
+    fn library_search_exposes_only_ready_non_demo_titles() {
+        let dir = std::env::temp_dir().join(format!("gearnote-library-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(FILE_NAME);
+        let mut ready = record("ready", "Rust 指南");
+        ready.content_text = "隐藏正文标记 Rust 所有权".into();
+        let mut fault = record("fault", "Rust 故障");
+        fault.status = crate::ProcessStatus::Fault;
+        let demo = record("demo", "Rust 演示");
+        write_records(&path, &[ready, fault, demo]).unwrap();
+        let connection = open(&path).unwrap();
+        connection.execute("UPDATE record_rows SET json=json_set(json,'$.demo',true) WHERE id='demo'", []).unwrap();
+        drop(connection);
+        let found = search_library_titles(&path, "Rust", 8).unwrap();
+        assert_eq!(found, vec![LibraryTitle { id: "ready".into(), title: "Rust 指南".into() }]);
+        assert!(!serde_json::to_string(&found).unwrap().contains("隐藏正文标记"));
+        assert!(ready_library_titles(&path, &["fault".into()]).is_err());
+        assert!(ready_library_titles(&path, &["demo".into()]).is_err());
+        drop(found);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

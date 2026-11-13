@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ChatFrame, ChatMessage, ChatStreaming } from '../chat-data'
 import type { KnowledgeRecord } from '../data'
-import type { ContextPreview, PendingChoice, ProjectMemory, WorkingContext } from '../agent'
+import type { ContextPreview, PendingChoice, PendingLibrarySearch, ProjectMemory, WorkingContext } from '../agent'
 import { isCaptureCommand } from '../capture-command'
 import { CapturedFrame } from './CapturedFrame'
 import { ChamferCard } from './ChamferCard'
@@ -11,6 +11,8 @@ import './chat.css'
 
 type Props = {
   pendingChoice?: PendingChoice | null
+  pendingLibrarySearch?: PendingLibrarySearch | null
+  onResolveLibrarySearch?: (proposalId: string, accept: boolean, question: string) => Promise<void>
   records: KnowledgeRecord[]
   sessionId?: string
   referencedIds: string[]
@@ -83,10 +85,11 @@ function StreamingRun({ streaming }: { streaming: ChatStreaming }) {
   </div>
 }
 
-export function ChatPanel({ records, pendingChoice = null, sessionId, referencedIds, workingContext = { goal: '', completed: '', nextStep: '', updatedAt: '' }, projectMemory = [], compactedSummary = '', compactedCount = 0, historyOpen, agentAvailable, sending = false, streaming = null, suggestingMessageId = null, suggestionErrorId = null, error = '', onSend, onPreviewContext, onOpenAgentSetup, onSummarize, onRemoveReference, onRevealRecord, onToggleHistory, onShowHistory, onCreateNoteDraft, messages = [], compact = false }: Props) {
+export function ChatPanel({ records, pendingChoice = null, pendingLibrarySearch = null, onResolveLibrarySearch, sessionId, referencedIds, workingContext = { goal: '', completed: '', nextStep: '', updatedAt: '' }, projectMemory = [], compactedSummary = '', compactedCount = 0, historyOpen, agentAvailable, sending = false, streaming = null, suggestingMessageId = null, suggestionErrorId = null, error = '', onSend, onPreviewContext, onOpenAgentSetup, onSummarize, onRemoveReference, onRevealRecord, onToggleHistory, onShowHistory, onCreateNoteDraft, messages = [], compact = false }: Props) {
   const [draft, setDraft] = useState('')
   const [deepMode, setDeepMode] = useState(false)
   const [choiceSubmitting, setChoiceSubmitting] = useState(false)
+  const [librarySubmitting, setLibrarySubmitting] = useState(false)
   const [attachedFrame, setAttachedFrame] = useState<ChatFrame | null>(null)
   const [selectedMessageIds, setSelectedMessageIds] = useState<string[]>([])
   const [dismissedNotes, setDismissedNotes] = useState<string[]>([])
@@ -206,6 +209,13 @@ export function ChatPanel({ records, pendingChoice = null, sessionId, referenced
           {pendingChoice?.status === 'open' && pendingChoice.messageId === message.id && <div className="chat-choice" role="group" aria-label={pendingChoice.prompt}>
             {pendingChoice.options.map(option => <button type="button" key={option.id} disabled={sending || Boolean(streaming) || choiceSubmitting || !agentAvailable} onClick={() => { void selectChoice(option.label) }}><strong>{option.label}{pendingChoice.recommended === option.id && <span className="chat-choice-recommended">推荐</span>}</strong>{option.detail && <span>{option.detail}</span>}</button>)}
             <small>也可以在下方输入自己的选择；发送后会按你的回答继续。</small>
+          </div>}
+          {pendingLibrarySearch?.status === 'open' && pendingLibrarySearch.messageId === message.id && <div className="chat-library-proposal" role="group" aria-label="资料库搜索结果">
+            <strong>要打开这几条吗？</strong>
+            <ul>{pendingLibrarySearch.records.map(record => <li key={record.id}>{record.title}</li>)}</ul>
+            <div><button type="button" disabled={sending || Boolean(streaming) || librarySubmitting} onClick={() => { if (!onResolveLibrarySearch) return; setLibrarySubmitting(true); void onResolveLibrarySearch(pendingLibrarySearch.id, true, pendingLibrarySearch.question).finally(() => setLibrarySubmitting(false)) }}>确认并继续提问</button>
+              <button type="button" disabled={sending || Boolean(streaming) || librarySubmitting} onClick={() => { if (!onResolveLibrarySearch) return; setLibrarySubmitting(true); void onResolveLibrarySearch(pendingLibrarySearch.id, false, pendingLibrarySearch.question).finally(() => setLibrarySubmitting(false)) }}>暂不打开</button></div>
+            <small>确认后加入本轮参考，再按原问题读取资料；跳过后不会读取正文。</small>
           </div>}
           {!compact && onCreateNoteDraft && message.role === 'agent' && !message.frame && Boolean(message.citations?.some(citation => records.some(record => record.id === citation.recordId && !record.demo))) && !dismissedNotes.includes(message.id) && <div className="message-note-offer"><span>将这次分析整理成笔记？</span><div><button type="button" onClick={() => onCreateNoteDraft(message)}>整理为笔记<span className="mono-note-gear"><GearIcon kind="center" /></span></button><button type="button" onClick={() => setDismissedNotes(current => [...current, message.id])}>暂不整理</button></div></div>}
         </ChamferCard>

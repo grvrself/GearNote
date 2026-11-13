@@ -9,7 +9,8 @@ export type WorkingContext = { goal: string; completed: string; nextStep: string
 export type ProjectMemory = { id: string; content: string; source: string; createdAt: string; confirmedAt: string; expiresAt?: string | null; active: boolean }
 export type ChoiceOption = { id: string; label: string; detail: string }
 export type PendingChoice = { id: string; messageId: string; prompt: string; why: string; options: ChoiceOption[]; recommended: string | null; status: 'open' | 'answered' | 'dismissed'; selectedId: string | null; customText: string | null; answeredAt: string | null }
-export type ChatState = { activeId: string; sessions: ChatSessionSummary[]; messages: ChatMessage[]; referencedIds: string[]; workingContext: WorkingContext; projectMemory: ProjectMemory[]; compactedSummary: string; compactedCount: number; pendingChoice: PendingChoice | null }
+export type PendingLibrarySearch = { id: string; messageId: string; question: string; records: { id: string; title: string }[]; status: 'open' | 'accepted' | 'dismissed' }
+export type ChatState = { activeId: string; sessions: ChatSessionSummary[]; messages: ChatMessage[]; referencedIds: string[]; workingContext: WorkingContext; projectMemory: ProjectMemory[]; compactedSummary: string; compactedCount: number; pendingChoice: PendingChoice | null; pendingLibrarySearch: PendingLibrarySearch | null }
 export type PersonaInfo = { content: string; path: string; isDefault: boolean }
 export type ContextPreview = {
   systemText: string
@@ -50,6 +51,7 @@ export const switchChatSession = (id: string) => invoke<ChatState>('switch_chat_
 export const renameChatSession = (id: string, title: string) => invoke<ChatState>('rename_chat_session', { id, title })
 export const deleteChatSession = (id: string) => invoke<ChatState>('delete_chat_session', { id })
 export const setChatReferences = (id: string, referencedIds: string[]) => invoke<ChatState>('set_chat_references', { id, referencedIds })
+export const resolveLibrarySearch = (proposalId: string, accept: boolean) => invoke<ChatState>('resolve_library_search', { proposalId, accept })
 export const previewAgentContext = (question: string, referencedIds: string[], frameId?: string, messageIds: string[] = [], deepMode = false) =>
   invoke<ContextPreview>('preview_agent_context', { question, referencedIds, frameId: frameId ?? null, messageIds, deepMode })
 export async function askAgent(question: string, referencedIds: string[], onDelta: (delta: string) => void, frameId?: string, onActivity?: (message: string) => void, messageIds: string[] = [], choiceId?: string, deepMode = false) {
