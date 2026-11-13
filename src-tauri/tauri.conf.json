@@ -17,7 +17,8 @@
       "../vendor/dsh-video-storyboard/locale": "storyboard/locale",
       "../vendor/dsh-video-storyboard/package.json": "storyboard/package.json",
       "../vendor/dsh-video-storyboard/LICENSE": "storyboard/LICENSE",
-      "../vendor/dsh-video-storyboard/NOTICE": "storyboard/NOTICE"
+      "../vendor/dsh-video-storyboard/NOTICE": "storyboard/NOTICE",
+      "../extension": "extension"
     }
   },
   "app": {

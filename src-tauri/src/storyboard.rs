@@ -73,7 +73,11 @@ fn engine_path(app: &AppHandle) -> Result<PathBuf, String> {
     Err("分镜引擎文件缺失，请重新安装 GearNote。".into())
 }
 
-fn tool_path(program: &str) -> PathBuf {
+fn tool_path(app: &AppHandle, program: &str) -> PathBuf {
+    if let Ok(resources) = app.path().resource_dir() {
+        let bundled = resources.join("tools").join(format!("{program}.exe"));
+        if bundled.is_file() { return bundled; }
+    }
     if let Ok(exe) = std::env::current_exe() {
         if let Some(parent) = exe.parent() {
             let portable = parent.join("tools").join(format!("{program}.exe"));
@@ -83,8 +87,8 @@ fn tool_path(program: &str) -> PathBuf {
     PathBuf::from(program)
 }
 
-fn available(program: &str) -> bool {
-    Command::new(tool_path(program)).arg(if program == "node" { "--version" } else { "-version" })
+fn available(app: &AppHandle, program: &str) -> bool {
+    Command::new(tool_path(app, program)).arg(if program == "node" || program == "yt-dlp" { "--version" } else { "-version" })
         .output().is_ok_and(|output| output.status.success())
 }
 
@@ -104,9 +108,8 @@ pub(crate) async fn capture_frame(app: &AppHandle, source_url: &str, seconds: u3
     if !matches!(url.scheme(), "http" | "https") { return Err("视频链接无效".into()); }
     let script = engine_path(app)?.with_file_name("knowflow-frame.mjs");
     if !script.is_file() { return Err("取帧脚本缺失，请重新安装 GearNote。".into()); }
-    if !available("node") || !available("ffmpeg") ||
-        !Command::new(tool_path("yt-dlp")).arg("--version").output().is_ok_and(|output| output.status.success()) {
-        return Err("取帧需要 Node.js、FFmpeg 和 yt-dlp。".into());
+    if !available(app, "node") || !available(app, "ffmpeg") || !available(app, "ffprobe") || !available(app, "yt-dlp") {
+        return Err("取帧需要 Node.js、FFmpeg（含 ffprobe）和 yt-dlp。".into());
     }
     let dir = app.path().app_data_dir().map_err(|error| error.to_string())?.join("chat-frames");
     fs::create_dir_all(&dir).map_err(|error| format!("无法创建截图目录：{error}"))?;
@@ -114,15 +117,25 @@ pub(crate) async fn capture_frame(app: &AppHandle, source_url: &str, seconds: u3
     let run_script = node_path(script);
     let run_url = source_url.to_owned();
     let run_output = node_path(output_path.clone());
-    let tools_dir = std::env::current_exe().ok().and_then(|exe| exe.parent().map(|parent| parent.join("tools")));
+    let node_binary = tool_path(app, "node");
+    let ffmpeg_binary = tool_path(app, "ffmpeg");
+    let ffprobe_binary = tool_path(app, "ffprobe");
+    let ytdlp_binary = tool_path(app, "yt-dlp");
+    let tools_dir = node_binary.parent().filter(|path| path.join("yt-dlp.exe").is_file()).map(Path::to_path_buf);
+    let cache_dir = app.path().app_cache_dir().map_err(|error| error.to_string())?.join("video-storyboard");
     let result = tauri::async_runtime::spawn_blocking(move || {
-        let mut command = Command::new("node");
+        let mut command = Command::new(node_binary);
         if let Some(tools_dir) = tools_dir.as_ref().filter(|path| path.is_dir()) {
             let mut paths = vec![node_path(tools_dir.clone())];
             paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()));
             if let Ok(path) = std::env::join_paths(paths) { command.env("PATH", path); }
         }
-        command.env("KNOWFLOW_FFMPEG", tool_path("ffmpeg"))
+        command.env("KNOWFLOW_FFMPEG", &ffmpeg_binary)
+            .env("DSH_FFMPEG_PATH", &ffmpeg_binary)
+            .env("DSH_FFPROBE_PATH", &ffprobe_binary)
+            .env("DSH_YTDLP_PATH", &ytdlp_binary)
+            .env("DSH_VIDEO_CACHE_DIR", node_path(cache_dir.join("scan")))
+            .env("DSH_VIDEO_MEDIA_DIR", node_path(cache_dir.join("media")))
             .arg(run_script).arg(run_url).arg(seconds.to_string()).arg(run_output).output()
     }).await.map_err(|error| error.to_string())?
         .map_err(|error| format!("取帧程序启动失败：{error}"))?;
@@ -156,9 +169,9 @@ pub async fn analyze_video_storyboard(app: AppHandle, state: State<'_, AppState>
     };
     if cookies_text.is_some() && !is_bilibili { return Err("当前仅支持 B 站 cookies.txt。".into()); }
     let engine = engine_path(&app)?;
-    if !available("node") { return Err("缺少 Node.js，请安装后重启 GearNote。".into()); }
-    if !available("ffmpeg") || !available("ffprobe") { return Err("缺少 FFmpeg（ffmpeg 和 ffprobe），请安装后重启 GearNote。".into()); }
-    if !Command::new(tool_path("yt-dlp")).arg("--version").output().is_ok_and(|output| output.status.success()) {
+    if !available(&app, "node") { return Err("缺少 Node.js，请安装后重启 GearNote。".into()); }
+    if !available(&app, "ffmpeg") || !available(&app, "ffprobe") { return Err("缺少 FFmpeg（ffmpeg 和 ffprobe），请安装后重启 GearNote。".into()); }
+    if !available(&app, "yt-dlp") {
         return Err("缺少 yt-dlp。请安装后重启 GearNote，网页视频画面分析需要它下载视频。".into());
     }
     let dir = app.path().app_data_dir().map_err(|error| error.to_string())?
@@ -173,17 +186,25 @@ pub async fn analyze_video_storyboard(app: AppHandle, state: State<'_, AppState>
     let out = dir.join("board.png");
     let engine_run = engine.clone();
     let out_run = out.clone();
-    let tools_dir = std::env::current_exe().ok().and_then(|exe| exe.parent().map(|parent| parent.join("tools")));
+    let node_binary = tool_path(&app, "node");
+    let ffmpeg_binary = tool_path(&app, "ffmpeg");
+    let ffprobe_binary = tool_path(&app, "ffprobe");
+    let ytdlp_binary = tool_path(&app, "yt-dlp");
+    let tools_dir = node_binary.parent().filter(|path| path.join("yt-dlp.exe").is_file()).map(Path::to_path_buf);
     let cookies_path = cookies.as_ref().map(|jar| node_path(jar.0.clone()));
     let output = tauri::async_runtime::spawn_blocking(move || {
         let run = |low_quality: bool| {
-            let mut command = Command::new("node");
+            let mut command = Command::new(&node_binary);
             if let Some(tools_dir) = tools_dir.as_ref().filter(|path| path.is_dir()) {
                 let mut paths = vec![node_path(tools_dir.clone())];
                 paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()));
                 if let Ok(path) = std::env::join_paths(paths) { command.env("PATH", path); }
             }
-            command.env("DSH_VIDEO_CACHE_DIR", node_path(cache_dir.clone()))
+            command.env("DSH_FFMPEG_PATH", &ffmpeg_binary)
+                .env("DSH_FFPROBE_PATH", &ffprobe_binary)
+                .env("DSH_YTDLP_PATH", &ytdlp_binary)
+                .env("DSH_VIDEO_CACHE_DIR", node_path(cache_dir.join("scan")))
+                .env("DSH_VIDEO_MEDIA_DIR", node_path(cache_dir.join("media")))
                 .arg(node_path(engine_run.clone())).arg(&source_url)
                 .arg("--out").arg(node_path(out_run.clone()))
                 .arg("--strategy").arg("auto")

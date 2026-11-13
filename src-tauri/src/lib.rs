@@ -15,6 +15,22 @@ mod workflow;
 pub use process_status::ProcessStatus;
 use tauri::Manager;
 
+#[tauri::command]
+fn open_extension_folder(app: tauri::AppHandle) -> Result<(), String> {
+    let bundled = app.path().resource_dir().map_err(|error| error.to_string())?.join("extension");
+    let folder = if bundled.join("manifest.json").is_file() {
+        bundled
+    } else {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("extension")
+    };
+    if !folder.join("manifest.json").is_file() {
+        return Err("找不到浏览器扩展文件夹，请重新安装 GearNote。".into());
+    }
+    std::process::Command::new("explorer").arg(folder).spawn()
+        .map_err(|error| format!("无法打开扩展文件夹：{error}"))?;
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -25,7 +41,7 @@ pub fn run() {
             bridge::start(app.handle().clone());
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![storage::list_records, storage::list_capture_jobs, storage::dismiss_capture_job, storage::query_record_page, storage::get_record, storage::query_record_segments, storage::get_bridge_status,
+        .invoke_handler(tauri::generate_handler![open_extension_folder, storage::list_records, storage::list_capture_jobs, storage::dismiss_capture_job, storage::query_record_page, storage::get_record, storage::query_record_segments, storage::get_bridge_status,
             storyboard::analyze_video_storyboard, storyboard::get_storyboard_image, storyboard::open_video_at,
             agent::get_agent_status, agent::save_agent_config, agent::save_explore_references, agent::save_context_tier, agent::test_agent_tools, agent::list_chat_messages, agent::get_chat_state,
             agent::create_chat_session, agent::switch_chat_session, agent::rename_chat_session,

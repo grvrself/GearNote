@@ -73,9 +73,9 @@ DeepSeek 的 Chat Completions 默认启用思考模式，而强制调用工具�
 
 ## 捕获网页文章与视频字幕
 
-1. 在此项目目录运行 `npm run tauri dev`，保持桌面窗口打开。
+1. 安装并打开 GearNote；从源码开发时在项目目录运行 `npm run tauri dev`。
 2. 点击应用左侧「设置」，在「网页文章捕获」区复制本机配对码。
-3. Chrome 打开 `chrome://extensions`，Edge 打开 `edge://extensions`。开启「开发者模式」，点击「加载已解压的扩展」，选择本项目的 `extension` 文件夹。
+3. 点击设置里的「打开扩展文件夹」。Chrome 打开 `chrome://extensions`，Edge 打开 `edge://extensions`。开启「开发者模式」，点击「加载已解压的扩展」，选择打开的 `extension` 文件夹。
 4. 打开 GearNote 扩展的「扩展程序选项」，粘贴配对码，点击「连接本机程序」。
 5. 打开网页文章，或打开带字幕的 YouTube / Bilibili 视频，点击浏览器工具栏中的 GearNote 扩展图标。扩展图标出现 `OK` 后，资料会进入桌面程序右栏。再次点击已保存的资料不会重复创建记录。
 
@@ -89,7 +89,7 @@ DeepSeek 的 Chat Completions 默认启用思考模式，而强制调用工具�
 
 在对话中只引用一条视频后，可以输入「截取 01:20 的画面」或「截图 01:02:20」。这是本地指令，无须配置模型 API；GearNote 会优先复用画面分析留下的视频缓存，再从指定时间取一张 JPEG，作为图片消息保存在当前会话。点击图片下方的「加入提问」并发送问题后，GearNote 才会将该 JPEG 随问题发送至当前配置的模型服务；该模型必须支持 OpenAI 兼容的视觉输入。图片提问会产生模型服务费用，纯文本提问不附带图片。若 B 站限制匿名取流且本机没有视频缓存，需先在记录栏使用登录态完成一次画面分析。
 
-此功能需要 Node.js、`ffmpeg`、`ffprobe` 和 `yt-dlp`。Windows 预览目录的 `tools` 文件夹已放入经 SHA-256 校验的 FFmpeg 9.0.2 和 yt-dlp 2026.10.26，程序会优先使用它们，无须修改系统 PATH。重新从源码运行时，也可用 `winget install Gyan.FFmpeg` 安装 FFmpeg，并按 yt-dlp 官方说明安装其可执行文件。分析只适用于能够正常访问的视频；取流失败会在卡片中显示原因。画面分析需要下载视频并占用本地磁盘空间；下载缓存放在 GearNote 的应用缓存目录 `video-storyboard` 下，由分镜引擎按其缓存策略清理。项目源码位于 `vendor/dsh-video-storyboard`，按 Apache-2.0 许可证保留原作者 LICENSE 与 NOTICE。
+此功能需要 Node.js、`ffmpeg`、`ffprobe` 和 `yt-dlp`。Windows 安装包内含这四个工具，无须单独安装或修改系统 PATH。源码开发时也可使用系统已安装的工具。分析只适用于能够正常访问的视频；取流失败会在卡片中显示原因。画面分析会下载视频并占用本地磁盘空间；扫描缓存与视频下载缓存均放在 GearNote 的应用缓存目录 `video-storyboard` 下，视频下载缓存由分镜引擎按其缓存策略清理。项目源码位于 `vendor/dsh-video-storyboard`，按 Apache-2.0 许可证保留原作者 LICENSE 与 NOTICE。
 
 B 站返回 HTTP 567 时，GearNote 会先用较低画质重试一次。仍需登录的内容可在出错卡片中主动选择仅含 B 站域名的 Netscape 格式 `cookies.txt` 再试。该文件包含登录凭据，请勿分享或放入源码仓库；GearNote 仅在本次分析中创建临时副本，任务结束后删除。浏览器扩展本身不会自动读取或上传登录 cookie。登录凭据过期、会员权限不足或站点限制时，仍可能无法取流。
 
@@ -114,7 +114,9 @@ npm run tauri dev
 
 首次运行可能编译 Rust 依赖。只看前端时运行 `npm run dev`，浏览器访问 `http://127.0.0.1:1420/`。浏览器预览没有原生窗口控制；请使用 Tauri 程序检查标题栏按钮。
 
-本轮 Windows 预览程序位于 `src-tauri/target/release/gearnote.exe`，已经用 Tauri 正式构建流程生成并在桌面启动验证。原 `knowflow.exe` 与 `knowflow-settings-preview.exe` 属于旧名称和旧图标版本。源码可继续通过 `npm run tauri dev` 验证。独立运行的 exe 必须通过 Tauri 构建流程生成，普通 `cargo build --release` 会保留开发服务器地址，双击时出现 `127.0.0.1` 拒绝连接。当前预览程序不是完整安装包；单独复制 exe 不能保证分镜引擎、Node、FFmpeg 和 yt-dlp 等资源可用。旧整合预览包 `../KnowFlow-preview-storyboard/KnowFlow-vision.exe` 保留为历史产物。打开新版前请先关闭旧版；两个版本同时运行会占用相同的本机扩展连接端口。浏览器扩展有源码改动时，需在扩展管理页重新加载。
+给其他人试用时，发送 `src-tauri/target/release/bundle/nsis/` 中生成的 `GearNote_0.1.0_x64-setup.exe`。安装后在设置里点击「打开扩展文件夹」即可加载浏览器扩展。首次运行需在设置中填写自己的模型服务地址、模型名和密钥；资料与配置均保存在试用者自己的本机。安装包未经代码签名，Windows 可能显示来源确认提示。无字幕视频目前不能转写；浏览器扩展只捕获播放器已有字幕。打开新版前请先关闭旧版；两个版本同时运行会占用相同的本机扩展连接端口。浏览器扩展有源码改动时，需在扩展管理页重新加载。
+
+制作 Windows 安装包：在 `.release-tools/` 放入 `node.exe`、`ffmpeg.exe`、`ffprobe.exe`、`yt-dlp.exe` 和对应的 `FFmpeg-LICENSE.txt`、`FFmpeg-README.txt`、`yt-dlp-LICENSE.txt`，然后运行 `powershell -ExecutionPolicy Bypass -File scripts/build-windows-release.ps1`。也可给脚本传 `-NodeExe` 和 `-ToolDirectory`，从指定位置复制这些工具。二进制工具与生成的安装包不提交到 Git；发行时保留安装包内的许可文件。Node 版本须与 `licenses/Node-LICENSE-24.15.0.txt` 对应。
 
 ## 目前可操作的部分
 

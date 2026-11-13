@@ -1,0 +1,30 @@
+{
+  "bundle": {
+    "active": true,
+    "useLocalToolsDir": true,
+    "targets": ["nsis"],
+    "resources": {
+      "../vendor/dsh-video-storyboard/bin": "storyboard/bin",
+      "../vendor/dsh-video-storyboard/src": "storyboard/src",
+      "../vendor/dsh-video-storyboard/lib": "storyboard/lib",
+      "../vendor/dsh-video-storyboard/locale": "storyboard/locale",
+      "../vendor/dsh-video-storyboard/package.json": "storyboard/package.json",
+      "../vendor/dsh-video-storyboard/LICENSE": "storyboard/LICENSE",
+      "../vendor/dsh-video-storyboard/NOTICE": "storyboard/NOTICE",
+      "../extension": "extension",
+      "../.release-tools/node.exe": "tools/node.exe",
+      "../.release-tools/ffmpeg.exe": "tools/ffmpeg.exe",
+      "../.release-tools/ffprobe.exe": "tools/ffprobe.exe",
+      "../.release-tools/yt-dlp.exe": "tools/yt-dlp.exe",
+      "../licenses/Node-LICENSE-24.15.0.txt": "tools/Node-LICENSE.txt",
+      "../.release-tools/FFmpeg-LICENSE.txt": "tools/FFmpeg-LICENSE.txt",
+      "../.release-tools/FFmpeg-README.txt": "tools/FFmpeg-README.txt",
+      "../.release-tools/yt-dlp-LICENSE.txt": "tools/yt-dlp-LICENSE.txt"
+    },
+    "windows": {
+      "nsis": {
+        "languages": ["SimpChinese", "English"]
+      }
+    }
+  }
+}

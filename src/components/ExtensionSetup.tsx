@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { isTauri, invoke } from '@tauri-apps/api/core'
 import type { BridgeStatus } from '../records'
 import { ChamferCard } from './ChamferCard'
 import { HudButton } from './HudButton'
@@ -8,6 +9,15 @@ type Props = { status: BridgeStatus | null }
 
 export function ExtensionSetup({ status }: Props) {
   const [copyMessage, setCopyMessage] = useState('')
+  const [folderMessage, setFolderMessage] = useState('')
+  const openFolder = async () => {
+    try {
+      await invoke('open_extension_folder')
+      setFolderMessage('已打开扩展文件夹')
+    } catch (error) {
+      setFolderMessage(String(error))
+    }
+  }
   const copyCode = async () => {
     if (!status?.pairCode) return
     try {
@@ -23,6 +33,7 @@ export function ExtensionSetup({ status }: Props) {
     <p>点击浏览器工具栏图标后，扩展会保存当前文章；在带字幕的视频页面，则保存字幕与时间点。资料只写入这台电脑。</p>
     <div className="extension-setup-state" role="status">连接状态：<strong>{status?.error ? '本机连接异常' : status?.connected ? '扩展已连接' : '扩展未连接'}</strong></div>
     {status?.error && <p className="extension-setup-error">{status.error}</p>}
+    {isTauri() && <div><HudButton type="button" onClick={() => { void openFolder() }}>打开扩展文件夹</HudButton>{folderMessage && <small role="status">{folderMessage}</small>}</div>}
     <div className="extension-setup-pair">
       <span>PAIR CODE / 本机配对码</span>
       <code>{status?.pairCode ?? '请在 Tauri 桌面程序中查看'}</code>
@@ -31,7 +42,7 @@ export function ExtensionSetup({ status }: Props) {
     </div>
     <ol className="extension-setup-steps">
       <li>在 Chrome 打开 <code>chrome://extensions</code>；在 Edge 打开 <code>edge://extensions</code>。</li>
-      <li>开启「开发者模式」，选择「加载已解压的扩展」，选中本项目的 <code>extension</code> 文件夹。</li>
+      <li>开启「开发者模式」，选择「加载已解压的扩展」，选中上方按钮打开的 <code>extension</code> 文件夹。</li>
       <li>打开扩展详情的「扩展程序选项」，粘贴上方配对码并连接。</li>
       <li>打开普通网页文章，或打开带字幕的 YouTube / Bilibili 视频，点击浏览器工具栏的 GearNote 扩展图标。</li>
     </ol>
