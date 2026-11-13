@@ -1345,6 +1345,7 @@ pub fn preview_agent_context(app: AppHandle, agent: State<'_, AgentState>, stora
         Some(SourceChunk::image(frame.record_id, title.into(), frame.at_seconds))
     } else { None };
     let deep_record = if deep_mode { Some(validate_deep_video(&records, &referenced_ids, image.is_some(), !selected.is_empty(), open_choice.is_some())?) } else { None };
+    let general_chat = referenced_ids.is_empty() && selected.is_empty() && image.is_none();
     let index = (explore && !deep_mode && image.is_none() && selected.is_empty() && !referenced_ids.is_empty()).then(|| ReadIndex::new(&records, &referenced_ids));
     let mut prepared = if let Some(record) = deep_record {
         let batch_count = deep_video::batches(record).len();
@@ -1358,7 +1359,7 @@ pub fn preview_agent_context(app: AppHandle, agent: State<'_, AgentState>, stora
         context::build_with_message_refs_limit(&persona, question, &messages, &selected, &records, &referenced_ids, image,
             &project_memory, &working, &summary, 0, config.context_tier.char_limit())
     };
-    if prepared.sources.is_empty() && !prepared.preview.exploration_mode && project_memory.is_empty() && summary.is_empty() && working.goal.is_empty() && working.completed.is_empty() && working.next_step.is_empty() { return Err("请先添加资料，或保存项目记忆或工作状态".into()); }
+    if general_chat { context::enable_general_chat(&mut prepared, &persona); }
     if let Some(choice) = &open_choice {
         let addition = format!("\n\n{}", choice_system_instruction(choice, question, None));
         prepared.preview.system_text.push_str(&addition);
@@ -1492,10 +1493,12 @@ pub async fn ask_agent(app: AppHandle, agent: State<'_, AgentState>, storage: St
     let records = storage.records.lock().map_err(|_| "资料库暂不可用")?.iter()
         .filter(|record| referenced_ids.contains(&record.id)).cloned().collect::<Vec<_>>();
     let deep_record = if deep_mode { Some(validate_deep_video(&records, &referenced_ids, image_source.is_some(), !selected.is_empty(), open_choice.is_some())?) } else { None };
+    let general_chat = referenced_ids.is_empty() && selected.is_empty() && image_source.is_none();
     let use_exploration = config.explore_references && !deep_mode && image_source.is_none() && selected.is_empty() && !referenced_ids.is_empty();
     let index = use_exploration.then(|| ReadIndex::new(&records, &referenced_ids));
     let mut prepared = context::build_with_message_refs_limit(&persona, question, &recent_messages, &selected, &records, &referenced_ids,
         image_source, &project_memory, &working, &summary, 0, config.context_tier.char_limit());
+    if general_chat { context::enable_general_chat(&mut prepared, &persona); }
     let mut exploration_prepared = index.as_ref().filter(|index| !index.is_empty()).map(|index| {
         context::build_exploration_limit(&persona, question, &recent_messages, referenced_ids.len(),
             index.directory(&records, &referenced_ids, 6_000), index.len(), &project_memory, &working, &summary, config.context_tier.char_limit())
@@ -1512,7 +1515,6 @@ pub async fn ask_agent(app: AppHandle, agent: State<'_, AgentState>, storage: St
         if let Some(exploration_prepared) = &mut exploration_prepared { exploration_prepared.system_text.push_str(&instruction); }
         if let Some(deep_prepared) = &mut deep_prepared { deep_prepared.system_text.push_str(&instruction); }
     }
-    if prepared.sources.is_empty() && exploration_prepared.is_none() && deep_prepared.is_none() && project_memory.is_empty() && summary.is_empty() && working.goal.is_empty() && working.completed.is_empty() && working.next_step.is_empty() { return Err("请先添加资料，或保存项目记忆或工作状态".into()); }
     let client = reqwest::Client::builder().connect_timeout(Duration::from_secs(15)).timeout(Duration::from_secs(180)).build().map_err(|_| "无法初始化网络客户端")?;
     let (exploration, read_coverage) = if let (Some(record), Some(deep_prepared)) = (deep_record, deep_prepared.as_ref()) {
         let (result, coverage) = explore_video_deep(|message| {
@@ -1578,9 +1580,7 @@ pub async fn ask_agent(app: AppHandle, agent: State<'_, AgentState>, storage: St
     let answer = answer.trim();
     if answer.is_empty() { return Err("模型返回了空回答".into()); }
     if answer.chars().count() > 20_000 { return Err("模型回答过长，未保存".into()); }
-    let background_available = referenced_ids.is_empty() && selected.is_empty() && attachment.is_none()
-        && (!project_memory.is_empty() || !working.goal.is_empty() || !working.completed.is_empty() || !working.next_step.is_empty());
-    let citations = validate_answer_evidence(answer, &sources, background_available)?;
+    let citations = validate_answer_evidence(answer, &sources, general_chat)?;
     let now = now_millis()?;
     let user = ChatMessage { id: format!("msg-{}", Uuid::new_v4()), role: "user".into(), created_at: now.to_string(), paragraphs: vec![question.into()], tool_steps: Vec::new(), citations: Vec::new(), frame: attachment.as_ref().map(|(frame, _)| frame.clone()), run: None, suggestions: Vec::new() };
     let assistant = ChatMessage { id: format!("msg-{}", Uuid::new_v4()), role: "agent".into(), created_at: now.to_string(), paragraphs: vec![answer.into()], tool_steps, citations, frame: None,
@@ -1606,6 +1606,13 @@ pub async fn ask_agent(app: AppHandle, agent: State<'_, AgentState>, storage: St
 mod tests {
     use super::*;
     use crate::{storage::KnowledgeRecord, ProcessStatus};
+
+    #[test]
+    fn ordinary_chat_without_references_accepts_plain_answer_but_not_fake_citation() {
+        assert!(validate_answer_evidence("可以先明确目标，再列出可选方案。", &[], true).unwrap().is_empty());
+        assert!(validate_answer_evidence("根据资料 [1]，方案已经完成。", &[], true).is_err());
+        assert!(validate_answer_evidence("根据资料，方案已经完成。", &[], false).is_err());
+    }
 
     #[test]
     fn deep_video_stops_after_verified_enough_and_reports_partial_coverage() {

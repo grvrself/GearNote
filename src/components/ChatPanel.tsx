@@ -110,7 +110,6 @@ export function ChatPanel({ records, pendingChoice = null, sessionId, referenced
   const referenceLabel = referencedRecords[0]?.title ?? (selectedMessages[0] ? `${selectedMessages[0].role === 'agent' ? 'Agent 回答' : '你的消息'}：${selectedMessages[0].paragraphs.join(' ')}` : '')
   const usableMemory = projectMemory.filter(item => !item.expiresAt || Number(item.expiresAt) > Date.now())
   const hasBackground = usableMemory.length > 0 || Boolean(compactedSummary || workingContext.goal || workingContext.completed || workingContext.nextStep)
-  const hasReference = referencedRecords.length > 0 || selectedMessages.length > 0 || Boolean(attachedFrame) || hasBackground
   const canSend = agentAvailable || isCaptureCommand(draft)
 
   useEffect(() => { setDraft(''); setAttachedFrame(null); setSelectedMessageIds([]); setDeepMode(false); setDismissedNotes([]); setContextPreview(null); setContextPreviewOpen(false) }, [sessionId])
@@ -132,7 +131,7 @@ export function ChatPanel({ records, pendingChoice = null, sessionId, referenced
     const sendingSessionId = sessionId
     const question = draft.trim()
     const capture = isCaptureCommand(question)
-    if (!question || !onSend || !(agentAvailable || capture) || sending || !hasReference || (capture && referencedRecords.length === 0)) return
+    if (!question || !onSend || !(agentAvailable || capture) || sending || (capture && referencedRecords.length === 0)) return
     setDraft('')
     setContextPreview(null)
     setContextPreviewOpen(false)
@@ -219,7 +218,7 @@ export function ChatPanel({ records, pendingChoice = null, sessionId, referenced
 
     {!compact && <GearDivider area="composer" />}
     <div className="chat-composer" id="cmd-01">
-      <div className="composer-head"><label htmlFor="agent-draft">向 Agent 提问</label><div>{onPreviewContext && <button className="context-preview-toggle" type="button" aria-expanded={contextPreviewOpen} disabled={sending || contextPreviewBusy || !draft.trim() || isCaptureCommand(draft) || !hasReference} onClick={() => { void previewContext() }}>{contextPreviewBusy ? '读取中' : contextPreviewOpen ? '收起上下文' : '本轮上下文'}</button>}<span data-available={canSend}>{sending ? isCaptureCommand(draft) ? '正在截取' : '正在回答' : canSend ? '可以发送' : '尚未接入'}</span></div></div>
+      <div className="composer-head"><label htmlFor="agent-draft">向 Agent 提问</label><div>{onPreviewContext && <button className="context-preview-toggle" type="button" aria-expanded={contextPreviewOpen} disabled={sending || contextPreviewBusy || !draft.trim() || isCaptureCommand(draft)} onClick={() => { void previewContext() }}>{contextPreviewBusy ? '读取中' : contextPreviewOpen ? '收起上下文' : '本轮上下文'}</button>}<span data-available={canSend}>{sending ? isCaptureCommand(draft) ? '正在截取' : '正在回答' : canSend ? '可以发送' : '尚未接入'}</span></div></div>
       {attachedFrame && <div className="composer-frame"><span>已选截图 / {formatElapsed(attachedFrame.atSeconds)} · 发送时会交给当前模型</span><button type="button" disabled={sending} aria-label="移除已选截图" onClick={() => { setAttachedFrame(null); setContextPreview(null); setContextPreviewOpen(false) }}>移除</button></div>}
       {referenceCount > 0 && <details className="reference-review" aria-label="本轮参考">
         <summary className="reference-review-summary" title={referenceLabel}><strong>本轮参考</strong><span>{referenceLabel}</span><small aria-live="polite">{referenceCount} 条</small></summary>
@@ -251,7 +250,7 @@ export function ChatPanel({ records, pendingChoice = null, sessionId, referenced
         {contextPreview.explorationMode ? <details open><summary>{activeDeepMode ? '深度模式 · 字幕待逐批读取' : '资料目录 · 正文待读取'}</summary><pre>{contextPreview.directoryText}</pre></details> : <details open><summary>资料片段 · {contextPreview.sources.length} 条</summary>{contextPreview.sources.map(source => <div className="context-preview-source" key={source.index}><strong>{source.label} {source.title}{source.atSeconds == null ? '' : ` / ${formatElapsed(source.atSeconds)}`}{source.visual ? ' · 图片' : ''}{source.selectionReason === 'coverage' ? ' · 覆盖式选取' : ''}</strong><small>捕获时间：{source.capturedAt || '未知'} · 来源：{source.sourceUrl || '未记录'}</small><pre>{source.text}</pre></div>)}</details>}
       </div>}
       {error && <p className="chat-error" role="alert">{error}</p>}
-      <div className="composer-foot"><span>{attachedFrame ? '图片已加入本次提问' : selectedMessages.length > 0 ? `${selectedMessages.length} 条对话消息已选中` : referencedRecords.length === 0 ? hasBackground ? '可依据记忆和会话计划提问' : '请先添加资料或选择消息' : `${referencedRecords.length} 条资料已选中`}</span><div><HudButton type="button" onClick={onShowHistory}>＋ 添加参考</HudButton>{onSummarize && <HudButton type="button" disabled={!agentAvailable || sending || referencedRecords.length === 0} onClick={() => onSummarize?.(activeDeepMode)}>总结</HudButton>}{!agentAvailable && onOpenAgentSetup && <HudButton type="button" onClick={onOpenAgentSetup}>配置 Agent</HudButton>}<HudButton type="button" variant="primary" disabled={!canSend || sending || !draft.trim() || !hasReference || (isCaptureCommand(draft) && referencedRecords.length === 0)} onClick={() => { void send() }}>{sending ? isCaptureCommand(draft) ? '截取中' : '生成中' : <><span className="mono-send-plane"><PaperPlaneIcon /></span>发送<span className="hud-send-arrow"> →</span></>}</HudButton></div></div>
+      <div className="composer-foot"><span>{attachedFrame ? '图片已加入本次提问' : selectedMessages.length > 0 ? `${selectedMessages.length} 条对话消息已选中` : referencedRecords.length === 0 ? hasBackground ? '可依据记忆和会话计划提问' : '可直接提问，也可添加参考资料' : `${referencedRecords.length} 条资料已选中`}</span><div><HudButton type="button" onClick={onShowHistory}>＋ 添加参考</HudButton>{onSummarize && <HudButton type="button" disabled={!agentAvailable || sending || referencedRecords.length === 0} onClick={() => onSummarize?.(activeDeepMode)}>总结</HudButton>}{!agentAvailable && onOpenAgentSetup && <HudButton type="button" onClick={onOpenAgentSetup}>配置 Agent</HudButton>}<HudButton type="button" variant="primary" disabled={!canSend || sending || !draft.trim() || (isCaptureCommand(draft) && referencedRecords.length === 0)} onClick={() => { void send() }}>{sending ? isCaptureCommand(draft) ? '截取中' : '生成中' : <><span className="mono-send-plane"><PaperPlaneIcon /></span>发送<span className="hud-send-arrow"> →</span></>}</HudButton></div></div>
     </div>
   </section>
 }
