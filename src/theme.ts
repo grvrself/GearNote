@@ -6,8 +6,8 @@ export type Theme = 'hud' | 'mono'
 const KEY = 'knowflow-theme'
 
 export function readTheme(): Theme {
-  try { return localStorage.getItem(KEY) === 'mono' ? 'mono' : 'hud' }
-  catch { return 'hud' }
+  try { return localStorage.getItem(KEY) === 'hud' ? 'hud' : 'mono' }
+  catch { return 'mono' }
 }
 
 export function applyTheme(theme: Theme) {

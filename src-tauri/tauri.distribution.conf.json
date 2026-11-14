@@ -11,6 +11,7 @@
       "../vendor/dsh-video-storyboard/package.json": "storyboard/package.json",
       "../vendor/dsh-video-storyboard/LICENSE": "storyboard/LICENSE",
       "../vendor/dsh-video-storyboard/NOTICE": "storyboard/NOTICE",
+      "../LICENSE": "LICENSE",
       "../extension": "extension",
       "../.release-tools/node.exe": "tools/node.exe",
       "../.release-tools/ffmpeg.exe": "tools/ffmpeg.exe",

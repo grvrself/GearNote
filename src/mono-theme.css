@@ -1,4 +1,4 @@
-/* The monochrome theme is an opt-in visual layer. The HUD tokens remain the default. */
+/* The monochrome theme is the default; the HUD tokens remain available by choice. */
 .mono-brand-gear, .mono-active-gear, .mono-status-gear, .mono-note-gear, .mono-send-plane, .mono-workspace-gear, .gear-divider { display: none; }
 .mono-thinking-gear { display: none; }
 

@@ -42,8 +42,12 @@ pub fn start(app: AppHandle) {
 fn handle_connection(mut stream: TcpStream, app: &AppHandle) {
     let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
     let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
+    let mut allowed_origin = None;
     let response = read_request(&stream).and_then(|(method, path, headers, body)| {
+        let origin = check_browser_origin(&headers)?;
+        allowed_origin = origin.map(str::to_owned);
         if method == "OPTIONS" {
+            check_preflight(&headers)?;
             return Ok((204, json!({})));
         }
         let supplied = headers.get("x-knowflow-token").map(String::as_str).unwrap_or_default();
@@ -116,7 +120,38 @@ fn handle_connection(mut stream: TcpStream, app: &AppHandle) {
         Ok(result) => result,
         Err((status, message)) => (status, json!({ "error": message })),
     };
-    write_response(&mut stream, status, &body);
+    write_response(&mut stream, status, &body, allowed_origin.as_deref());
+}
+
+// Browser requests must come from a Chrome/Edge extension. Native clients without
+// an Origin still need the pairing token on every non-preflight request.
+fn check_browser_origin(headers: &HashMap<String, String>) -> Result<Option<&str>, (u16, String)> {
+    if headers.get("host").map(String::as_str) != Some("127.0.0.1:45147") {
+        return Err((403, "本机接口地址无效".into()));
+    }
+    let Some(origin) = headers.get("origin").map(String::as_str) else { return Ok(None) };
+    let Some(id) = origin.strip_prefix("chrome-extension://") else {
+        return Err((403, "只允许浏览器扩展连接本机接口".into()));
+    };
+    if id.len() != 32 || !id.bytes().all(|byte| (b'a'..=b'p').contains(&byte)) {
+        return Err((403, "浏览器扩展来源无效".into()));
+    }
+    Ok(Some(origin))
+}
+
+fn check_preflight(headers: &HashMap<String, String>) -> Result<(), (u16, String)> {
+    if !headers.contains_key("origin") {
+        return Err((403, "预检请求缺少扩展来源".into()));
+    }
+    if !matches!(headers.get("access-control-request-method").map(String::as_str), Some("GET" | "POST")) {
+        return Err((403, "预检请求方法无效".into()));
+    }
+    if let Some(requested) = headers.get("access-control-request-headers") {
+        if requested.split(',').any(|header| !matches!(header.trim().to_ascii_lowercase().as_str(), "content-type" | "x-knowflow-token")) {
+            return Err((403, "预检请求头无效".into()));
+        }
+    }
+    Ok(())
 }
 
 fn same_token(received: &str, expected: &str) -> bool {
@@ -172,17 +207,74 @@ fn read_header_line(reader: &mut BufReader<TcpStream>, limit: usize) -> Result<S
     String::from_utf8(bytes).map_err(|_| (400, "请求头编码无效".into()))
 }
 
-fn write_response(stream: &mut TcpStream, status: u16, body: &Value) {
+fn write_response(stream: &mut TcpStream, status: u16, body: &Value, origin: Option<&str>) {
     let phrase = match status {
         200 => "OK", 204 => "No Content", 400 => "Bad Request", 401 => "Unauthorized",
-        404 => "Not Found", 413 => "Content Too Large", 431 => "Request Header Fields Too Large",
+        403 => "Forbidden", 404 => "Not Found", 413 => "Content Too Large", 431 => "Request Header Fields Too Large",
         _ => "Internal Server Error",
     };
     let bytes = if status == 204 { Vec::new() } else { body.to_string().into_bytes() };
+    let cors = cors_headers(origin);
     let header = format!(
-        "HTTP/1.1 {status} {phrase}\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: {}\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type, X-KnowFlow-Token\r\nAccess-Control-Allow-Private-Network: true\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n",
+        "HTTP/1.1 {status} {phrase}\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: {}\r\nVary: Origin\r\n{cors}Cache-Control: no-store\r\nConnection: close\r\n\r\n",
         bytes.len()
     );
     let _ = stream.write_all(header.as_bytes());
     let _ = stream.write_all(&bytes);
+}
+
+fn cors_headers(origin: Option<&str>) -> String {
+    origin.map(|origin| format!("Access-Control-Allow-Origin: {origin}\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type, X-KnowFlow-Token\r\nAccess-Control-Allow-Private-Network: true\r\n")).unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn headers(origin: Option<&str>) -> HashMap<String, String> {
+        let mut headers = HashMap::from([("host".into(), "127.0.0.1:45147".into())]);
+        if let Some(origin) = origin { headers.insert("origin".into(), origin.into()); }
+        headers
+    }
+
+    #[test]
+    fn accepts_extension_origin_and_native_client() {
+        let extension = "chrome-extension://abcdefghijklmnopabcdefghijklmnop";
+        assert_eq!(check_browser_origin(&headers(Some(extension))).unwrap(), Some(extension));
+        assert_eq!(check_browser_origin(&headers(None)).unwrap(), None);
+    }
+
+    #[test]
+    fn rejects_web_origin_and_rebound_host() {
+        assert!(check_browser_origin(&headers(Some("https://example.com"))).is_err());
+        assert!(check_browser_origin(&headers(Some("null"))).is_err());
+        assert!(check_browser_origin(&headers(Some("chrome-extension://bad/id"))).is_err());
+        let mut rebound = headers(None);
+        rebound.insert("host".into(), "example.com:45147".into());
+        assert!(check_browser_origin(&rebound).is_err());
+    }
+
+    #[test]
+    fn preflight_allows_only_bridge_methods_and_headers() {
+        let mut request = headers(Some("chrome-extension://abcdefghijklmnopabcdefghijklmnop"));
+        request.insert("access-control-request-method".into(), "POST".into());
+        request.insert("access-control-request-headers".into(), "content-type, x-knowflow-token".into());
+        assert!(check_preflight(&request).is_ok());
+        request.insert("access-control-request-headers".into(), "authorization".into());
+        assert!(check_preflight(&request).is_err());
+        request.insert("access-control-request-headers".into(), "content-type".into());
+        request.insert("access-control-request-method".into(), "DELETE".into());
+        assert!(check_preflight(&request).is_err());
+        assert!(check_preflight(&headers(None)).is_err());
+    }
+
+    #[test]
+    fn cors_headers_only_echo_approved_origin() {
+        let extension = "chrome-extension://abcdefghijklmnopabcdefghijklmnop";
+        let request = headers(Some(extension));
+        let origin = check_browser_origin(&request).unwrap();
+        assert!(cors_headers(origin).contains(&format!("Access-Control-Allow-Origin: {extension}\r\n")));
+        assert!(cors_headers(None).is_empty());
+        assert!(check_browser_origin(&headers(Some("https://example.com"))).is_err());
+    }
 }

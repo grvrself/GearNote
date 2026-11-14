@@ -18,6 +18,7 @@
       "../vendor/dsh-video-storyboard/package.json": "storyboard/package.json",
       "../vendor/dsh-video-storyboard/LICENSE": "storyboard/LICENSE",
       "../vendor/dsh-video-storyboard/NOTICE": "storyboard/NOTICE",
+      "../LICENSE": "LICENSE",
       "../extension": "extension"
     }
   },
@@ -25,6 +26,9 @@
     "windows": [
       { "title": "GearNote", "width": 1480, "height": 900, "minWidth": 880, "minHeight": 600, "decorations": false, "shadow": false }
     ],
-    "security": { "csp": null }
+    "security": {
+      "csp": "default-src 'self'; base-uri 'none'; object-src 'none'; frame-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: asset: http://asset.localhost; font-src 'self'; connect-src 'self' ipc: http://ipc.localhost",
+      "devCsp": null
+    }
   }
 }
