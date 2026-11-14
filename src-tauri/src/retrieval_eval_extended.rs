@@ -97,20 +97,41 @@ fn cases() -> Vec<Case> {
             record(&target, "连续短语", format!("{filler}{quote}"), None),
         ], target, None);
     }
+    // Varied probes outside the repeated templates above. These expose lexical gaps
+    // that a short alias list does not solve; they are not a claim of real-world recall.
+    let semantic_probes = [
+        ("网络断了还能继续编辑吗", "应用在离线状态下允许修改草稿。"),
+        ("怎样找回误删的笔记", "回收站中保留已移除的记录七天。"),
+        ("这项功能收费吗", "使用该服务无需支付费用。"),
+        ("没有声音如何排查", "音频静音时应先核对输出设备。"),
+        ("为什么下载这么慢", "服务端限流会降低文件传输速度。"),
+        ("能否把内容交给同事", "团队成员可共享这份文档。"),
+        ("数据会自动保存吗", "系统每隔五分钟持久化当前草稿。"),
+        ("出现白屏该怎么处理", "界面空白时先清除网页缓存。"),
+        ("怎样撤销刚才的操作", "可通过历史记录恢复上一版本。"),
+        ("导出失败后怎么检查", "写入异常时应核对磁盘剩余空间。"),
+    ];
+    for (i, (question, quote)) in semantic_probes.into_iter().enumerate() {
+        let id = format!("semantic-probe-{i}");
+        all.push(Case { group: "semantic_probe", question: question.into(), quote: quote.into(),
+            record_id: id.clone(), seconds: None, absent_fact: format!("不存在的核验码-{id}"),
+            records: with_distractors(&id, record(&id, "操作指南", quote.into(), None)) });
+    }
     all
 }
 
 #[derive(Default)]
 struct Metrics { total: usize, relevant: usize, hits: usize, mrr: f64, ndcg: f64, tool_hits: usize, tool_mrr: f64, no_answer_matches: usize }
 
-// 当前词法基线：90 条有答案案例中命中 60 条；Recall@8、MRR@8、NDCG@8 均为 0.667。
+// 原有 100 条模板案例的词法基线：90 条有答案案例中命中 60 条；Recall@8、MRR@8、NDCG@8 均为 0.667。
 // bilingual/synonym/traditional 各 0/10；其余六个有答案组各 10/10 且黄金片段排第 1。
 // search_references 的前六条同样命中 60/90，ToolMRR=0.667。
 // no_answer 共 10 条，不参与排序指标；检索排名不能证明模型会正确拒答。
+// 另外 10 条多样化语义探针单独报告，避免模板分数掩盖通用语义检索缺口。
 #[test]
 fn extended_retrieval_baseline() {
     let cases = cases();
-    assert_eq!(cases.len(), 100);
+    assert_eq!(cases.len(), 110);
     let mut by_group: BTreeMap<&str, Metrics> = BTreeMap::new();
     for case in &cases {
         assert!(!case.records.iter().any(|record| record.content_text.contains(&case.absent_fact)
@@ -144,6 +165,10 @@ fn extended_retrieval_baseline() {
             m.tool_hits as f64 / divisor, m.tool_mrr / divisor, m.no_answer_matches);
         assert_eq!(m.total, 10);
     }
+    let answerable = by_group.values().map(|m| m.relevant).sum::<usize>();
+    let hits = by_group.values().map(|m| m.hits).sum::<usize>();
+    println!("overall_answerable={answerable} overall_hits={hits} Recall@8={:.3}", hits as f64 / answerable as f64);
     // 无答案场景只验证资料缺失；拒答行为需要独立的回答评测。
     assert_eq!(by_group["no_answer"].relevant, 0);
+    assert_eq!(by_group["no_answer"].no_answer_matches, 0);
 }

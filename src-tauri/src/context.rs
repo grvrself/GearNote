@@ -107,8 +107,23 @@ fn shortened(text: &str, max: usize) -> (String, bool) {
     (text.chars().take(max.saturating_sub(1)).collect::<String>() + "…", true)
 }
 
+fn normalize_search_char(ch: char) -> char {
+    if matches!(ch as u32, 0xff01..=0xff5e) {
+        return char::from_u32(ch as u32 - 0xfee0).unwrap_or(ch);
+    }
+    match ch {
+        '資' => '资', '備' => '备', '驗' => '验', '記' => '记', '錄' => '录',
+        '應' => '应', '開' => '开', '關' => '关', '檔' => '档', '網' => '网',
+        '機' => '机', '會' => '会', '計' => '计', '畫' => '画', '數' => '数',
+        '據' => '据', '輸' => '输', '載' => '载', '讀' => '读', '寫' => '写',
+        '語' => '语', '頻' => '频', '視' => '视', '處' => '处', '對' => '对',
+        '規' => '规', '則' => '则', '為' => '为', '麼' => '么', '線' => '线',
+        _ => ch,
+    }
+}
+
 pub(crate) fn terms(text: &str) -> HashSet<String> {
-    let lower = text.to_lowercase();
+    let lower = text.chars().map(normalize_search_char).collect::<String>().to_lowercase();
     let chars: Vec<char> = lower.chars().collect();
     let mut result = HashSet::new();
     let mut word = String::new();
@@ -123,6 +138,21 @@ pub(crate) fn terms(text: &str) -> HashSet<String> {
         }
     }
     result
+}
+
+// Keep this deliberately small: an expansion helps recall, but must not outrank
+// an exact match or turn a broad question into an unrelated search.
+fn query_expansions(question: &str) -> HashSet<String> {
+    let normalized = question.chars().map(normalize_search_char).collect::<String>().to_lowercase();
+    let mut expanded = HashSet::new();
+    for (chinese, english) in [("备份", "backup"), ("离线", "offline")] {
+        if normalized.contains(chinese) { expanded.insert(english.to_string()); }
+        if normalized.contains(english) { expanded.insert(chinese.to_string()); }
+    }
+    if (normalized.contains("避免") || normalized.contains("防止")) && normalized.contains("丢失") {
+        expanded.insert("备份".to_string());
+    }
+    expanded
 }
 
 fn split_long_unit(unit: &str) -> Vec<String> {
@@ -220,7 +250,9 @@ pub(crate) fn chunks(record: &KnowledgeRecord) -> Vec<SourceChunk> {
 }
 
 pub(crate) fn score_chunks(question: &str, chunks: &[&SourceChunk]) -> Vec<usize> {
-    let query = terms(question);
+    let direct = terms(question);
+    let mut query = direct.clone();
+    query.extend(query_expansions(question));
     if query.is_empty() { return vec![0; chunks.len()]; }
     let texts = chunks.iter().map(|chunk| terms(&chunk.search_text)).collect::<Vec<_>>();
     let titles = chunks.iter().map(|chunk| terms(&chunk.title)).collect::<Vec<_>>();
@@ -230,10 +262,12 @@ pub(crate) fn score_chunks(question: &str, chunks: &[&SourceChunk]) -> Vec<usize
     }
     texts.iter().zip(titles.iter()).zip(chunks).map(|((text, title), chunk)| {
         let body = query.iter().filter(|term| text.contains(*term)).map(|term| {
-            ((chunks.len() + 1) as f64 / (frequency[term] + 1) as f64).ln() + 1.0
+            let weight = if direct.contains(term) { 1.0 } else { 0.35 };
+            (((chunks.len() + 1) as f64 / (frequency[term] + 1) as f64).ln() + 1.0) * weight
         }).sum::<f64>();
         let heading = query.iter().filter(|term| title.contains(*term)).map(|term| {
-            (((chunks.len() + 1) as f64 / (frequency[term] + 1) as f64).ln() + 1.0) * 2.0
+            let weight = if direct.contains(term) { 1.0 } else { 0.35 };
+            (((chunks.len() + 1) as f64 / (frequency[term] + 1) as f64).ln() + 1.0) * 2.0 * weight
         }).sum::<f64>();
         let length = char_count(&chunk.search_text).max(120) as f64;
         ((body / (length / 500.0).max(0.4).sqrt() + heading) * 1000.0).round() as usize
@@ -412,6 +446,23 @@ pub fn build_exploration_limit(persona: &str, question: &str, messages: &[ChatMe
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn search_terms_normalize_common_traditional_and_fullwidth_forms() {
+        assert!(terms("資料備份與校驗").contains("备份"));
+        assert!(terms("資料備份與校驗").contains("校验"));
+        assert!(terms("ＡＬＰＨＡ－１２").contains("alpha"));
+        assert!(terms("ＡＬＰＨＡ－１２").contains("12"));
+    }
+
+    #[test]
+    fn query_expansion_is_limited_to_explicit_intents() {
+        assert!(query_expansions("离线备份怎么做").contains("offline"));
+        assert!(query_expansions("离线备份怎么做").contains("backup"));
+        assert!(query_expansions("怎样避免文件丢失").contains("备份"));
+        assert!(!query_expansions("文件丢失的原因是什么").contains("备份"));
+        assert!(query_expansions("删除文件怎么办").is_empty());
+    }
 
     #[test]
     fn general_chat_keeps_history_without_inventing_sources() {
