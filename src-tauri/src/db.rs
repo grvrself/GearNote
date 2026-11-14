@@ -587,6 +587,47 @@ pub fn upsert_note(path: &Path, note: &Note, position: usize) -> Result<(), Stri
     transaction.commit().map_err(|error| format!("笔记事务提交失败：{error}"))
 }
 
+pub fn delete_note(path: &Path, note: &Note) -> Result<(Vec<String>, Vec<String>), String> {
+    let mut connection = open(path)?;
+    let transaction = connection.transaction().map_err(|error| format!("笔记删除事务启动失败：{error}"))?;
+    let version: Option<i64> = transaction.query_row("SELECT version FROM entity_meta WHERE name='notes'", [], |row| row.get(0))
+        .optional().map_err(|error| format!("笔记版本读取失败：{error}"))?;
+    if version != Some(2) { return Err("笔记尚未完成迁移，请重启应用".into()); }
+    let expected = serde_json::to_string(note).map_err(|error| format!("笔记编码失败：{error}"))?;
+    let position: i64 = transaction.query_row("SELECT ordinal FROM note_rows WHERE id=?1 AND json=?2",
+        params![&note.id, &expected], |row| row.get(0)).optional()
+        .map_err(|error| format!("笔记检查失败：{error}"))?.ok_or("笔记已变化，请刷新后重试")?;
+    let draft_ids = {
+        let mut query = transaction.prepare("SELECT id FROM note_frame_drafts WHERE note_id=?1")
+            .map_err(|error| format!("笔记截图查询失败：{error}"))?;
+        let ids = query.query_map([&note.id], |row| row.get::<_, String>(0))
+            .map_err(|error| format!("笔记截图查询失败：{error}"))?
+            .collect::<Result<Vec<_>, _>>().map_err(|error| format!("笔记截图查询失败：{error}"))?;
+        ids
+    };
+    let pending_ids = {
+        let mut query = transaction.prepare("SELECT id FROM workflow_proposals WHERE target_id=?1 AND kind='note_edit' AND status='pending'")
+            .map_err(|error| format!("笔记提案查询失败：{error}"))?;
+        let ids = query.query_map([&note.id], |row| row.get::<_, String>(0))
+            .map_err(|error| format!("笔记提案查询失败：{error}"))?
+            .collect::<Result<Vec<_>, _>>().map_err(|error| format!("笔记提案查询失败：{error}"))?;
+        ids
+    };
+    for (table, label) in [("note_renditions", "高级版"), ("note_assets", "笔记图片"),
+        ("note_frame_drafts", "笔记截图"), ("workflow_events", "修改记录"),
+        ("workflow_proposals", "修改提案")] {
+        transaction.execute(&format!("DELETE FROM {table} WHERE {}=?1", if table.starts_with("workflow_") { "target_id" } else { "note_id" }), [&note.id])
+            .map_err(|error| format!("{label}删除失败：{error}"))?;
+    }
+    let removed = transaction.execute("DELETE FROM note_rows WHERE id=?1 AND json=?2", params![&note.id, &expected])
+        .map_err(|error| format!("笔记删除失败：{error}"))?;
+    if removed != 1 { return Err("笔记已变化，请刷新后重试".into()); }
+    transaction.execute("UPDATE note_rows SET ordinal=ordinal-1 WHERE ordinal>?1", [position])
+        .map_err(|error| format!("笔记顺序更新失败：{error}"))?;
+    transaction.commit().map_err(|error| format!("笔记删除提交失败：{error}"))?;
+    Ok((draft_ids, pending_ids))
+}
+
 pub fn list_note_folders(path: &Path) -> Result<Vec<NoteFolder>, String> {
     let connection = open(path)?;
     let mut query = connection.prepare("SELECT id,name,created_at FROM note_folders ORDER BY name COLLATE NOCASE,id")
@@ -1001,6 +1042,39 @@ mod tests {
 
     fn note(id: &str, title: &str) -> Note {
         serde_json::from_value(json!({"id":id,"title":title,"body":"正文","sources":[],"createdAt":100,"updatedAt":200})).unwrap()
+    }
+
+    #[test]
+    fn deleting_note_removes_associated_rows_and_keeps_remaining_order() {
+        let dir = std::env::temp_dir().join(format!("gearnote-delete-note-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(FILE_NAME);
+        let first = note("first", "第一篇");
+        let second = note("second", "第二篇");
+        write_notes(&path, &[first.clone(), second.clone()]).unwrap();
+        let connection = open(&path).unwrap();
+        connection.execute_batch("INSERT INTO note_renditions(id,note_id,theme,note_snapshot_json,created_at) VALUES ('design','first','mono','{}',1);
+            INSERT INTO note_assets(id,note_id,source_image_id,record_id,at_seconds,relative_path,created_at) VALUES ('asset','first','frame','video',1,'note-assets/first/asset.jpg',1);
+            INSERT INTO note_frame_drafts(id,note_id,session_id,record_id,at_seconds,created_at) VALUES ('draft','first','chat','video',1,1);
+            INSERT INTO workflow_proposals(id,kind,target_id,before_json,after_json,mode,before_text,after_text,reason,status,created_at) VALUES ('proposal','note_edit','first','{}','{}','append','','','', 'pending','1');
+            INSERT INTO workflow_events(id,proposal_id,action,target_id,at,detail) VALUES ('event','proposal','created','first','1','');").unwrap();
+        drop(connection);
+        let mut stale = first.clone();
+        stale.title = "过期内容".into();
+        assert!(delete_note(&path, &stale).is_err());
+        assert_eq!(read_notes(&path).unwrap().unwrap().len(), 2);
+        assert_eq!(delete_note(&path, &first).unwrap(), (vec!["draft".to_string()], vec!["proposal".to_string()]));
+        assert_eq!(read_notes(&path).unwrap().unwrap().iter().map(|note| note.id.as_str()).collect::<Vec<_>>(), vec!["second"]);
+        let connection = open(&path).unwrap();
+        for (table, column) in [("note_renditions", "note_id"), ("note_assets", "note_id"),
+            ("note_frame_drafts", "note_id"), ("workflow_proposals", "target_id"), ("workflow_events", "target_id")] {
+            let count: i64 = connection.query_row(&format!("SELECT count(*) FROM {table} WHERE {column}='first'"), [], |row| row.get(0)).unwrap();
+            assert_eq!(count, 0, "{table} still refers to deleted note");
+        }
+        drop(connection);
+        upsert_note(&path, &note("third", "第三篇"), 1).unwrap();
+        assert_eq!(read_notes(&path).unwrap().unwrap().len(), 2);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

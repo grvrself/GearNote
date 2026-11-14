@@ -175,6 +175,30 @@ pub fn save_note(app: AppHandle, state: State<'_, NotesState>, records: State<'_
 }
 
 #[tauri::command]
+pub fn delete_note(app: AppHandle, state: State<'_, NotesState>, id: String) -> Result<(), String> {
+    let data_dir = app.path().app_data_dir().map_err(|error| error.to_string())?;
+    let mut guard = state.notes.lock().map_err(|_| "笔记暂不可用")?;
+    let position = guard.iter().position(|note| note.id == id).ok_or("笔记不存在")?;
+    let note = &guard[position];
+    let (draft_ids, pending_ids) = crate::db::delete_note(&state.path, note)?;
+    let note_id = note.id.clone();
+    guard.remove(position);
+    drop(guard);
+    if !note_id.is_empty() && note_id.len() <= 100 && note_id.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_') {
+        let _ = fs::remove_dir_all(data_dir.join("note-assets").join(&note_id));
+    }
+    for draft_id in draft_ids {
+        if Uuid::parse_str(&draft_id).is_ok() {
+            let _ = fs::remove_file(data_dir.join("note-frame-drafts").join(format!("{draft_id}.jpg")));
+        }
+    }
+    for proposal_id in pending_ids {
+        crate::agent::mark_chat_note_edit(&app, &proposal_id, "stale");
+    }
+    Ok(())
+}
+
+#[tauri::command]
 pub fn export_note(app: AppHandle, state: State<'_, NotesState>, id: String) -> Result<String, String> {
     let note = state.notes.lock().map_err(|_| "笔记暂不可用")?.iter().find(|note| note.id == id).cloned().ok_or("笔记不存在")?;
     let dir = app.path().app_data_dir().map_err(|error| error.to_string())?.join("exports");

@@ -13,6 +13,7 @@ export type NoteWorkflowEvent = { id: string; proposalId: string; action: string
 
 export const listNotes = () => invoke<Note[]>('list_notes')
 export const saveNote = (draft: NoteDraft, id?: string) => invoke<Note>('save_note', { id: id ?? null, ...draft, folderId: draft.folderId ?? null })
+export const deleteNote = (id: string) => invoke<void>('delete_note', { id })
 export const exportNote = (id: string) => invoke<string>('export_note', { id })
 export const listNoteFolders = () => invoke<NoteFolder[]>('list_note_folders')
 export const createNoteFolder = (name: string) => invoke<NoteFolder>('create_note_folder', { name })

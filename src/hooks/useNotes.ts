@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import { isTauri } from '@tauri-apps/api/core'
 import type { ChatMessage } from '../chat-data'
 import type { KnowledgeRecord } from '../data'
-import { applyNoteEdit, createNoteFolder, deleteNoteFolder, draftFromMessage, listNoteFolders, listNotes, renameNoteFolder, saveNote, undoNoteEdit, type Note, type NoteDraft, type NoteFolder } from '../notes'
+import { applyNoteEdit, createNoteFolder, deleteNote, deleteNoteFolder, draftFromMessage, listNoteFolders, listNotes, renameNoteFolder, saveNote, undoNoteEdit, type Note, type NoteDraft, type NoteFolder } from '../notes'
 
 export function useNotes(records: KnowledgeRecord[], onError: (message: string) => void, openLibrary: () => void) {
   const [notes, setNotes] = useState<Note[]>([])
@@ -24,6 +24,10 @@ export function useNotes(records: KnowledgeRecord[], onError: (message: string) 
     const saved = await saveNote(draft, id)
     setNotes(await listNotes())
     return saved
+  }
+  const removeNote = async (id: string) => {
+    await deleteNote(id)
+    setNotes(await listNotes())
   }
   const addNoteFolder = async (name: string) => {
     const folder = await createNoteFolder(name)
@@ -51,6 +55,6 @@ export function useNotes(records: KnowledgeRecord[], onError: (message: string) 
     return restored
   }
 
-  return { notes, noteFolders, noteDraft, setNoteDraft, createNoteDraft, persistNote, addNoteFolder,
+  return { notes, noteFolders, noteDraft, setNoteDraft, createNoteDraft, persistNote, removeNote, addNoteFolder,
     changeNoteFolderName, removeNoteFolder, applyNoteEditAndRefresh, undoNoteEditAndRefresh }
 }

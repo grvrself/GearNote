@@ -55,7 +55,7 @@ pub fn run() {
             agent::delete_chat_session, agent::set_chat_references, agent::resolve_library_search, agent::resolve_command_proposal, agent::save_working_context, agent::confirm_project_memory, agent::revoke_project_memory, agent::compact_chat_context, agent::preview_agent_context, agent::ask_agent,
             agent::get_persona, agent::save_persona, agent::get_default_persona, agent::reload_persona,
             agent::get_chat_frame_image, agent::suggest_chat_followups,
-            notes::list_notes, notes::save_note, notes::export_note,
+            notes::list_notes, notes::save_note, notes::delete_note, notes::export_note,
             note_design::preview_note_design, note_design::save_note_design, note_design::get_note_design, note_design::delete_note_design, note_design::export_note_design,
             note_compose::compose_note_from_sources, note_compose::propose_note_restructure, note_compose::revise_note_restructure,
             note_images::list_note_frames, note_images::get_note_frame_image, note_images::capture_note_frame,

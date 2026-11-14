@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { KnowledgeRecord } from '../data'
-import type { Note, NoteDraft, NoteEditProposal, NoteFolder, NoteSourceInput, NoteWorkflowEvent } from '../notes'
+import type { Note, NoteDraft, NoteFolder, NoteSourceInput } from '../notes'
 import { composeNoteFromSources } from '../notes'
 import { HudButton } from './HudButton'
 import { PanelHeading } from './PanelHeading'
@@ -14,14 +14,12 @@ type Props = {
   incomingDraft: NoteDraft | null
   onDraftConsumed: () => void
   onSave: (draft: NoteDraft, id?: string) => Promise<Note>
+  onDelete: (id: string) => Promise<void>
   onExport: (id: string) => Promise<string>
   onRevealRecord: (id: string, atSeconds?: number) => void
-  onProposeEdit: (noteId: string, instruction: string) => Promise<NoteEditProposal>
   onApplyEdit: (proposalId: string) => Promise<Note>
   onUndoEdit: (proposalId: string) => Promise<Note>
   onRejectEdit: (proposalId: string) => Promise<void>
-  onListWorkflowEvents: (noteId: string) => Promise<NoteWorkflowEvent[]>
-  onGetPendingEdit: (noteId: string) => Promise<NoteEditProposal | null>
   onCreateFolder: (name: string) => Promise<NoteFolder>
   onRenameFolder: (id: string, name: string) => Promise<void>
   onDeleteFolder: (id: string) => Promise<number>
@@ -36,9 +34,7 @@ const mergeSources = (left: NoteSourceInput[], right: NoteSourceInput[]) => {
   return merged
 }
 const timeOf = (seconds: number) => `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`
-const latestUndoable = (events: NoteWorkflowEvent[]) => events.find(event => event.undoable)?.proposalId ?? null
-
-export function NotesPanel({ notes, folders, records, incomingDraft, onDraftConsumed, onSave, onExport, onRevealRecord, onProposeEdit, onApplyEdit, onUndoEdit, onRejectEdit, onListWorkflowEvents, onGetPendingEdit, onCreateFolder, onRenameFolder, onDeleteFolder }: Props) {
+export function NotesPanel({ notes, folders, records, incomingDraft, onDraftConsumed, onSave, onDelete, onExport, onRevealRecord, onApplyEdit, onUndoEdit, onRejectEdit, onCreateFolder, onRenameFolder, onDeleteFolder }: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [draft, setDraft] = useState<NoteDraft>(emptyDraft)
   const [folderFilter, setFolderFilter] = useState('all')
@@ -49,10 +45,6 @@ export function NotesPanel({ notes, folders, records, incomingDraft, onDraftCons
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [exportPath, setExportPath] = useState('')
-  const [editInstruction, setEditInstruction] = useState('')
-  const [proposal, setProposal] = useState<NoteEditProposal | null>(null)
-  const [lastAppliedId, setLastAppliedId] = useState<string | null>(null)
-  const [workflowEvents, setWorkflowEvents] = useState<NoteWorkflowEvent[]>([])
   const [designOpen, setDesignOpen] = useState(false)
   const [composeOpen, setComposeOpen] = useState(false)
   const [composeIds, setComposeIds] = useState<string[]>([])
@@ -75,7 +67,7 @@ export function NotesPanel({ notes, folders, records, incomingDraft, onDraftCons
     setFolderFilter(filter)
     setSelectedId(null)
     setDraft(emptyDraft(folderForFilter(filter)))
-    setProposal(null); setLastAppliedId(null); setError(''); setNotice(''); setExportPath('')
+    setError(''); setNotice(''); setExportPath('')
     setFolderMode(null); setFolderError('')
   }
   const newNote = () => {
@@ -85,14 +77,14 @@ export function NotesPanel({ notes, folders, records, incomingDraft, onDraftCons
     setComposeCoverage(''); setOpenDesignAfterSave(false)
     setSelectedId(null)
     setDraft(emptyDraft(folderForFilter(folderFilter)))
-    setError(''); setNotice(''); setExportPath(''); setProposal(null); setLastAppliedId(null)
+    setError(''); setNotice(''); setExportPath('')
   }
   const startCompose = () => {
     if (!confirmDiscard()) return
     setDesignOpen(false); setComposeOpen(true); setComposeIds([]); setComposeFocus(''); setComposeCoverage('')
     setOpenDesignAfterSave(false)
     setSelectedId(null); setDraft(emptyDraft(folderForFilter(folderFilter)))
-    setError(''); setNotice(''); setProposal(null); setLastAppliedId(null)
+    setError(''); setNotice('')
   }
   const compose = async () => {
     setBusy(true); setError(''); setNotice('')
@@ -120,24 +112,9 @@ export function NotesPanel({ notes, folders, records, incomingDraft, onDraftCons
     setBusy(true); setFolderError('')
     try {
       const moved = await onDeleteFolder(selectedFolder.id)
-      setFolderFilter('uncategorized'); setSelectedId(null); setDraft(emptyDraft()); setProposal(null); setLastAppliedId(null)
+      setFolderFilter('uncategorized'); setSelectedId(null); setDraft(emptyDraft())
       setFolderMode(null); setNotice(`文件夹已删除，${moved} 篇笔记已移到未分类。`)
     } catch (cause) { setFolderError(String(cause)) } finally { setBusy(false) }
-  }
-
-  useEffect(() => {
-    if (!selectedId) { setWorkflowEvents([]); return }
-    let active = true
-    void Promise.all([onListWorkflowEvents(selectedId), onGetPendingEdit(selectedId)])
-      .then(([events, pending]) => { if (active) { setWorkflowEvents(events); setLastAppliedId(latestUndoable(events)); setProposal(pending) } })
-      .catch(() => { if (active) { setWorkflowEvents([]); setLastAppliedId(null); setProposal(null) } })
-    return () => { active = false }
-  }, [selectedId])
-
-  const refreshEvents = async (noteId: string) => {
-    const events = await onListWorkflowEvents(noteId)
-    setWorkflowEvents(events)
-    setLastAppliedId(latestUndoable(events))
   }
 
   useEffect(() => {
@@ -149,9 +126,6 @@ export function NotesPanel({ notes, folders, records, incomingDraft, onDraftCons
     setError('')
     setNotice('请检查并修改草稿，确认后保存。')
     setExportPath('')
-    setProposal(null)
-    setLastAppliedId(null)
-    setEditInstruction('')
     onDraftConsumed()
   }, [incomingDraft, onDraftConsumed, folderFilter])
 
@@ -162,7 +136,6 @@ export function NotesPanel({ notes, folders, records, incomingDraft, onDraftCons
     setSelectedId(note.id)
     setDraft({ title: note.title, body: note.body, sources: note.sources.map(source => ({ recordId: source.recordId, atSeconds: source.atSeconds })), folderId: note.folderId ?? null })
     setError(''); setNotice(''); setExportPath('')
-    setProposal(proposal?.noteId === note.id ? proposal : null); setLastAppliedId(null); setEditInstruction('')
   }
   const appendTo = (note: Note) => {
     setDesignOpen(false)
@@ -176,20 +149,16 @@ export function NotesPanel({ notes, folders, records, incomingDraft, onDraftCons
     })
     setNotice(`已合并到《${note.title}》的草稿，保存前可继续修改。`)
     setError(''); setExportPath('')
-    setProposal(null); setLastAppliedId(null)
   }
   const save = async () => {
     setBusy(true); setError(''); setNotice('')
     try {
-      if (proposal) { await onRejectEdit(proposal.id); setProposal(null) }
       const saved = await onSave(draft, selectedId ?? undefined)
       setSelectedId(saved.id)
       setDraft({ title: saved.title, body: saved.body, sources: saved.sources, folderId: saved.folderId ?? null })
       if (folderFilter !== 'all' && (saved.folderId ?? null) !== folderForFilter(folderFilter)) setFolderFilter(saved.folderId ?? 'uncategorized')
-      setLastAppliedId(null)
       setNotice('已保存到本地笔记。')
       if (openDesignAfterSave) { setDesignOpen(true); setOpenDesignAfterSave(false) }
-      await refreshEvents(saved.id)
     } catch (cause) { setError(String(cause)) } finally { setBusy(false) }
   }
   const exportCurrent = async () => {
@@ -198,42 +167,15 @@ export function NotesPanel({ notes, folders, records, incomingDraft, onDraftCons
     try { setExportPath(await onExport(selectedId)); setNotice('Markdown 已导出。') }
     catch (cause) { setError(String(cause)) } finally { setBusy(false) }
   }
-  const generateEdit = async () => {
-    if (!selectedId || proposal) return
-    setBusy(true); setError(''); setNotice(''); setLastAppliedId(null)
+  const removeCurrent = async () => {
+    if (!saved || busy) return
+    if (!window.confirm(`确定删除笔记《${saved.title}》？这会同时删除它的高级版和笔记截图，且无法撤销。`)) return
+    setBusy(true); setError(''); setNotice('')
     try {
-      setProposal(await onProposeEdit(selectedId, editInstruction))
-      await refreshEvents(selectedId)
-    } catch (cause) { setError(String(cause)) } finally { setBusy(false) }
-  }
-  const applyEdit = async () => {
-    if (!proposal || proposal.noteId !== selectedId) return
-    setBusy(true); setError('')
-    try {
-      const saved = await onApplyEdit(proposal.id)
-      setDraft({ title: saved.title, body: saved.body, sources: saved.sources, folderId: saved.folderId ?? null })
-      setLastAppliedId(proposal.id)
-      setProposal(null)
-      setNotice('已按确认的建议修改笔记，可撤销这次操作。')
-      await refreshEvents(selectedId)
-    } catch (cause) { setError(String(cause)); await refreshEvents(selectedId).catch(() => {}) }
-    finally { setBusy(false) }
-  }
-  const rejectEdit = async () => {
-    if (!proposal || proposal.noteId !== selectedId) return
-    setBusy(true); setError('')
-    try { await onRejectEdit(proposal.id); setProposal(null); setNotice('已放弃建议，笔记未修改。'); await refreshEvents(selectedId) }
-    catch (cause) { setError(String(cause)) } finally { setBusy(false) }
-  }
-  const undoEdit = async () => {
-    if (!lastAppliedId || !selectedId) return
-    setBusy(true); setError('')
-    try {
-      const restored = await onUndoEdit(lastAppliedId)
-      setDraft({ title: restored.title, body: restored.body, sources: restored.sources, folderId: restored.folderId ?? null })
-      setLastAppliedId(null)
-      setNotice('已撤销这次修改。')
-      await refreshEvents(selectedId)
+      await onDelete(saved.id)
+      setSelectedId(null); setDraft(emptyDraft(folderForFilter(folderFilter)))
+      setDesignOpen(false); setComposeCoverage(''); setOpenDesignAfterSave(false); setExportPath('')
+      setNotice('笔记已删除。')
     } catch (cause) { setError(String(cause)) } finally { setBusy(false) }
   }
   const sourceTitle = (source: NoteSourceInput) => records.find(record => record.id === source.recordId)?.title
@@ -285,8 +227,7 @@ export function NotesPanel({ notes, folders, records, incomingDraft, onDraftCons
         {notice && <p className="notes-notice" role="status">{notice}</p>}
         {exportPath && <div className="notes-export"><span>导出文件：{exportPath}</span><button type="button" onClick={() => { void navigator.clipboard.writeText(exportPath).then(() => setNotice('路径已复制。')).catch(() => setError('复制路径失败，请手动选择路径。')) }}>复制路径</button></div>}
         {hasUnsavedChanges && <p className="notes-notice">保存修改后可以导出最新内容。</p>}
-        <div className="notes-actions"><HudButton type="button" variant="primary" disabled={busy || !draft.title.trim() || !draft.body.trim()} onClick={() => { void save() }}>{busy ? '处理中' : '保存笔记'}</HudButton><HudButton type="button" disabled={busy || !selectedId || hasUnsavedChanges} onClick={() => { void exportCurrent() }}>导出 Markdown</HudButton><HudButton type="button" disabled={busy || !selectedId || hasUnsavedChanges} onClick={() => setDesignOpen(true)}>生成高级版</HudButton></div>
-        {selectedId && <details className="note-workflow"><summary>Agent 修改建议与操作记录</summary><p>生成建议会把笔记标题、正文和修改要求发给当前配置的模型。模型可提出最多三处正文修改；逐项核对后，点击确认才会一次写入。标题和来源不会由模型修改。</p><label htmlFor="note-edit-instruction">修改要求</label><textarea id="note-edit-instruction" value={editInstruction} maxLength={500} onChange={event => setEditInstruction(event.target.value)} placeholder="例如：把第二段改得更清楚，不增加新事实" /><HudButton type="button" disabled={busy || !!proposal || hasUnsavedChanges || !editInstruction.trim()} onClick={() => { void generateEdit() }}>{busy ? '处理中' : '生成建议'}</HudButton>{hasUnsavedChanges && <p className="notes-notice">请先保存或放弃当前手动修改，再生成建议。</p>}{proposal?.noteId === selectedId && <div className="note-proposal"><strong>{proposal.edits.length} 处建议修改</strong>{proposal.edits.map((edit, index) => <div key={index}><strong>{index + 1}. {edit.mode === 'append' ? '末尾追加' : edit.mode === 'restructure' ? '全文整理' : '替换原文'}</strong><p>{edit.reason}</p>{edit.quote && <p>资料原句 [{edit.sourceIndex}]：{edit.quote}</p>}<div><span>原文位置</span><pre>{edit.beforeText}</pre></div><div><span>建议文字</span><pre>{edit.afterText}</pre></div></div>)}<div className="notes-actions"><HudButton type="button" variant="primary" disabled={busy || hasUnsavedChanges} onClick={() => { void applyEdit() }}>确认并写入</HudButton><HudButton type="button" disabled={busy} onClick={() => { void rejectEdit() }}>放弃建议</HudButton></div></div>}{lastAppliedId && <HudButton type="button" disabled={busy || hasUnsavedChanges} onClick={() => { void undoEdit() }}>撤销本次修改</HudButton>}<div className="note-workflow-events"><strong>最近操作</strong>{workflowEvents.length === 0 ? <p>暂无记录</p> : workflowEvents.map(event => <p key={event.id}><time>{new Date(Number(event.at)).toLocaleString('zh-CN')}</time> · {event.detail}</p>)}</div></details>}
+        <div className="notes-actions"><HudButton type="button" variant="primary" disabled={busy || !draft.title.trim() || !draft.body.trim()} onClick={() => { void save() }}>{busy ? '处理中' : '保存笔记'}</HudButton><HudButton type="button" disabled={busy || !selectedId || hasUnsavedChanges} onClick={() => { void exportCurrent() }}>导出 Markdown</HudButton><HudButton type="button" disabled={busy || !selectedId || hasUnsavedChanges} onClick={() => setDesignOpen(true)}>生成高级版</HudButton>{selectedId && <HudButton type="button" disabled={busy} onClick={() => { void removeCurrent() }}>删除笔记</HudButton>}</div>
         </>}
       </div>
     </div>
