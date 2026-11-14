@@ -3,6 +3,7 @@ import type { KnowledgeRecord } from '../data'
 import type { Note, NoteDraft, NoteFolder, NoteSourceInput } from '../notes'
 import { composeNoteFromSources } from '../notes'
 import { HudButton } from './HudButton'
+import { GearIcon } from './GearIcon'
 import { PanelHeading } from './PanelHeading'
 import { AdvancedNotePanel } from './AdvancedNotePanel'
 import './notes.css'
@@ -196,7 +197,7 @@ export function NotesPanel({ notes, folders, records, incomingDraft, onDraftCons
         {folderMode && <form className="notes-folder-form" onSubmit={event => { event.preventDefault(); void submitFolder() }}><label htmlFor="note-folder-name">{folderMode === 'create' ? '新文件夹名称' : '重命名文件夹'}</label><input id="note-folder-name" autoFocus value={folderName} maxLength={60} onChange={event => setFolderName(event.target.value)} /><div><button type="submit" disabled={busy || !folderName.trim()}>保存</button><button type="button" disabled={busy} onClick={() => { setFolderMode(null); setFolderError('') }}>取消</button></div></form>}
         {folderError && <p className="notes-folder-error" role="alert">{folderError}</p>}
         <div className="notes-index-head"><span>笔记 <small>{visibleNotes.length}</small></span><button type="button" disabled={busy} onClick={newNote}>＋ 新建笔记</button></div>
-        <button className="notes-compose-entry" type="button" disabled={busy} aria-pressed={composeOpen} onClick={() => composeOpen ? setComposeOpen(false) : startCompose()}>从资料生成高级笔记</button>
+        <button className="notes-compose-entry" type="button" disabled={busy} aria-pressed={composeOpen} onClick={() => composeOpen ? setComposeOpen(false) : startCompose()}><span>从资料生成高级笔记</span><GearIcon kind="brand" size={16} /></button>
         {visibleNotes.length === 0 && <p className="notes-empty">{notes.length === 0 ? '暂无笔记。分析资料后可从回答中生成草稿。' : '这里还没有笔记。'}</p>}
         {visibleNotes.map(note => <button className="notes-index-item" type="button" key={note.id} disabled={busy} data-selected={selectedId === note.id} onClick={() => selectNote(note)}>
           <strong>{note.title}</strong><small>{new Date(note.updatedAt).toLocaleString('zh-CN')} · {note.sources.length} 个引用</small>
