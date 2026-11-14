@@ -117,6 +117,37 @@ fn cases() -> Vec<Case> {
             record_id: id.clone(), seconds: None, absent_fact: format!("不存在的核验码-{id}"),
             records: with_distractors(&id, record(&id, "操作指南", quote.into(), None)) });
     }
+    // Distinct Chinese and bilingual questions with on-topic but non-answering distractors.
+    let challenges = [
+        ("网络断开还能写草稿吗", "离线状态下仍允许修改未提交的草稿。", "网络连接中断后可查看诊断日志。"),
+        ("误删笔记之后如何找回", "已移除的笔记会在回收站保存七天。", "误删笔记的帮助入口位于菜单。"),
+        ("导出这项功能收费吗", "导出文档无需额外付费。", "导出收费项目清单需要联系管理员。"),
+        ("播放没有声音该检查什么", "音频静音时先核对输出设备。", "声音控制按钮位于页面右下角。"),
+        ("为什么下载很慢", "服务端限流会降低传输速度。", "下载列表会显示当前任务。"),
+        ("能和同事一起改这篇文章吗", "团队成员可以共同修改同一文档。", "同事可以收到只读分享链接。"),
+        ("内容会自己保存吗", "系统每五分钟持久化当前草稿。", "手动保存按钮显示在顶部。"),
+        ("打开后只有白屏怎么办", "界面空白时应先清除网页缓存。", "白屏错误码可提交给客服。"),
+        ("如何撤回刚刚的改动", "历史快照可以恢复上一版本。", "撤回按钮显示在工具栏。"),
+        ("导出失败应该先看哪里", "写入异常时先核对磁盘剩余空间。", "导出按钮支持多种文件格式。"),
+        ("Can I keep writing without Wi-Fi?", "断网后草稿依旧可以在本机修改。", "Wi-Fi 连接状态显示在标题栏。"),
+        ("How long can I recover removed notes?", "被删除的笔记在回收站保留七日。", "笔记列表提供删除入口。"),
+        ("Does exporting cost money?", "导出文档无需额外付费。", "导出费用说明位于服务条款。"),
+        ("What should I do when audio is muted?", "播放无声时先核对输出设备。", "音量按钮可切换静音状态。"),
+        ("Will a crash lose my work?", "异常退出后可恢复最近自动保存的草稿。", "崩溃报告会自动上传。"),
+        ("Can coworkers change the same page?", "团队成员可以共同修改同一文档。", "共享链接默认只能阅读。"),
+        ("Where does the app keep my records?", "用户资料存储于本机数据库。", "记录列表位于右侧面板。"),
+        ("Does this run on Linux?", "此程序支持 Linux 桌面系统。", "Linux 下载地址显示在官网。"),
+        ("How to inspect an old revision?", "历史快照中可以打开先前保存的版本。", "旧版本编号显示在标题右侧。"),
+        ("What happens when the login expires?", "认证失效时需要重新验证身份。", "登录页面显示账号有效期。"),
+    ];
+    for (i, (question, quote, distractor)) in challenges.into_iter().enumerate() {
+        let id = format!("semantic-challenge-{i}");
+        let mut records = (0..8).map(|number| record(&format!("{id}-distractor-{number}"), "相关说明",
+            distractor.to_string(), None)).collect::<Vec<_>>();
+        records.push(record(&id, "实际规则", quote.into(), None));
+        all.push(Case { group: "semantic_challenge", question: question.into(), quote: quote.into(),
+            record_id: id.clone(), seconds: None, absent_fact: format!("不存在的核验码-{id}"), records });
+    }
     all
 }
 
@@ -127,11 +158,13 @@ struct Metrics { total: usize, relevant: usize, hits: usize, mrr: f64, ndcg: f64
 // bilingual/synonym/traditional 各 0/10；其余六个有答案组各 10/10 且黄金片段排第 1。
 // search_references 的前六条同样命中 60/90，ToolMRR=0.667。
 // no_answer 共 10 条，不参与排序指标；检索排名不能证明模型会正确拒答。
-// 另外 10 条多样化语义探针单独报告，避免模板分数掩盖通用语义检索缺口。
+// 另外 10 条语义探针和 20 条带相关干扰资料的独立问题单独报告，避免模板分数掩盖缺口。
+// 当前词法实现：120 条有答案案例中命中 93 条；Recall@8=0.775。
+// 其中模板 90/90、语义探针 1/10、相关干扰挑战 2/20；后两组尚无真实向量模型的结果。
 #[test]
 fn extended_retrieval_baseline() {
     let cases = cases();
-    assert_eq!(cases.len(), 110);
+    assert_eq!(cases.len(), 130);
     let mut by_group: BTreeMap<&str, Metrics> = BTreeMap::new();
     for case in &cases {
         assert!(!case.records.iter().any(|record| record.content_text.contains(&case.absent_fact)
@@ -163,7 +196,10 @@ fn extended_retrieval_baseline() {
         println!("{group}: n={} relevant={} Recall@8={:.3} MRR@8={:.3} NDCG@8={:.3} ToolRecall={:.3} ToolMRR={:.3} no_answer_matches={}",
             m.total, m.relevant, m.hits as f64 / divisor, m.mrr / divisor, m.ndcg / divisor,
             m.tool_hits as f64 / divisor, m.tool_mrr / divisor, m.no_answer_matches);
-        assert_eq!(m.total, 10);
+        assert_eq!(m.total, if *group == "semantic_challenge" { 20 } else { 10 });
+    }
+    for group in ["injection", "long_tail", "multi_document", "phrase", "subtitle", "table_list_code"] {
+        assert_eq!(by_group[group].hits, 10, "原有词法强项退步：{group}");
     }
     let answerable = by_group.values().map(|m| m.relevant).sum::<usize>();
     let hits = by_group.values().map(|m| m.hits).sum::<usize>();
