@@ -15,6 +15,9 @@ mod secret;
 mod storage;
 mod storyboard;
 mod notes;
+mod note_design;
+mod note_compose;
+mod note_images;
 mod workflow;
 pub use process_status::ProcessStatus;
 use tauri::Manager;
@@ -53,6 +56,9 @@ pub fn run() {
             agent::get_persona, agent::save_persona, agent::get_default_persona, agent::reload_persona,
             agent::get_chat_frame_image, agent::suggest_chat_followups,
             notes::list_notes, notes::save_note, notes::export_note,
+            note_design::preview_note_design, note_design::save_note_design, note_design::get_note_design, note_design::delete_note_design, note_design::export_note_design,
+            note_compose::compose_note_from_sources, note_compose::propose_note_restructure, note_compose::revise_note_restructure,
+            note_images::list_note_frames, note_images::get_note_frame_image, note_images::capture_note_frame,
             notes::list_note_folders, notes::create_note_folder, notes::rename_note_folder, notes::delete_note_folder,
             workflow::propose_note_edit, workflow::apply_note_edit, workflow::undo_note_edit,
             workflow::reject_note_edit, workflow::list_note_workflow_events, workflow::get_pending_note_edit,

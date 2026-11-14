@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react'
 import type { KnowledgeRecord } from '../data'
 import type { Note, NoteDraft, NoteEditProposal, NoteFolder, NoteSourceInput, NoteWorkflowEvent } from '../notes'
+import { composeNoteFromSources } from '../notes'
 import { HudButton } from './HudButton'
 import { PanelHeading } from './PanelHeading'
+import { AdvancedNotePanel } from './AdvancedNotePanel'
 import './notes.css'
 
 type Props = {
@@ -51,6 +53,12 @@ export function NotesPanel({ notes, folders, records, incomingDraft, onDraftCons
   const [proposal, setProposal] = useState<NoteEditProposal | null>(null)
   const [lastAppliedId, setLastAppliedId] = useState<string | null>(null)
   const [workflowEvents, setWorkflowEvents] = useState<NoteWorkflowEvent[]>([])
+  const [designOpen, setDesignOpen] = useState(false)
+  const [composeOpen, setComposeOpen] = useState(false)
+  const [composeIds, setComposeIds] = useState<string[]>([])
+  const [composeFocus, setComposeFocus] = useState('')
+  const [composeCoverage, setComposeCoverage] = useState('')
+  const [openDesignAfterSave, setOpenDesignAfterSave] = useState(false)
   const saved = notes.find(note => note.id === selectedId)
   const hasUnsavedChanges = Boolean(saved && (saved.title !== draft.title || saved.body !== draft.body ||
     (saved.folderId ?? null) !== (draft.folderId ?? null) || JSON.stringify(saved.sources.map(keyOf)) !== JSON.stringify(draft.sources.map(keyOf))))
@@ -62,6 +70,8 @@ export function NotesPanel({ notes, folders, records, incomingDraft, onDraftCons
   const confirmDiscard = () => !hasUnsavedChanges && !hasNewDraft || window.confirm('当前笔记有未保存的内容，确定放弃并切换吗？')
   const changeFolderFilter = (filter: string) => {
     if (filter === folderFilter || !confirmDiscard()) return
+    setDesignOpen(false)
+    setComposeOpen(false); setComposeCoverage(''); setOpenDesignAfterSave(false)
     setFolderFilter(filter)
     setSelectedId(null)
     setDraft(emptyDraft(folderForFilter(filter)))
@@ -70,9 +80,29 @@ export function NotesPanel({ notes, folders, records, incomingDraft, onDraftCons
   }
   const newNote = () => {
     if (!confirmDiscard()) return
+    setDesignOpen(false)
+    setComposeOpen(false)
+    setComposeCoverage(''); setOpenDesignAfterSave(false)
     setSelectedId(null)
     setDraft(emptyDraft(folderForFilter(folderFilter)))
     setError(''); setNotice(''); setExportPath(''); setProposal(null); setLastAppliedId(null)
+  }
+  const startCompose = () => {
+    if (!confirmDiscard()) return
+    setDesignOpen(false); setComposeOpen(true); setComposeIds([]); setComposeFocus(''); setComposeCoverage('')
+    setOpenDesignAfterSave(false)
+    setSelectedId(null); setDraft(emptyDraft(folderForFilter(folderFilter)))
+    setError(''); setNotice(''); setProposal(null); setLastAppliedId(null)
+  }
+  const compose = async () => {
+    setBusy(true); setError(''); setNotice('')
+    try {
+      const composed = await composeNoteFromSources(composeIds, composeFocus)
+      setDraft({ title: composed.title, body: composed.body, sources: composed.sources, folderId: folderForFilter(folderFilter) })
+      setComposeCoverage(composed.coverage); setComposeOpen(false)
+      setOpenDesignAfterSave(true)
+      setNotice('已生成待核对草稿。模型只读取列出的片段；请逐句检查引文，再保存笔记。')
+    } catch (cause) { setError(String(cause)) } finally { setBusy(false) }
   }
   const submitFolder = async () => {
     if (!folderMode || !folderName.trim()) return
@@ -112,6 +142,8 @@ export function NotesPanel({ notes, folders, records, incomingDraft, onDraftCons
 
   useEffect(() => {
     if (!incomingDraft) return
+    setDesignOpen(false)
+    setComposeOpen(false); setComposeCoverage(''); setOpenDesignAfterSave(false)
     setSelectedId(null)
     setDraft({ ...incomingDraft, folderId: incomingDraft.folderId ?? folderForFilter(folderFilter) })
     setError('')
@@ -125,12 +157,16 @@ export function NotesPanel({ notes, folders, records, incomingDraft, onDraftCons
 
   const selectNote = (note: Note) => {
     if ((selectedId !== note.id || hasUnsavedChanges) && !confirmDiscard()) return
+    setDesignOpen(false)
+    setComposeCoverage(''); setOpenDesignAfterSave(false)
     setSelectedId(note.id)
     setDraft({ title: note.title, body: note.body, sources: note.sources.map(source => ({ recordId: source.recordId, atSeconds: source.atSeconds })), folderId: note.folderId ?? null })
     setError(''); setNotice(''); setExportPath('')
     setProposal(proposal?.noteId === note.id ? proposal : null); setLastAppliedId(null); setEditInstruction('')
   }
   const appendTo = (note: Note) => {
+    setDesignOpen(false)
+    setComposeOpen(false); setComposeCoverage(''); setOpenDesignAfterSave(false)
     setSelectedId(note.id)
     setDraft({
       title: note.title,
@@ -152,6 +188,7 @@ export function NotesPanel({ notes, folders, records, incomingDraft, onDraftCons
       if (folderFilter !== 'all' && (saved.folderId ?? null) !== folderForFilter(folderFilter)) setFolderFilter(saved.folderId ?? 'uncategorized')
       setLastAppliedId(null)
       setNotice('已保存到本地笔记。')
+      if (openDesignAfterSave) { setDesignOpen(true); setOpenDesignAfterSave(false) }
       await refreshEvents(saved.id)
     } catch (cause) { setError(String(cause)) } finally { setBusy(false) }
   }
@@ -216,6 +253,7 @@ export function NotesPanel({ notes, folders, records, incomingDraft, onDraftCons
         {folderMode && <form className="notes-folder-form" onSubmit={event => { event.preventDefault(); void submitFolder() }}><label htmlFor="note-folder-name">{folderMode === 'create' ? '新文件夹名称' : '重命名文件夹'}</label><input id="note-folder-name" autoFocus value={folderName} maxLength={60} onChange={event => setFolderName(event.target.value)} /><div><button type="submit" disabled={busy || !folderName.trim()}>保存</button><button type="button" disabled={busy} onClick={() => { setFolderMode(null); setFolderError('') }}>取消</button></div></form>}
         {folderError && <p className="notes-folder-error" role="alert">{folderError}</p>}
         <div className="notes-index-head"><span>笔记 <small>{visibleNotes.length}</small></span><button type="button" disabled={busy} onClick={newNote}>＋ 新建笔记</button></div>
+        <button className="notes-compose-entry" type="button" disabled={busy} onClick={startCompose}>从资料生成高级笔记</button>
         {visibleNotes.length === 0 && <p className="notes-empty">{notes.length === 0 ? '暂无笔记。分析资料后可从回答中生成草稿。' : '这里还没有笔记。'}</p>}
         {visibleNotes.map(note => <button className="notes-index-item" type="button" key={note.id} disabled={busy} data-selected={selectedId === note.id} onClick={() => selectNote(note)}>
           <strong>{note.title}</strong><small>{new Date(note.updatedAt).toLocaleString('zh-CN')} · {note.sources.length} 个引用</small>
@@ -223,6 +261,17 @@ export function NotesPanel({ notes, folders, records, incomingDraft, onDraftCons
       </aside>
       <div className="notes-editor">
         <div className="notes-editor-head"><span>{selectedId ? '编辑笔记' : '笔记草稿'}</span><span>{selectedId ? '已保存' : '未保存'}</span></div>
+        {designOpen && saved ? <AdvancedNotePanel note={saved} records={records} onClose={() => setDesignOpen(false)} onRevealRecord={onRevealRecord}
+          onApplyEdit={onApplyEdit} onRejectEdit={onRejectEdit} onUndoEdit={onUndoEdit}
+          onNoteChanged={updated => setDraft({ title: updated.title, body: updated.body, sources: updated.sources, folderId: updated.folderId ?? null })} /> : <>
+        {composeOpen && <div className="notes-compose"><strong>选择资料生成草稿</strong><p>最多选择 3 条已完成的资料。模型仅会读取部分相关片段；生成后仍由你检查并保存。</p>
+          <div className="notes-compose-records">{records.filter(record => record.status === 'ready' && !record.demo).map(record => <label key={record.id}>
+            <input type="checkbox" checked={composeIds.includes(record.id)} disabled={busy || (!composeIds.includes(record.id) && composeIds.length >= 3)}
+              onChange={event => setComposeIds(current => event.target.checked ? [...current, record.id] : current.filter(id => id !== record.id))} />{record.title}</label>)}</div>
+          <label htmlFor="note-compose-focus">整理重点（可选）</label><input id="note-compose-focus" value={composeFocus} maxLength={300} onChange={event => setComposeFocus(event.target.value)} placeholder="例如：总结操作步骤" />
+          <div className="notes-actions"><HudButton type="button" variant="primary" disabled={busy || composeIds.length === 0} onClick={() => { void compose() }}>{busy ? '生成中' : '生成待核对草稿'}</HudButton><HudButton type="button" disabled={busy} onClick={() => setComposeOpen(false)}>取消</HudButton></div>
+        </div>}
+        {composeCoverage && <p className="notes-notice">本次读取范围：{composeCoverage}</p>}
         <label htmlFor="note-title">标题</label>
         <input id="note-title" value={draft.title} maxLength={120} onChange={event => setDraft(current => ({ ...current, title: event.target.value }))} placeholder="输入笔记标题" />
         <label htmlFor="note-folder-select">文件夹</label>
@@ -236,8 +285,9 @@ export function NotesPanel({ notes, folders, records, incomingDraft, onDraftCons
         {notice && <p className="notes-notice" role="status">{notice}</p>}
         {exportPath && <div className="notes-export"><span>导出文件：{exportPath}</span><button type="button" onClick={() => { void navigator.clipboard.writeText(exportPath).then(() => setNotice('路径已复制。')).catch(() => setError('复制路径失败，请手动选择路径。')) }}>复制路径</button></div>}
         {hasUnsavedChanges && <p className="notes-notice">保存修改后可以导出最新内容。</p>}
-        <div className="notes-actions"><HudButton type="button" variant="primary" disabled={busy || !draft.title.trim() || !draft.body.trim()} onClick={() => { void save() }}>{busy ? '处理中' : '保存笔记'}</HudButton><HudButton type="button" disabled={busy || !selectedId || hasUnsavedChanges} onClick={() => { void exportCurrent() }}>导出 Markdown</HudButton></div>
-        {selectedId && <details className="note-workflow"><summary>Agent 修改建议与操作记录</summary><p>生成建议会把笔记标题、正文和修改要求发给当前配置的模型。模型可提出最多三处正文修改；逐项核对后，点击确认才会一次写入。标题和来源不会由模型修改。</p><label htmlFor="note-edit-instruction">修改要求</label><textarea id="note-edit-instruction" value={editInstruction} maxLength={500} onChange={event => setEditInstruction(event.target.value)} placeholder="例如：把第二段改得更清楚，不增加新事实" /><HudButton type="button" disabled={busy || !!proposal || hasUnsavedChanges || !editInstruction.trim()} onClick={() => { void generateEdit() }}>{busy ? '处理中' : '生成建议'}</HudButton>{hasUnsavedChanges && <p className="notes-notice">请先保存或放弃当前手动修改，再生成建议。</p>}{proposal?.noteId === selectedId && <div className="note-proposal"><strong>{proposal.edits.length} 处建议修改</strong>{proposal.edits.map((edit, index) => <div key={index}><strong>{index + 1}. {edit.mode === 'append' ? '末尾追加' : '替换原文'}</strong><p>{edit.reason}</p>{edit.quote && <p>资料原句 [{edit.sourceIndex}]：{edit.quote}</p>}<div><span>原文位置</span><pre>{edit.beforeText}</pre></div><div><span>建议文字</span><pre>{edit.afterText}</pre></div></div>)}<div className="notes-actions"><HudButton type="button" variant="primary" disabled={busy || hasUnsavedChanges} onClick={() => { void applyEdit() }}>确认并写入</HudButton><HudButton type="button" disabled={busy} onClick={() => { void rejectEdit() }}>放弃建议</HudButton></div></div>}{lastAppliedId && <HudButton type="button" disabled={busy || hasUnsavedChanges} onClick={() => { void undoEdit() }}>撤销本次修改</HudButton>}<div className="note-workflow-events"><strong>最近操作</strong>{workflowEvents.length === 0 ? <p>暂无记录</p> : workflowEvents.map(event => <p key={event.id}><time>{new Date(Number(event.at)).toLocaleString('zh-CN')}</time> · {event.detail}</p>)}</div></details>}
+        <div className="notes-actions"><HudButton type="button" variant="primary" disabled={busy || !draft.title.trim() || !draft.body.trim()} onClick={() => { void save() }}>{busy ? '处理中' : '保存笔记'}</HudButton><HudButton type="button" disabled={busy || !selectedId || hasUnsavedChanges} onClick={() => { void exportCurrent() }}>导出 Markdown</HudButton><HudButton type="button" disabled={busy || !selectedId || hasUnsavedChanges} onClick={() => setDesignOpen(true)}>生成高级版</HudButton></div>
+        {selectedId && <details className="note-workflow"><summary>Agent 修改建议与操作记录</summary><p>生成建议会把笔记标题、正文和修改要求发给当前配置的模型。模型可提出最多三处正文修改；逐项核对后，点击确认才会一次写入。标题和来源不会由模型修改。</p><label htmlFor="note-edit-instruction">修改要求</label><textarea id="note-edit-instruction" value={editInstruction} maxLength={500} onChange={event => setEditInstruction(event.target.value)} placeholder="例如：把第二段改得更清楚，不增加新事实" /><HudButton type="button" disabled={busy || !!proposal || hasUnsavedChanges || !editInstruction.trim()} onClick={() => { void generateEdit() }}>{busy ? '处理中' : '生成建议'}</HudButton>{hasUnsavedChanges && <p className="notes-notice">请先保存或放弃当前手动修改，再生成建议。</p>}{proposal?.noteId === selectedId && <div className="note-proposal"><strong>{proposal.edits.length} 处建议修改</strong>{proposal.edits.map((edit, index) => <div key={index}><strong>{index + 1}. {edit.mode === 'append' ? '末尾追加' : edit.mode === 'restructure' ? '全文整理' : '替换原文'}</strong><p>{edit.reason}</p>{edit.quote && <p>资料原句 [{edit.sourceIndex}]：{edit.quote}</p>}<div><span>原文位置</span><pre>{edit.beforeText}</pre></div><div><span>建议文字</span><pre>{edit.afterText}</pre></div></div>)}<div className="notes-actions"><HudButton type="button" variant="primary" disabled={busy || hasUnsavedChanges} onClick={() => { void applyEdit() }}>确认并写入</HudButton><HudButton type="button" disabled={busy} onClick={() => { void rejectEdit() }}>放弃建议</HudButton></div></div>}{lastAppliedId && <HudButton type="button" disabled={busy || hasUnsavedChanges} onClick={() => { void undoEdit() }}>撤销本次修改</HudButton>}<div className="note-workflow-events"><strong>最近操作</strong>{workflowEvents.length === 0 ? <p>暂无记录</p> : workflowEvents.map(event => <p key={event.id}><time>{new Date(Number(event.at)).toLocaleString('zh-CN')}</time> · {event.detail}</p>)}</div></details>}
+        </>}
       </div>
     </div>
   </section>

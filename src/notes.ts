@@ -7,8 +7,8 @@ export type NoteSource = NoteSourceInput & { title: string; url: string }
 export type Note = { id: string; title: string; body: string; sources: NoteSource[]; folderId?: string | null; createdAt: number; updatedAt: number }
 export type NoteDraft = { title: string; body: string; sources: NoteSourceInput[]; folderId?: string | null }
 export type NoteFolder = { id: string; name: string; createdAt: string }
-export type NoteEditItem = { mode: 'append' | 'replace'; beforeText: string; afterText: string; reason: string; sourceIndex?: number; quote?: string }
-export type NoteEditProposal = { id: string; noteId: string; mode: 'append' | 'replace' | 'multi'; beforeText: string; afterText: string; reason: string; edits: NoteEditItem[]; status: string; createdAt: string }
+export type NoteEditItem = { mode: 'append' | 'replace' | 'restructure'; beforeText: string; afterText: string; reason: string; sourceIndex?: number; quote?: string }
+export type NoteEditProposal = { id: string; noteId: string; mode: 'append' | 'replace' | 'multi' | 'restructure'; beforeText: string; afterText: string; reason: string; edits: NoteEditItem[]; status: string; createdAt: string }
 export type NoteWorkflowEvent = { id: string; proposalId: string; action: string; at: string; detail: string; undoable: boolean }
 
 export const listNotes = () => invoke<Note[]>('list_notes')
@@ -24,6 +24,13 @@ export const undoNoteEdit = (proposalId: string) => invoke<Note>('undo_note_edit
 export const rejectNoteEdit = (proposalId: string) => invoke<void>('reject_note_edit', { proposalId })
 export const listNoteWorkflowEvents = (noteId: string) => invoke<NoteWorkflowEvent[]>('list_note_workflow_events', { noteId })
 export const getPendingNoteEdit = (noteId: string) => invoke<NoteEditProposal | null>('get_pending_note_edit', { noteId })
+export type ComposedNote = { title: string; body: string; sources: NoteSourceInput[]; coverage: string }
+export const composeNoteFromSources = (selectedIds: string[], focus: string) =>
+  invoke<ComposedNote>('compose_note_from_sources', { selectedIds, focus })
+export const proposeNoteRestructure = (noteId: string) =>
+  invoke<NoteEditProposal>('propose_note_restructure', { noteId })
+export const reviseNoteRestructure = (proposalId: string, body: string) =>
+  invoke<void>('revise_note_restructure', { proposalId, body })
 
 export function draftFromMessage(message: ChatMessage, records: KnowledgeRecord[]): NoteDraft {
   const sources: NoteSourceInput[] = []

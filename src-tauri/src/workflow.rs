@@ -225,7 +225,7 @@ pub fn apply_note_edit(app: AppHandle, notes: State<'_, NotesState>, proposal_id
     Ok(note)
 }
 
-fn apply_note_edit_inner(path: &Path, notes: &mut [Note], proposal_id: &str) -> Result<Note, String> {
+pub(crate) fn apply_note_edit_inner(path: &Path, notes: &mut [Note], proposal_id: &str) -> Result<Note, String> {
     let mut connection = db::open(path)?;
     let transaction = connection.transaction().map_err(|error| format!("操作事务启动失败：{error}"))?;
     let proposal = load_proposal(&transaction, proposal_id)?;
@@ -257,7 +257,7 @@ pub fn undo_note_edit(notes: State<'_, NotesState>, proposal_id: String) -> Resu
     undo_note_edit_inner(&notes.path, &mut guard, &proposal_id)
 }
 
-fn undo_note_edit_inner(path: &Path, notes: &mut [Note], proposal_id: &str) -> Result<Note, String> {
+pub(crate) fn undo_note_edit_inner(path: &Path, notes: &mut [Note], proposal_id: &str) -> Result<Note, String> {
     let mut connection = db::open(path)?;
     let transaction = connection.transaction().map_err(|error| format!("撤销事务启动失败：{error}"))?;
     let proposal = load_proposal(&transaction, proposal_id)?;

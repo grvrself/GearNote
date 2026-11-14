@@ -59,6 +59,22 @@ pub(crate) fn open(path: &Path) -> Result<Connection, String> {
         );
         CREATE INDEX IF NOT EXISTS idx_note_rows_updated ON note_rows(updated_at DESC);
         CREATE INDEX IF NOT EXISTS idx_note_rows_ordinal ON note_rows(ordinal);
+        CREATE TABLE IF NOT EXISTS note_renditions (
+            id TEXT PRIMARY KEY, note_id TEXT NOT NULL, theme TEXT NOT NULL,
+            note_snapshot_json TEXT NOT NULL, images_json TEXT NOT NULL DEFAULT '[]', created_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_note_renditions_note ON note_renditions(note_id,created_at DESC);
+        CREATE TABLE IF NOT EXISTS note_assets (
+            id TEXT PRIMARY KEY, note_id TEXT NOT NULL, source_image_id TEXT NOT NULL,
+            record_id TEXT NOT NULL, at_seconds INTEGER NOT NULL, relative_path TEXT NOT NULL,
+            created_at INTEGER NOT NULL, UNIQUE(note_id,source_image_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_note_assets_note ON note_assets(note_id);
+        CREATE TABLE IF NOT EXISTS note_frame_drafts (
+            id TEXT PRIMARY KEY, note_id TEXT NOT NULL, session_id TEXT NOT NULL,
+            record_id TEXT NOT NULL, at_seconds INTEGER NOT NULL, created_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_note_frame_drafts_note ON note_frame_drafts(note_id,session_id);
         CREATE TABLE IF NOT EXISTS note_folders (
             id TEXT PRIMARY KEY, name TEXT NOT NULL COLLATE NOCASE UNIQUE, created_at TEXT NOT NULL
         );
@@ -111,6 +127,15 @@ pub(crate) fn open(path: &Path) -> Result<Connection, String> {
     if !has_edits {
         connection.execute("ALTER TABLE workflow_proposals ADD COLUMN edits_json TEXT NOT NULL DEFAULT '[]'", [])
             .map_err(|error| format!("操作建议结构升级失败：{error}"))?;
+    }
+    let has_images = connection.prepare("PRAGMA table_info(note_renditions)")
+        .and_then(|mut query| query.query_map([], |row| row.get::<_, String>(1))
+            .and_then(|rows| rows.collect::<Result<Vec<_>, _>>() ))
+        .map_err(|error| format!("高级版结构检查失败：{error}"))?
+        .iter().any(|name| name == "images_json");
+    if !has_images {
+        connection.execute("ALTER TABLE note_renditions ADD COLUMN images_json TEXT NOT NULL DEFAULT '[]'", [])
+            .map_err(|error| format!("高级版结构升级失败：{error}"))?;
     }
     Ok(connection)
 }

@@ -30,7 +30,7 @@ pub struct Note {
 #[serde(rename_all = "camelCase")]
 pub struct NoteFolder { pub id: String, pub name: String, pub created_at: String }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NoteSourceInput { pub record_id: String, pub at_seconds: Option<u32> }
 
@@ -51,6 +51,7 @@ impl NotesState {
             crate::db::write_notes(&path, &legacy).map_err(std::io::Error::other)?;
             legacy
         };
+        let _ = crate::note_images::prune_old_capture_drafts(&dir, &path);
         Ok(Self { path, notes: Mutex::new(notes) })
     }
 }
@@ -189,6 +190,7 @@ pub fn export_note(app: AppHandle, state: State<'_, NotesState>, id: String) -> 
             markdown.push_str(&format!("- [{label}]({url}){at}\n"));
         }
     }
+    markdown.push_str(&crate::note_images::export_markdown_images(&app.path().app_data_dir().map_err(|error| error.to_string())?, &state.path, &note)?);
     fs::write(&path, markdown).map_err(|error| format!("导出失败：{error}"))?;
     Ok(path.to_string_lossy().into_owned())
 }

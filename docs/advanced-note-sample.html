@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>高级笔记阅读样稿 · GearNote</title>
+  <style>
+    :root{color-scheme:light;--ink:#171717;--muted:#666;--line:#dedede;--paper:#fafafa;--card:#fff}
+    *{box-sizing:border-box}
+    body{margin:0;background:#e9e9e9;color:var(--ink);font-family:"Microsoft YaHei","PingFang SC",sans-serif}
+    .sheet{max-width:880px;min-height:100vh;margin:32px auto;padding:72px 80px 56px;background:var(--paper);box-shadow:0 14px 48px #00000012}
+    .mast{display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--ink);padding-bottom:12px;font-size:11px;font-weight:700;letter-spacing:.16em;text-transform:uppercase}
+    .mast span:last-child{color:var(--muted);font-weight:400}
+    .kicker{margin:60px 0 14px;font-size:12px;font-weight:700;letter-spacing:.14em;color:var(--muted)}
+    h1{max-width:700px;margin:0;font-size:40px;line-height:1.26;letter-spacing:-.035em}
+    .deck{max-width:590px;margin:24px 0 34px;font-size:16px;line-height:1.85;color:#4b4b4b}
+    .meta{display:flex;gap:14px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:12px 0;color:var(--muted);font-size:11px}
+    .meta b{color:var(--ink)}
+    article{max-width:670px;margin:62px auto 0}
+    h2{display:flex;align-items:baseline;gap:14px;margin:54px 0 20px;font-size:25px;letter-spacing:-.025em}
+    h2 small{font-size:11px;letter-spacing:.12em;color:#777}
+    p,li{font-size:15px;line-height:1.95;letter-spacing:.01em}
+    p{margin:0 0 20px}
+    .lead{font-size:17px;line-height:1.9}
+    .callout{display:grid;grid-template-columns:92px 1fr;gap:24px;margin:34px 0;padding:22px 0;border-top:2px solid var(--ink);border-bottom:1px solid var(--line)}
+    .callout strong{font-size:11px;letter-spacing:.1em}
+    .callout p{margin:0;font-size:15px;font-weight:600}
+    figure{margin:42px 0}
+    .frame{height:300px;display:grid;place-items:center;background:linear-gradient(145deg,#272727,#101010);color:white;overflow:hidden}
+    .frame-inner{width:82%;height:70%;display:grid;grid-template-columns:2fr 1fr;gap:12px}
+    .frame-inner div{border:1px solid #ffffffa8}
+    .frame-inner div:first-child{display:grid;place-items:center;font-size:32px;font-weight:700;letter-spacing:.08em}
+    .frame-inner div:last-child{background:repeating-linear-gradient(0deg,#ffffff1e 0 5px,transparent 5px 22px)}
+    figcaption{display:flex;justify-content:space-between;gap:24px;padding-top:12px;border-top:1px solid var(--line);color:var(--muted);font-size:11px;line-height:1.6}
+    figcaption b{color:var(--ink)}
+    .source{margin-top:55px;padding-top:18px;border-top:1px solid var(--ink);font-size:11px;color:var(--muted)}
+    .source h2{margin:0 0 16px;font-size:15px}
+    .source ol{margin:0;padding-left:18px}
+    .source li{font-size:12px;line-height:1.8}
+    .source a{color:var(--ink);text-underline-offset:3px}
+    .foot{display:flex;justify-content:space-between;margin-top:58px;padding-top:10px;border-top:1px solid var(--line);font-size:10px;color:#777}
+    @media(max-width:760px){.sheet{margin:0;padding:36px 24px;box-shadow:none}.kicker{margin-top:44px}h1{font-size:31px}.deck{font-size:15px}article{margin-top:40px}.frame{height:220px}.callout{grid-template-columns:1fr;gap:8px}}
+    @media print{body{background:#fff}.sheet{max-width:none;min-height:0;margin:0;padding:0;box-shadow:none}h2,figure,.callout{break-inside:avoid}.foot{margin-top:30px}@page{size:A4;margin:20mm}}
+  </style>
+</head>
+<body>
+  <main class="sheet">
+    <div class="mast"><span>GEARNOTE / READING EDITION</span><span>01 — 知识笔记</span></div>
+    <div class="kicker">资料整理 / 视频与文章</div>
+    <h1>从零搭建一个可维护的桌面应用</h1>
+    <p class="deck">这是用脱敏示例内容制作的静态视觉样稿。它用于检验长文层级、截图比例、来源区和 A4 分页；正式功能会由用户自己的笔记生成。</p>
+    <div class="meta"><span><b>GearNote</b> · 高级笔记</span><span>文章 1 条</span><span>视频画面 1 张</span><span>阅读时间约 4 分钟</span></div>
+    <article>
+      <p class="lead">先把功能边界和数据保存方式定清楚，再处理界面表现。这样做出的笔记可以追溯来源，也方便日后重新编辑与导出。</p>
+      <h2><small>01</small>先整理信息结构</h2>
+      <p>把要解决的问题、使用场景和已确认的事实分别写清楚。遇到资料没有说明的部分，保留问题，不要把猜测写成结论。随后再把这些内容排成适合阅读的段落。</p>
+      <div class="callout"><strong>关键结论</strong><p>漂亮的排版建立在准确、可编辑的内容之上。</p></div>
+      <h2><small>02</small>让图片有明确出处</h2>
+      <p>视频截图用于说明某个画面。图下注明所属视频和时间点，读者就能回到原处核对；截图本身不代替字幕原句。</p>
+      <figure>
+        <div class="frame" aria-label="示意图：黑白桌面应用界面"><div class="frame-inner"><div>GN</div><div></div></div></div>
+        <figcaption><span><b>图 1</b>　界面结构示意。正式笔记将在这里显示用户选定的原始截图。</span><span>VIDEO · 01:25</span></figcaption>
+      </figure>
+      <h2><small>03</small>保留后续修改的空间</h2>
+      <p>正文仍是普通笔记可编辑的内容。高级版记录主题、图片和展示方式；正文变化后，界面提醒重新生成。导出文件可以分享，笔记本身继续作为工作中的原稿。</p>
+      <section class="source" aria-label="来源"><h2>来源与核对</h2><ol><li><a href="#">示例文章 · 结构设计</a></li><li><a href="#">示例视频 · 01:25 画面</a></li></ol></section>
+    </article>
+    <div class="foot"><span>GEARNOTE · LOCAL KNOWLEDGE WORKSPACE</span><span>静态样稿 / 非真实用户资料</span></div>
+  </main>
+</body>
+</html>
