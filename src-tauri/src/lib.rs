@@ -6,6 +6,8 @@ mod deep_video;
 mod read_tools;
 #[cfg(test)]
 mod retrieval_eval;
+#[cfg(test)]
+mod retrieval_eval_extended;
 mod db;
 mod process_status;
 mod secret;
