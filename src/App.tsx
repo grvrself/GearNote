@@ -1,12 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { isTauri } from '@tauri-apps/api/core'
-import { askAgent, suggestChatFollowups, createChatSession, deleteChatSession, getAgentStatus, getChatState, previewAgentContext, resolveCommandProposal, resolveLibrarySearch, setChatReferences, switchChatSession, type AgentStatus, type ChatSessionSummary, type ChatState } from './agent'
-import type { ChatMessage, ChatStreaming } from './chat-data'
+import { createChatSession, deleteChatSession, previewAgentContext, switchChatSession } from './agent'
 import { AgentSetup } from './components/AgentSetup'
 import { PersonaSetup } from './components/PersonaSetup'
 import { ThemeSettings } from './components/ThemeSettings'
-import { emitTo, listen, type UnlistenFn } from '@tauri-apps/api/event'
-import { WebviewWindow } from '@tauri-apps/api/webviewWindow'
 import { HistoryPanel } from './components/HistoryPanel'
 import { ChatPanel } from './components/ChatPanel'
 import { NotesPanel } from './components/NotesPanel'
@@ -17,72 +14,38 @@ import { HudButton } from './components/HudButton'
 import { Sidebar, navigation, type SettingsSection, type View } from './components/Sidebar'
 import { Topbar, type BrowserChoice } from './components/Topbar'
 import { recordFixtures } from './data'
-import { dismissCaptureJob, listCaptureJobs, loadBridgeStatus, loadSavedRecords, type BridgeStatus, type CaptureJob } from './records'
-import type { KnowledgeRecord } from './data'
-import { applyNoteEdit, createNoteFolder, deleteNoteFolder, draftFromMessage, exportNote, getPendingNoteEdit, listNoteFolders, listNoteWorkflowEvents, listNotes, proposeNoteEdit, rejectNoteEdit, renameNoteFolder, saveNote, undoNoteEdit, type Note, type NoteDraft, type NoteFolder } from './notes'
-import {
-  MINI_CONTEXT_EVENT, MINI_READY_EVENT, MINI_REMOVE_REFERENCE_EVENT, MINI_REVEAL_EVENT,
-  openMiniWindow,
-  type MiniContextPayload, type MiniRemoveReferencePayload, type MiniRevealPayload,
-} from './mini-window'
+import { dismissCaptureJob, listCaptureJobs, loadSavedRecords } from './records'
+import { useRecords } from './hooks/useRecords'
+import { exportNote, getPendingNoteEdit, listNoteWorkflowEvents, proposeNoteEdit, rejectNoteEdit } from './notes'
+import { useNotes } from './hooks/useNotes'
+import { useChat } from './hooks/useChat'
+import { useMiniWindow } from './hooks/useMiniWindow'
 import './app.css'
 
 export default function App() {
   const [view, setView] = useState<View>('chat')
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('overview')
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [referencedIds, setReferencedIds] = useState<string[]>([])
   const [rightOpen, setRightOpen] = useState(true)
   const [browser, setBrowser] = useState<BrowserChoice>('Chrome')
   const [focusRequest, setFocusRequest] = useState<{ id: string; atSeconds?: number } | null>(null)
-  const [miniOpening, setMiniOpening] = useState(false)
   const [miniError, setMiniError] = useState('')
-  const [savedRecords, setSavedRecords] = useState<KnowledgeRecord[]>([])
-  const [captureJobs, setCaptureJobs] = useState<CaptureJob[]>([])
-  const [bridgeStatus, setBridgeStatus] = useState<BridgeStatus | null>(null)
-  const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null)
-  const [messages, setMessages] = useState<ChatMessage[]>([])
-  const [pendingChoice, setPendingChoice] = useState<ChatState['pendingChoice']>(null)
-  const [pendingLibrarySearch, setPendingLibrarySearch] = useState<ChatState['pendingLibrarySearch']>(null)
-  const [pendingChatNoteEdit, setPendingChatNoteEdit] = useState<ChatState['pendingChatNoteEdit']>(null)
-  const [pendingCommand, setPendingCommand] = useState<ChatState['pendingCommand']>(null)
-  const [notes, setNotes] = useState<Note[]>([])
-  const [noteFolders, setNoteFolders] = useState<NoteFolder[]>([])
-  const [noteDraft, setNoteDraft] = useState<NoteDraft | null>(null)
-  const [sessions, setSessions] = useState<ChatSessionSummary[]>([])
-  const [activeSessionId, setActiveSessionId] = useState('')
-  const [sessionError, setSessionError] = useState('')
-  const [workingContext, setWorkingContext] = useState<ChatState['workingContext']>({ goal: '', completed: '', nextStep: '', updatedAt: '' })
-  const [projectMemory, setProjectMemory] = useState<ChatState['projectMemory']>([])
-  const [compactedSummary, setCompactedSummary] = useState('')
-  const [compactedCount, setCompactedCount] = useState(0)
-  const [sending, setSending] = useState(false)
-  const [streaming, setStreaming] = useState<ChatStreaming | null>(null)
-  const [suggestingMessageId, setSuggestingMessageId] = useState<string | null>(null)
-  const [suggestionErrorId, setSuggestionErrorId] = useState<string | null>(null)
-  const [agentError, setAgentError] = useState('')
   const searchRef = useRef<HTMLInputElement>(null)
-  const sendingRef = useRef(false)
-  const referencedIdsRef = useRef(referencedIds)
-  referencedIdsRef.current = referencedIds
-  const applyChatState = useCallback((state: ChatState) => {
-    setActiveSessionId(state.activeId)
-    setSessions(state.sessions)
-    setMessages(state.messages)
-    setPendingChoice(state.pendingChoice)
-    setPendingLibrarySearch(state.pendingLibrarySearch)
-    setPendingChatNoteEdit(state.pendingChatNoteEdit)
-    setPendingCommand(state.pendingCommand)
-    setReferencedIds(state.referencedIds)
-    setWorkingContext(state.workingContext)
-    setProjectMemory(state.projectMemory)
-    setCompactedSummary(state.compactedSummary)
-    setCompactedCount(state.compactedCount)
-  }, [])
+  const { savedRecords, setSavedRecords, captureJobs, setCaptureJobs, bridgeStatus } = useRecords(setMiniError, id => {
+    setView('chat')
+    setRightOpen(true)
+    setSelectedId(id)
+    setFocusRequest({ id })
+  })
   const extensionConnected = bridgeStatus?.connected ?? false
-  const agentAvailable = Boolean(agentStatus?.hasKey && agentStatus.model)
   const records = isTauri() ? savedRecords : recordFixtures.map(record => ({ ...record, demo: true }))
-  const miniAvailable = isTauri() && !miniOpening
+  const { notes, noteFolders, noteDraft, setNoteDraft, createNoteDraft, persistNote, addNoteFolder,
+    changeNoteFolderName, removeNoteFolder, applyNoteEditAndRefresh, undoNoteEditAndRefresh } = useNotes(records, setMiniError, () => setView('library'))
+  const { referencedIds, setReferencedIds, agentStatus, setAgentStatus, messages, pendingChoice, pendingLibrarySearch,
+    pendingChatNoteEdit, pendingCommand, sessions, activeSessionId, sessionError, workingContext, projectMemory,
+    compactedSummary, compactedCount, sending, streaming, suggestingMessageId, suggestionErrorId, agentError,
+    sendQuestion, decideLibrarySearch, decideChatNoteEdit, decideCommand, manageSession } = useChat(() => setView('chat'), applyNoteEditAndRefresh)
+  const agentAvailable = Boolean(agentStatus?.hasKey && agentStatus.model)
   const showHistory = rightOpen && view === 'chat'
   const pendingTitle = view === 'settings' && settingsSection === 'shortcuts' ? '快捷键设置' : navigation.find(item => item.id === view)?.label ?? ''
 
@@ -103,230 +66,8 @@ export default function App() {
     setRightOpen(true)
     setFocusRequest({ id, atSeconds })
   }, [])
-
-  useEffect(() => {
-    if (!isTauri()) return
-    void listNotes().then(setNotes).catch(() => setMiniError('本地笔记读取失败。'))
-    void listNoteFolders().then(setNoteFolders).catch(() => setMiniError('笔记文件夹读取失败。'))
-  }, [])
-
-  const createNoteDraft = (message: ChatMessage) => {
-    setNoteDraft(draftFromMessage(message, records))
-    setView('library')
-  }
-
-  const persistNote = async (draft: NoteDraft, id?: string) => {
-    const saved = await saveNote(draft, id)
-    setNotes(await listNotes())
-    return saved
-  }
-
-  const addNoteFolder = async (name: string) => {
-    const folder = await createNoteFolder(name)
-    setNoteFolders(await listNoteFolders())
-    return folder
-  }
-  const changeNoteFolderName = async (id: string, name: string) => {
-    await renameNoteFolder(id, name)
-    setNoteFolders(await listNoteFolders())
-  }
-  const removeNoteFolder = async (id: string) => {
-    const moved = await deleteNoteFolder(id)
-    setNoteFolders(await listNoteFolders())
-    setNotes(await listNotes())
-    return moved
-  }
-
-  const applyNoteEditAndRefresh = async (proposalId: string) => {
-    const saved = await applyNoteEdit(proposalId)
-    setNotes(await listNotes())
-    return saved
-  }
-  const undoNoteEditAndRefresh = async (proposalId: string) => {
-    const restored = await undoNoteEdit(proposalId)
-    setNotes(await listNotes())
-    return restored
-  }
-
-  const sendQuestion = async (question: string, frameId?: string, messageIds: string[] = [], choiceId?: string, deepMode = false, referenceOverride?: string[]) => {
-    if (sendingRef.current) return false
-    sendingRef.current = true
-    setSending(true)
-    setStreaming({ question, answer: '', startedAt: Date.now(), activities: [] })
-    setSuggestionErrorId(null)
-    setAgentError('')
-    try {
-      const reply = await askAgent(question, referenceOverride ?? referencedIds, delta => setStreaming(current => current && { ...current, answer: current.answer + delta }), frameId,
-        activity => setStreaming(current => current && { ...current, activity, activities: [...current.activities, activity] }), messageIds, choiceId, deepMode)
-      const saved = await getChatState()
-      applyChatState(saved)
-      setStreaming(null)
-      if (!reply.frame && !(saved.pendingChoice?.status === 'open' && saved.pendingChoice.messageId === reply.id) && !(saved.pendingLibrarySearch?.status === 'open' && saved.pendingLibrarySearch.messageId === reply.id) && !(saved.pendingChatNoteEdit?.proposal.status === 'pending' && saved.pendingChatNoteEdit.messageId === reply.id) && !(saved.pendingCommand?.status === 'open' && saved.pendingCommand.messageId === reply.id)) {
-        setSuggestingMessageId(reply.id)
-        void suggestChatFollowups(saved.activeId, reply.id)
-          .then(async () => applyChatState(await getChatState()))
-          .catch(() => setSuggestionErrorId(reply.id))
-          .finally(() => setSuggestingMessageId(current => current === reply.id ? null : current))
-      }
-      return true
-    } catch (error) {
-      try { applyChatState(await getChatState()) } catch { /* Keep the original send error visible. */ }
-      setStreaming(null)
-      setAgentError(String(error))
-      return false
-    } finally {
-      sendingRef.current = false
-      setSending(false)
-    }
-  }
-
-  const decideLibrarySearch = async (proposalId: string, accept: boolean, question: string) => {
-    try {
-      const updated = await resolveLibrarySearch(proposalId, accept)
-      applyChatState(updated)
-      if (accept) await sendQuestion(question, undefined, [], undefined, false, updated.referencedIds)
-    } catch (cause) { setAgentError(String(cause)) }
-  }
-  const decideChatNoteEdit = async (proposalId: string, accept: boolean) => {
-    try {
-      if (accept) await applyNoteEditAndRefresh(proposalId)
-      else await rejectNoteEdit(proposalId)
-      applyChatState(await getChatState())
-    } catch (cause) { setAgentError(String(cause)) }
-  }
-  const decideCommand = async (proposalId: string, accept: boolean) => {
-    try { applyChatState(await resolveCommandProposal(proposalId, accept)) }
-    catch (cause) { setAgentError(String(cause)); try { applyChatState(await getChatState()) } catch { /* Preserve command error. */ } }
-  }
-
-  const manageSession = async (action: () => Promise<ChatState>) => {
-    setSessionError('')
-    try {
-      applyChatState(await action())
-      setView('chat')
-    } catch (error) { setSessionError(String(error)) }
-  }
-
-  useEffect(() => {
-    if (!isTauri()) return
-    let disposed = false
-    const stops: UnlistenFn[] = []
-    void Promise.all([getAgentStatus(), getChatState()]).then(([status, saved]) => {
-      if (!disposed) { setAgentStatus(status); applyChatState(saved) }
-    }).catch(() => { if (!disposed) setAgentError('对话或模型配置读取失败') })
-    void listen('knowflow:chat-changed', () => {
-      if (!sendingRef.current) void getChatState().then(saved => { if (!disposed) applyChatState(saved) })
-    }).then(stop => { if (disposed) stop(); else stops.push(stop) })
-    return () => { disposed = true; stops.forEach(stop => stop()) }
-  }, [applyChatState])
-
-  useEffect(() => {
-    if (!isTauri() || !activeSessionId) return
-    void setChatReferences(activeSessionId, referencedIds).catch(error => setSessionError(String(error)))
-  }, [activeSessionId, referencedIds])
-
-  const handleOpenMini = async () => {
-    if (!isTauri() || miniOpening) return
-    setMiniOpening(true)
-    setMiniError('')
-    try {
-      await openMiniWindow()
-    } catch {
-      setMiniError('小窗打开失败，请重试。')
-    } finally {
-      setMiniOpening(false)
-    }
-  }
-
-  useEffect(() => {
-    if (!isTauri()) return
-    let disposed = false
-    let stop: UnlistenFn | undefined
-    const refresh = async () => {
-      try {
-        const saved = await loadSavedRecords()
-        if (!disposed) setSavedRecords(saved)
-      } catch {
-        if (!disposed) setMiniError('本地资料读取失败，请检查应用数据。')
-      }
-    }
-    void refresh()
-    void listen<string>('knowflow:records-changed', event => {
-      void refresh().then(() => {
-        setView('chat')
-        setRightOpen(true)
-        setSelectedId(event.payload)
-        setFocusRequest({ id: event.payload })
-      })
-    }).then(unlisten => {
-      if (disposed) unlisten()
-      else stop = unlisten
-    }).catch(() => { if (!disposed) setMiniError('资料更新监听失败。') })
-    return () => { disposed = true; stop?.() }
-  }, [])
-
-  useEffect(() => {
-    if (!isTauri()) return
-    let disposed = false
-    let stop: UnlistenFn | undefined
-    const refresh = async () => {
-      try {
-        const jobs = await listCaptureJobs()
-        if (!disposed) setCaptureJobs(jobs)
-      } catch { if (!disposed) setMiniError('采集任务读取失败。') }
-    }
-    void listen('gearnote:capture-jobs-changed', () => { void refresh() }).then(unlisten => {
-      if (disposed) unlisten()
-      else { stop = unlisten; void refresh() }
-    }).catch(() => { if (!disposed) setMiniError('采集状态监听失败。') })
-    return () => { disposed = true; stop?.() }
-  }, [])
-
-  useEffect(() => {
-    if (!isTauri()) return
-    let disposed = false
-    const refresh = async () => {
-      try {
-        const status = await loadBridgeStatus()
-        if (!disposed) setBridgeStatus(status)
-      } catch {
-        if (!disposed) setBridgeStatus(null)
-      }
-    }
-    void refresh()
-    const timer = window.setInterval(() => { void refresh() }, 5000)
-    return () => { disposed = true; window.clearInterval(timer) }
-  }, [])
-
-  useEffect(() => {
-    if (!isTauri()) return
-    let disposed = false
-    const stops: UnlistenFn[] = []
-    const subscribe = async () => {
-      try {
-        stops.push(await listen(MINI_READY_EVENT, () => {
-          void emitTo<MiniContextPayload>('mini', MINI_CONTEXT_EVENT, { referencedIds: referencedIdsRef.current }).catch(() => setMiniError('小窗资料同步失败。'))
-        }))
-        stops.push(await listen<MiniRevealPayload>(MINI_REVEAL_EVENT, event => revealRecord(event.payload.id, event.payload.atSeconds)))
-        stops.push(await listen<MiniRemoveReferencePayload>(MINI_REMOVE_REFERENCE_EVENT, event => {
-          setReferencedIds(current => current.filter(id => id !== event.payload.id))
-        }))
-        if (disposed) stops.forEach(stop => stop())
-      } catch {
-        stops.forEach(stop => stop())
-        if (!disposed) setMiniError('小窗通信初始化失败。')
-      }
-    }
-    void subscribe()
-    return () => { disposed = true; stops.forEach(stop => stop()) }
-  }, [revealRecord])
-
-  useEffect(() => {
-    if (!isTauri()) return
-    void WebviewWindow.getByLabel('mini')
-      .then(mini => mini ? emitTo<MiniContextPayload>('mini', MINI_CONTEXT_EVENT, { referencedIds }) : undefined)
-      .catch(() => setMiniError('小窗资料同步失败。'))
-  }, [referencedIds])
+  const { miniOpening, handleOpenMini } = useMiniWindow(referencedIds, setReferencedIds, revealRecord, setMiniError)
+  const miniAvailable = isTauri() && !miniOpening
 
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
