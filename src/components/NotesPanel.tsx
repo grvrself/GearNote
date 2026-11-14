@@ -132,6 +132,7 @@ export function NotesPanel({ notes, folders, records, incomingDraft, onDraftCons
   const selectNote = (note: Note) => {
     if ((selectedId !== note.id || hasUnsavedChanges) && !confirmDiscard()) return
     setDesignOpen(false)
+    setComposeOpen(false)
     setComposeCoverage(''); setOpenDesignAfterSave(false)
     setSelectedId(note.id)
     setDraft({ title: note.title, body: note.body, sources: note.sources.map(source => ({ recordId: source.recordId, atSeconds: source.atSeconds })), folderId: note.folderId ?? null })
@@ -195,7 +196,7 @@ export function NotesPanel({ notes, folders, records, incomingDraft, onDraftCons
         {folderMode && <form className="notes-folder-form" onSubmit={event => { event.preventDefault(); void submitFolder() }}><label htmlFor="note-folder-name">{folderMode === 'create' ? '新文件夹名称' : '重命名文件夹'}</label><input id="note-folder-name" autoFocus value={folderName} maxLength={60} onChange={event => setFolderName(event.target.value)} /><div><button type="submit" disabled={busy || !folderName.trim()}>保存</button><button type="button" disabled={busy} onClick={() => { setFolderMode(null); setFolderError('') }}>取消</button></div></form>}
         {folderError && <p className="notes-folder-error" role="alert">{folderError}</p>}
         <div className="notes-index-head"><span>笔记 <small>{visibleNotes.length}</small></span><button type="button" disabled={busy} onClick={newNote}>＋ 新建笔记</button></div>
-        <button className="notes-compose-entry" type="button" disabled={busy} onClick={startCompose}>从资料生成高级笔记</button>
+        <button className="notes-compose-entry" type="button" disabled={busy} aria-pressed={composeOpen} onClick={() => composeOpen ? setComposeOpen(false) : startCompose()}>从资料生成高级笔记</button>
         {visibleNotes.length === 0 && <p className="notes-empty">{notes.length === 0 ? '暂无笔记。分析资料后可从回答中生成草稿。' : '这里还没有笔记。'}</p>}
         {visibleNotes.map(note => <button className="notes-index-item" type="button" key={note.id} disabled={busy} data-selected={selectedId === note.id} onClick={() => selectNote(note)}>
           <strong>{note.title}</strong><small>{new Date(note.updatedAt).toLocaleString('zh-CN')} · {note.sources.length} 个引用</small>
@@ -207,11 +208,11 @@ export function NotesPanel({ notes, folders, records, incomingDraft, onDraftCons
           onApplyEdit={onApplyEdit} onRejectEdit={onRejectEdit} onUndoEdit={onUndoEdit}
           onNoteChanged={updated => setDraft({ title: updated.title, body: updated.body, sources: updated.sources, folderId: updated.folderId ?? null })} /> : <>
         {composeOpen && <div className="notes-compose"><strong>选择资料生成草稿</strong><p>最多选择 3 条已完成的资料。模型仅会读取部分相关片段；生成后仍由你检查并保存。</p>
-          <div className="notes-compose-records">{records.filter(record => record.status === 'ready' && !record.demo).map(record => <label key={record.id}>
+          <div className="notes-compose-records">{records.filter(record => record.status === 'ready' && !record.demo).map(record => <label key={record.id} data-selected={composeIds.includes(record.id)} data-disabled={!composeIds.includes(record.id) && composeIds.length >= 3}>
             <input type="checkbox" checked={composeIds.includes(record.id)} disabled={busy || (!composeIds.includes(record.id) && composeIds.length >= 3)}
-              onChange={event => setComposeIds(current => event.target.checked ? [...current, record.id] : current.filter(id => id !== record.id))} />{record.title}</label>)}</div>
+              onChange={event => setComposeIds(current => event.target.checked ? [...current, record.id] : current.filter(id => id !== record.id))} /><span>{record.title}</span></label>)}</div>
           <label htmlFor="note-compose-focus">整理重点（可选）</label><input id="note-compose-focus" value={composeFocus} maxLength={300} onChange={event => setComposeFocus(event.target.value)} placeholder="例如：总结操作步骤" />
-          <div className="notes-actions"><HudButton type="button" variant="primary" disabled={busy || composeIds.length === 0} onClick={() => { void compose() }}>{busy ? '生成中' : '生成待核对草稿'}</HudButton><HudButton type="button" disabled={busy} onClick={() => setComposeOpen(false)}>取消</HudButton></div>
+          <div className="notes-actions notes-compose-actions"><HudButton type="button" variant="primary" disabled={busy || composeIds.length === 0} onClick={() => { void compose() }}>{busy ? '生成中' : '生成待核对草稿'}</HudButton><HudButton type="button" disabled={busy} onClick={() => setComposeOpen(false)}>取消</HudButton></div>
         </div>}
         {composeCoverage && <p className="notes-notice">本次读取范围：{composeCoverage}</p>}
         <label htmlFor="note-title">标题</label>

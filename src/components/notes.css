@@ -52,8 +52,17 @@
 .notes-export button { flex:none; border:0; color:var(--accent); background:transparent; }
 .notes-actions { display:flex; gap:var(--space-2); }
 @media (max-width:980px) { .notes-layout { grid-template-columns:minmax(150px, 30%) minmax(0, 1fr); } .notes-editor { padding:var(--space-3); } }
-.notes-compose-entry { width: calc(100% - 24px); margin: 8px 12px 14px; padding: 9px 10px; text-align: left; border: 1px solid var(--line, #444); background: transparent; color: inherit; cursor: pointer; }
+.notes-compose-entry { width: calc(100% - 24px); margin: 8px 12px 14px; padding: 9px 10px; text-align: left; border: 1px solid var(--line); background: transparent; color: var(--paper); cursor: pointer; }
+.notes-compose-entry:hover:not(:disabled), .notes-compose-entry[aria-pressed='true'] { background: var(--panel-2); }
+.notes-compose-entry[aria-pressed='true'] { border-color: var(--accent); color: var(--accent); }
+.notes-compose-entry:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .notes-compose { border: 1px solid var(--line, #444); padding: 16px; margin-bottom: 20px; }
 .notes-compose p { line-height: 1.6; opacity: .75; }
-.notes-compose-records { max-height: 180px; overflow: auto; display: grid; gap: 8px; margin: 12px 0; }
-.notes-compose-records label { display: flex; align-items: center; gap: 8px; }
+.notes-compose-records { max-height: 180px; overflow: auto; display: grid; gap: 4px; margin: 12px 0; }
+.notes-compose-records label { display: grid; grid-template-columns: 16px minmax(0, 1fr); align-items: center; gap: 12px; min-height: 38px; padding: 8px 10px; border: 1px solid transparent; color: var(--paper); cursor: pointer; line-height: 1.4; }
+.notes-compose-records label:hover:not([data-disabled='true']), .notes-compose-records label[data-selected='true'] { background: var(--panel-2); }
+.notes-compose-records label[data-selected='true'] { border-color: var(--accent); }
+.notes-compose-records label[data-disabled='true'] { opacity: .5; cursor: default; }
+.notes-compose-records input[type='checkbox'] { width: 16px; height: 16px; min-height: 0; margin: 0; padding: 0; flex: none; accent-color: var(--accent); cursor: inherit; }
+.notes-compose-records span { min-width: 0; overflow-wrap: anywhere; }
+.notes-compose-actions { margin-top: var(--space-5); }
