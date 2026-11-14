@@ -3,8 +3,12 @@ import { listen } from '@tauri-apps/api/event'
 import type { ChatMessage, ChatSuggestion } from './chat-data'
 import type { NoteEditProposal } from './notes'
 
-export type AgentStatus = { baseUrl: string; model: string; exploreReferences: boolean; contextTier: 'small' | 'medium'; hasKey: boolean; keyPersistent: boolean; keyWarning: string | null }
+export type AgentStatus = { baseUrl: string; model: string; exploreReferences: boolean; contextTier: 'small' | 'medium';
+  semanticRetrieval: boolean; embeddingBaseUrl: string; embeddingModel: string; embeddingHasKey: boolean;
+  hasKey: boolean; keyPersistent: boolean; keyWarning: string | null }
 export type ToolProbe = { supported: boolean; searched: boolean; read: boolean; elapsedMs: number; steps: string[]; reason: string }
+export type SemanticProbe = { supported: boolean; dimensions: number; cases: number; topOne: number;
+  recallThree: number; elapsedMs: number; reason: string }
 export type ChatSessionSummary = { id: string; title: string; updatedAt: string; messageCount: number }
 export type WorkingContext = { goal: string; completed: string; nextStep: string; updatedAt: string }
 export type ProjectMemory = { id: string; content: string; source: string; createdAt: string; confirmedAt: string; expiresAt?: string | null; active: boolean }
@@ -35,6 +39,7 @@ export type ContextPreview = {
   limitChars: number
   reservedChars: number
   imageAttached: boolean
+  semanticPending: boolean
 }
 type StreamDelta = { requestId: string; delta: string }
 type ToolActivity = { requestId: string; message: string }
@@ -44,6 +49,9 @@ export const saveAgentConfig = (baseUrl: string, model: string, apiKey?: string)
   invoke<AgentStatus>('save_agent_config', { baseUrl, model, apiKey })
 export const saveExploreReferences = (enabled: boolean) => invoke<AgentStatus>('save_explore_references', { enabled })
 export const saveContextTier = (tier: 'small' | 'medium') => invoke<AgentStatus>('save_context_tier', { tier })
+export const saveSemanticRetrieval = (enabled: boolean, baseUrl: string, model: string, apiKey?: string) =>
+  invoke<AgentStatus>('save_semantic_retrieval', { enabled, baseUrl, model, apiKey })
+export const testSemanticRetrieval = () => invoke<SemanticProbe>('test_semantic_retrieval')
 export const testAgentTools = () => invoke<ToolProbe>('test_agent_tools')
 export const listChatMessages = () => invoke<ChatMessage[]>('list_chat_messages')
 export const getChatState = () => invoke<ChatState>('get_chat_state')

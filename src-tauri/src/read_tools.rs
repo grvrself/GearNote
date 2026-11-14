@@ -26,6 +26,8 @@ impl ReadIndex {
 
     pub fn len(&self) -> usize { self.chunks.len() }
 
+    pub(crate) fn entries(&self) -> &[(String, SourceChunk)] { &self.chunks }
+
     pub fn directory(&self, records: &[KnowledgeRecord], referenced_ids: &[String], max_chars: usize) -> String {
         let mut text = String::from("本轮已选资料目录（预览不是可引用原文）：\n");
         let chosen = referenced_ids.iter().filter_map(|id| records.iter().find(|record| &record.id == id)).collect::<Vec<_>>();
@@ -61,15 +63,25 @@ impl ReadIndex {
         text
     }
 
+    #[cfg(test)]
     pub fn search(&self, query: &str) -> Value {
+        self.search_with_semantic(query, None)
+    }
+
+    pub fn search_with_semantic(&self, query: &str, semantic: Option<&[f32]>) -> Value {
         let query = query.trim();
         if query.is_empty() || query.chars().count() > 200 {
             return json!({"error":"检索词需为 1–200 字"});
         }
         let scores = context::score_chunks(query, &self.chunks.iter().map(|(_, chunk)| chunk).collect::<Vec<_>>());
-        let mut ranked = self.chunks.iter().zip(scores).filter_map(|((id, chunk), score)| {
-            (score > 0).then_some((score, id, chunk))
-        }).collect::<Vec<_>>();
+        let mut ranked = if let Some(fused) = semantic.and_then(|values| crate::semantic::fuse_scores(&scores, values)) {
+            (0..scores.len()).filter(|&index| fused[index] > 0)
+                .map(|index| (fused[index], &self.chunks[index].0, &self.chunks[index].1)).collect::<Vec<_>>()
+        } else {
+            self.chunks.iter().zip(scores).filter_map(|((id, chunk), score)| {
+                (score > 0).then_some((score, id, chunk))
+            }).collect::<Vec<_>>()
+        };
         ranked.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(b.1)));
         let matches = ranked.into_iter().take(MAX_SEARCH_RESULTS).map(|(score, id, chunk)| json!({
             "chunk_id": id, "title": chunk.title, "at_seconds": chunk.at_seconds,
@@ -121,6 +133,19 @@ mod tests {
         assert_eq!(index.read("selected:0").unwrap().record_id, "selected");
         assert!(index.read("other:0").is_err());
         assert!(index.read("failed:0").is_err());
+    }
+
+    #[test]
+    fn semantic_fusion_can_find_paraphrases_without_expanding_read_access() {
+        let index = ReadIndex::new(&[
+            record("selected", ProcessStatus::Ready, "应用在离线状态下允许修改草稿。"),
+            record("unselected", ProcessStatus::Ready, "断线能编辑吗"),
+        ], &["selected".into()]);
+        assert!(index.search("断线能编辑吗")["matches"].as_array().unwrap().is_empty());
+        let result = index.search_with_semantic("断线能编辑吗", Some(&[0.91]));
+        assert_eq!(result["matches"][0]["chunk_id"], "selected:0");
+        assert!(index.read("unselected:0").is_err());
+        assert!(index.search_with_semantic("断线能编辑吗", Some(&[]))["matches"].as_array().unwrap().is_empty());
     }
 
     #[test]

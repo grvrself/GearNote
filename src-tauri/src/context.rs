@@ -83,6 +83,7 @@ pub struct ContextPreview {
     pub limit_chars: usize,
     pub reserved_chars: usize,
     pub image_attached: bool,
+    pub semantic_pending: bool,
 }
 
 pub struct PreparedContext {
@@ -295,10 +296,16 @@ fn coverage_sources(candidates: &[SourceChunk], ids: &[String]) -> Vec<SourceChu
 }
 
 pub fn select_sources(records: &[KnowledgeRecord], ids: &[String], question: &str) -> (Vec<SourceChunk>, usize) {
+    select_sources_with_semantic(records, ids, question, None)
+}
+
+pub(crate) fn select_sources_with_semantic(records: &[KnowledgeRecord], ids: &[String], question: &str,
+    semantic: Option<&[f32]>) -> (Vec<SourceChunk>, usize) {
     let mut candidates: Vec<_> = records.iter().filter(|record| ids.contains(&record.id) && record.status == ProcessStatus::Ready
         && (!record.content_text.is_empty() || record.transcript.as_ref().is_some_and(|cues| !cues.is_empty())))
         .flat_map(chunks).collect();
-    let scores = score_chunks(question, &candidates.iter().collect::<Vec<_>>());
+    let lexical = score_chunks(question, &candidates.iter().collect::<Vec<_>>());
+    let scores = semantic.and_then(|values| crate::semantic::fuse_scores(&lexical, values)).unwrap_or(lexical);
     for (chunk, score) in candidates.iter_mut().zip(scores) { chunk.score = score; }
     let candidate_count = candidates.len();
     if candidates.iter().all(|chunk| chunk.score == 0) { return (coverage_sources(&candidates, ids), candidate_count); }
@@ -331,6 +338,14 @@ pub fn build_with_message_refs(persona: &str, question: &str, messages: &[ChatMe
 }
 
 pub fn build_with_message_refs_limit(persona: &str, question: &str, messages: &[ChatMessage], selected_messages: &[ChatMessage], records: &[KnowledgeRecord], ids: &[String], image: Option<SourceChunk>, project_memory: &[ProjectMemory], working: &WorkingContext, summary: &str, reserve_chars: usize, limit_chars: usize) -> PreparedContext {
+    build_with_message_refs_limit_semantic(persona, question, messages, selected_messages, records, ids,
+        image, project_memory, working, summary, reserve_chars, limit_chars, None)
+}
+
+pub(crate) fn build_with_message_refs_limit_semantic(persona: &str, question: &str, messages: &[ChatMessage],
+    selected_messages: &[ChatMessage], records: &[KnowledgeRecord], ids: &[String], image: Option<SourceChunk>,
+    project_memory: &[ProjectMemory], working: &WorkingContext, summary: &str, reserve_chars: usize,
+    limit_chars: usize, semantic: Option<&[f32]>) -> PreparedContext {
     let system_text = format!("人格风格设定：\n{persona}\n\n{RULES}");
     let mut included_memory = Vec::new();
     let mut memory_chars = 0;
@@ -354,7 +369,7 @@ pub fn build_with_message_refs_limit(persona: &str, question: &str, messages: &[
     let history_budget = MAX_HISTORY_CHARS.min(available / 3);
     let source_budget = MAX_SOURCE_CHARS.min(available.saturating_sub(history_budget));
 
-    let (mut selected, candidate_chunk_count) = select_sources(records, ids, question);
+    let (mut selected, candidate_chunk_count) = select_sources_with_semantic(records, ids, question, semantic);
     for message in selected_messages.iter().rev() { selected.insert(0, SourceChunk::chat(message)); }
     if let Some(image) = image { selected.insert(0, image); selected.truncate(MAX_SOURCE_CHUNKS); }
     selected.truncate(MAX_SOURCE_CHUNKS);
@@ -418,7 +433,7 @@ pub fn build_with_message_refs_limit(persona: &str, question: &str, messages: &[
         omitted_history_count,
         shortened_history_count, shortened_source_count,
         text_chars: char_count(&system_text) + char_count(&user_text), limit_chars, reserved_chars: reserve_chars,
-        image_attached: sources.iter().any(|source| source.visual),
+        image_attached: sources.iter().any(|source| source.visual), semantic_pending: false,
     };
     PreparedContext { system_text, user_text, sources, preview }
 }
@@ -462,6 +477,25 @@ mod tests {
         assert!(query_expansions("怎样避免文件丢失").contains("备份"));
         assert!(!query_expansions("文件丢失的原因是什么").contains("备份"));
         assert!(query_expansions("删除文件怎么办").is_empty());
+    }
+
+    #[test]
+    fn semantic_ranking_reaches_a_paraphrase_when_exploration_is_off() {
+        let record = |id: String, body: &str| -> KnowledgeRecord { serde_json::from_value(serde_json::json!({
+            "id":id,"type":"article","title":"资料","site":"example.invalid","savedAt":"1",
+            "status":"ready","sourceUrl":"https://example.invalid","contentText":body,"excerpt":[]
+        })).unwrap() };
+        let mut records = (0..8).map(|index| record(format!("distractor-{index}"), "普通流程。"))
+            .collect::<Vec<_>>();
+        records.push(record("target".into(), "应用在离线状态下允许修改草稿。"));
+        let ids = records.iter().map(|record| record.id.clone()).collect::<Vec<_>>();
+        let (lexical, _) = select_sources(&records, &ids, "断线后能编辑吗");
+        assert!(!lexical.iter().any(|chunk| chunk.record_id == "target"));
+        let mut vector = vec![0.0; 9];
+        vector[8] = 0.95;
+        let (ranked, _) = select_sources_with_semantic(&records, &ids, "断线后能编辑吗", Some(&vector));
+        assert_eq!(ranked[0].record_id, "target");
+        assert!(ranked.len() <= 8);
     }
 
     #[test]

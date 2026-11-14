@@ -9,9 +9,15 @@ fn answer_payload(config: &AgentConfig, messages: &[serde_json::Value], explored
     payload
 }
 
+#[cfg(test)]
 fn execute_reference_tool(index: &ReadIndex, sources: &mut Vec<SourceChunk>, name: &str, args: &serde_json::Value) -> serde_json::Value {
+    execute_reference_tool_with_semantic(index, sources, name, args, None)
+}
+
+fn execute_reference_tool_with_semantic(index: &ReadIndex, sources: &mut Vec<SourceChunk>, name: &str,
+    args: &serde_json::Value, semantic: Option<&[f32]>) -> serde_json::Value {
     match name {
-        "search_references" => index.search(args.get("query").and_then(serde_json::Value::as_str).unwrap_or_default()),
+        "search_references" => index.search_with_semantic(args.get("query").and_then(serde_json::Value::as_str).unwrap_or_default(), semantic),
         "read_reference" => {
             let chunk_id = args.get("chunk_id").and_then(serde_json::Value::as_str).unwrap_or_default();
             match index.read(chunk_id) {
@@ -56,6 +62,13 @@ fn tool_step_label(name: &str, args: &serde_json::Value, result: &serde_json::Va
 async fn explore_references<F: Fn(&str)>(
     activity: F, client: &reqwest::Client, config: &AgentConfig, key: &str,
     prepared: &PreparedContext, index: &ReadIndex, allow_choice: bool,
+) -> Result<Option<Exploration>, String> {
+    explore_references_with_semantic(activity, client, config, key, prepared, index, allow_choice, None).await
+}
+
+async fn explore_references_with_semantic<F: Fn(&str)>(
+    activity: F, client: &reqwest::Client, config: &AgentConfig, key: &str,
+    prepared: &PreparedContext, index: &ReadIndex, allow_choice: bool, semantic: Option<&[f32]>,
 ) -> Result<Option<Exploration>, String> {
     if index.is_empty() { return Ok(None); }
     let mut messages = vec![
@@ -129,7 +142,7 @@ async fn explore_references<F: Fn(&str)>(
             }
             let status = if name == "search_references" { "正在检索本轮参考资料…" } else { "正在读取资料原文…" };
             activity(status);
-            let result = execute_reference_tool(index, &mut sources, name, &args);
+            let result = execute_reference_tool_with_semantic(index, &mut sources, name, &args, semantic);
             let mut content = result.to_string();
             let remaining = MAX_TOOL_OUTPUT_CHARS.saturating_sub(output_chars);
             if content.chars().count() > remaining {

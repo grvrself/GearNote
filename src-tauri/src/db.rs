@@ -88,7 +88,20 @@ pub(crate) fn open(path: &Path) -> Result<Connection, String> {
             id TEXT PRIMARY KEY, proposal_id TEXT NOT NULL, action TEXT NOT NULL,
             target_id TEXT NOT NULL, at TEXT NOT NULL, detail TEXT NOT NULL
         );
-        CREATE INDEX IF NOT EXISTS idx_workflow_events_target ON workflow_events(target_id,at DESC);")
+        CREATE INDEX IF NOT EXISTS idx_workflow_events_target ON workflow_events(target_id,at DESC);
+        CREATE TABLE IF NOT EXISTS chunk_vectors (
+            chunk_id TEXT NOT NULL, record_id TEXT NOT NULL, provider TEXT NOT NULL,
+            model TEXT NOT NULL, digest TEXT NOT NULL, dim INTEGER NOT NULL, vec BLOB NOT NULL,
+            PRIMARY KEY(chunk_id,provider,model)
+        );
+        CREATE INDEX IF NOT EXISTS idx_chunk_vectors_record ON chunk_vectors(record_id);
+        CREATE TRIGGER IF NOT EXISTS record_rows_ad_vectors AFTER DELETE ON record_rows BEGIN
+            DELETE FROM chunk_vectors WHERE record_id=old.id;
+        END;
+        CREATE TRIGGER IF NOT EXISTS record_rows_au_vectors AFTER UPDATE OF json ON record_rows
+        WHEN old.json != new.json BEGIN
+            DELETE FROM chunk_vectors WHERE record_id=new.id;
+        END;")
         .map_err(|error| format!("数据库初始化失败：{error}"))?;
     let has_edits = connection.prepare("PRAGMA table_info(workflow_proposals)")
         .and_then(|mut query| query.query_map([], |row| row.get::<_, String>(1))

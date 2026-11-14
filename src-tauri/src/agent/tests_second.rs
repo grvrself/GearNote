@@ -333,6 +333,8 @@
         let config: AgentConfig = serde_json::from_str(old).unwrap();
         assert!(config.explore_references);
         assert_eq!(config.context_tier, ContextTier::Small);
+        assert!(!config.semantic_retrieval);
+        assert!(config.embedding_model.is_empty());
 
         let mut disabled = config.clone();
         disabled.explore_references = false;
@@ -344,6 +346,11 @@
         let restored: AgentConfig = serde_json::from_str(&serde_json::to_string(&disabled).unwrap()).unwrap();
         assert_eq!(restored.context_tier.char_limit(), 48_000);
         assert!(!restored.explore_references);
+        disabled.semantic_retrieval = true;
+        disabled.embedding_model = "test-embedding".into();
+        let restored: AgentConfig = serde_json::from_str(&serde_json::to_string(&disabled).unwrap()).unwrap();
+        assert!(restored.semantic_retrieval);
+        assert_eq!(restored.embedding_model, "test-embedding");
     }
 
     #[test]

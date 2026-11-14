@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { isTauri } from '@tauri-apps/api/core'
-import { getAgentStatus, saveAgentConfig, saveExploreReferences, saveContextTier, testAgentTools, type AgentStatus, type ToolProbe } from '../agent'
+import { getAgentStatus, saveAgentConfig, saveExploreReferences, saveContextTier, saveSemanticRetrieval, testSemanticRetrieval, testAgentTools, type AgentStatus, type ToolProbe, type SemanticProbe } from '../agent'
 import { ChamferCard } from './ChamferCard'
 import { HudButton } from './HudButton'
 import './agent-setup.css'
@@ -16,6 +16,15 @@ export function AgentSetup({ onStatusChange }: Props) {
   const [keyWarning, setKeyWarning] = useState<string | null>(null)
   const [exploreEnabled, setExploreEnabled] = useState(true)
   const [contextTier, setContextTier] = useState<'small' | 'medium'>('small')
+  const [semanticEnabled, setSemanticEnabled] = useState(false)
+  const [embeddingBaseUrl, setEmbeddingBaseUrl] = useState('')
+  const [embeddingModel, setEmbeddingModel] = useState('')
+  const [embeddingKey, setEmbeddingKey] = useState('')
+  const [embeddingHasKey, setEmbeddingHasKey] = useState(false)
+  const [savingSemantic, setSavingSemantic] = useState(false)
+  const [semanticMessage, setSemanticMessage] = useState('')
+  const [semanticProbeBusy, setSemanticProbeBusy] = useState(false)
+  const [semanticProbe, setSemanticProbe] = useState<SemanticProbe | null>(null)
   const [savingTier, setSavingTier] = useState(false)
   const [tierMessage, setTierMessage] = useState('')
   const [savingExplore, setSavingExplore] = useState(false)
@@ -38,6 +47,11 @@ export function AgentSetup({ onStatusChange }: Props) {
       setKeyWarning(status.keyWarning)
       setExploreEnabled(status.exploreReferences)
       setContextTier(status.contextTier)
+      setSemanticEnabled(status.semanticRetrieval)
+      setEmbeddingBaseUrl(status.embeddingBaseUrl)
+      setEmbeddingModel(status.embeddingModel)
+      setEmbeddingHasKey(status.embeddingHasKey)
+      setSemanticProbe(null)
       onStatusChange(status)
     }).catch(() => setMessage('模型配置读取失败'))
   }, [onStatusChange])
@@ -52,6 +66,11 @@ export function AgentSetup({ onStatusChange }: Props) {
       setKeyWarning(status.keyWarning)
       setExploreEnabled(status.exploreReferences)
       setContextTier(status.contextTier)
+      setSemanticEnabled(status.semanticRetrieval)
+      setEmbeddingBaseUrl(status.embeddingBaseUrl)
+      setEmbeddingModel(status.embeddingModel)
+      setEmbeddingHasKey(status.embeddingHasKey)
+      setSemanticProbe(null)
       setBaseUrl(status.baseUrl)
       setModel(status.model)
       setSavedConfig({ baseUrl: status.baseUrl, model: status.model })
@@ -100,6 +119,31 @@ export function AgentSetup({ onStatusChange }: Props) {
     finally { setSavingTier(false) }
   }
 
+  const saveSemantic = async () => {
+    setSavingSemantic(true)
+    setSemanticMessage('')
+    try {
+      const status = await saveSemanticRetrieval(semanticEnabled, embeddingBaseUrl, embeddingModel, embeddingKey || undefined)
+      setSemanticEnabled(status.semanticRetrieval)
+      setEmbeddingBaseUrl(status.embeddingBaseUrl)
+      setEmbeddingModel(status.embeddingModel)
+      setEmbeddingHasKey(status.embeddingHasKey)
+      setEmbeddingKey('')
+      setSemanticProbe(null)
+      onStatusChange(status)
+      setSemanticMessage('已保存')
+    } catch (error) { setSemanticMessage(String(error)) }
+    finally { setSavingSemantic(false) }
+  }
+
+  const testSemantic = async () => {
+    setSemanticProbeBusy(true)
+    setSemanticMessage('')
+    try { setSemanticProbe(await testSemanticRetrieval()) }
+    catch (error) { setSemanticMessage(String(error)) }
+    finally { setSemanticProbeBusy(false) }
+  }
+
   return <ChamferCard className="agent-setup-card"><section className="agent-setup" id="agt-01" aria-labelledby="agt-01-title">
     <div className="agent-setup-head"><span>AGT-01 / MODEL SERVICE</span><h3 id="agt-01-title">Agent 服务</h3></div>
     <p>填写支持 Chat Completions 的 API 地址与模型名称。提问时，所选资料的相关片段会发送到该服务。</p>
@@ -119,6 +163,17 @@ export function AgentSetup({ onStatusChange }: Props) {
       <label>上下文档位<select value={contextTier} disabled={!isTauri() || saving || savingTier} onChange={event => { void changeTier(event.target.value as 'small' | 'medium') }}><option value="small">小 · 24000 字</option><option value="medium">中 · 48000 字</option></select></label>
       <p>这是发送文本的字符预算，不是模型 token 数。中档只扩展总预算，单段资料仍最多 1200 字、每轮最多 8 段。</p>
       {tierMessage && <span role="status">{tierMessage}</span>}
+    </div>
+    <div className="agent-explore-config">
+      <label><input type="checkbox" checked={semanticEnabled} disabled={!isTauri() || savingSemantic} onChange={event => setSemanticEnabled(event.target.checked)} /><span>语义检索（默认关闭）</span></label>
+      <p>开启后会把本轮问题及已选资料片段发送到向量模型，增加 API 调用和费用。用于文字提问中的已选资料；深度视频、附图和未选资料不参与。若上方问答服务不提供 /embeddings，请填写独立向量服务。服务不兼容或请求失败时自动使用原有词法检索。</p>
+      {(semanticEnabled || !!embeddingModel) && <>
+      <label className="semantic-text-field">向量模型 ID（开启时必填）<input value={embeddingModel} onChange={event => setEmbeddingModel(event.target.value)} spellCheck={false} placeholder="填写支持 /embeddings 的模型 ID" /></label>
+      <label className="semantic-text-field">向量 API 地址（可选）<input value={embeddingBaseUrl} onChange={event => setEmbeddingBaseUrl(event.target.value)} spellCheck={false} placeholder="留空则沿用上方 API 地址" /></label>
+      <label className="semantic-text-field">向量 API 密钥（独立地址时填写）<input type="password" value={embeddingKey} onChange={event => setEmbeddingKey(event.target.value)} autoComplete="off" placeholder={embeddingHasKey ? '已保存；留空则保持' : '留空则仅在共用地址时沿用上方密钥'} /></label>
+      <div className="agent-setup-actions"><HudButton type="button" disabled={!isTauri() || savingSemantic || (semanticEnabled && !embeddingModel.trim())} onClick={() => { void saveSemantic() }}>{savingSemantic ? '保存中' : '保存语义检索'}</HudButton><HudButton type="button" disabled={!isTauri() || savingSemantic || semanticProbeBusy || !embeddingModel.trim()} onClick={() => { void testSemantic() }}>{semanticProbeBusy ? '测试中' : '测试已保存的向量服务'}</HudButton><span role="status">{semanticMessage}</span></div>
+      {semanticProbe && <p role="status">{semanticProbe.supported ? `向量服务可用 · ${semanticProbe.dimensions} 维 · ${semanticProbe.cases} 题中首位命中 ${semanticProbe.topOne} 题、前三命中 ${semanticProbe.recallThree} 题 · ${(semanticProbe.elapsedMs / 1000).toFixed(1)} 秒` : '向量服务不可用'}。{semanticProbe.reason}</p>}
+      </>}
     </div>
     <div className="agent-tool-probe">
       <div><strong>资料探索兼容性</strong><HudButton type="button" disabled={!isTauri() || saving || testing || !hasKey || !savedConfig.model || baseUrl !== savedConfig.baseUrl || model !== savedConfig.model} onClick={() => { void testTools() }}>{testing ? '测试中' : '测试已保存配置'}</HudButton></div>

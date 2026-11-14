@@ -41,6 +41,8 @@ pub fn preview_agent_context(app: AppHandle, agent: State<'_, AgentState>, stora
     } else { None };
     let deep_record = if deep_mode { Some(validate_deep_video(&records, &referenced_ids, image.is_some(), !selected.is_empty(), open_choice.is_some())?) } else { None };
     let general_chat = referenced_ids.is_empty() && selected.is_empty() && image.is_none();
+    let semantic_pending = config.semantic_retrieval && !deep_mode && image.is_none()
+        && selected.is_empty() && !referenced_ids.is_empty();
     let index = (explore && !deep_mode && image.is_none() && selected.is_empty() && !referenced_ids.is_empty()).then(|| ReadIndex::new(&records, &referenced_ids));
     let mut prepared = if let Some(record) = deep_record {
         let batch_count = deep_video::batches(record).len();
@@ -60,6 +62,7 @@ pub fn preview_agent_context(app: AppHandle, agent: State<'_, AgentState>, stora
         prepared.preview.system_text.push_str(&addition);
         prepared.preview.text_chars += addition.chars().count();
     }
+    prepared.preview.semantic_pending = semantic_pending;
     Ok(prepared.preview)
 }
 
@@ -292,11 +295,27 @@ pub async fn ask_agent(app: AppHandle, agent: State<'_, AgentState>, storage: St
     let deep_record = if deep_mode { Some(validate_deep_video(&records, &referenced_ids, image_source.is_some(), !selected.is_empty(), open_choice.is_some())?) } else { None };
     let general_chat = referenced_ids.is_empty() && selected.is_empty() && image_source.is_none();
     let use_exploration = (config.explore_references || confirmed_library_followup) && !deep_mode && image_source.is_none() && selected.is_empty() && !referenced_ids.is_empty();
-    let index = use_exploration.then(|| ReadIndex::new(&records, &referenced_ids));
-    let mut prepared = context::build_with_message_refs_limit(&persona, question, &recent_messages, &selected, &records, &referenced_ids,
-        image_source, &project_memory, &working, &summary, 0, config.context_tier.char_limit());
+    let use_semantic = config.semantic_retrieval && !deep_mode && image_source.is_none() && selected.is_empty() && !referenced_ids.is_empty();
+    let index = (use_exploration || use_semantic).then(|| ReadIndex::new(&records, &referenced_ids));
+    let client = reqwest::Client::builder().connect_timeout(Duration::from_secs(15)).timeout(Duration::from_secs(180)).build().map_err(|_| "无法初始化网络客户端")?;
+    let semantic_scores = if use_semantic {
+        if let Some(index) = index.as_ref().filter(|index| !index.is_empty()) {
+            let custom = !config.embedding_base_url.is_empty();
+            let base_url = if custom { &config.embedding_base_url } else { &config.base_url };
+            let embedding_key = if custom { agent.embedding_key.lock().ok().and_then(|value| value.clone()) }
+                else { Some(key.clone()) };
+            if let Some(embedding_key) = embedding_key.or_else(|| {
+                Url::parse(base_url).ok().and_then(|url| matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "[::1]")).then(String::new))
+            }) {
+                crate::semantic::similarities(&client, base_url, &config.embedding_model, &embedding_key,
+                    &agent.sessions_path, index.entries(), question).await
+            } else { None }
+        } else { None }
+    } else { None };
+    let mut prepared = context::build_with_message_refs_limit_semantic(&persona, question, &recent_messages, &selected, &records, &referenced_ids,
+        image_source, &project_memory, &working, &summary, 0, config.context_tier.char_limit(), semantic_scores.as_deref());
     if general_chat { context::enable_general_chat(&mut prepared, &persona); }
-    let mut exploration_prepared = index.as_ref().filter(|index| !index.is_empty()).map(|index| {
+    let mut exploration_prepared = index.as_ref().filter(|index| use_exploration && !index.is_empty()).map(|index| {
         context::build_exploration_limit(&persona, question, &recent_messages, referenced_ids.len(),
             index.directory(&records, &referenced_ids, 6_000), index.len(), &project_memory, &working, &summary, config.context_tier.char_limit())
     });
@@ -312,16 +331,15 @@ pub async fn ask_agent(app: AppHandle, agent: State<'_, AgentState>, storage: St
         if let Some(exploration_prepared) = &mut exploration_prepared { exploration_prepared.system_text.push_str(&instruction); }
         if let Some(deep_prepared) = &mut deep_prepared { deep_prepared.system_text.push_str(&instruction); }
     }
-    let client = reqwest::Client::builder().connect_timeout(Duration::from_secs(15)).timeout(Duration::from_secs(180)).build().map_err(|_| "无法初始化网络客户端")?;
     let (exploration, read_coverage) = if let (Some(record), Some(deep_prepared)) = (deep_record, deep_prepared.as_ref()) {
         let (result, coverage) = explore_video_deep(|message| {
             let _ = app.emit("knowflow:agent-tool", ToolActivity { request_id: request_id.clone(), message: message.into() });
         }, &config, &key, deep_prepared, record, question).await?;
         (Some(result), Some(coverage))
     } else if let (Some(index), Some(exploration_prepared)) = (index.as_ref(), exploration_prepared.as_ref()) {
-        (explore_references(|message| {
+        (explore_references_with_semantic(|message| {
             let _ = app.emit("knowflow:agent-tool", ToolActivity { request_id: request_id.clone(), message: message.into() });
-        }, &client, &config, &key, exploration_prepared, index, open_choice.is_none()).await?, None)
+        }, &client, &config, &key, exploration_prepared, index, open_choice.is_none(), semantic_scores.as_deref()).await?, None)
     } else { (None, None) };
     if let Some((draft, steps)) = exploration.as_ref().and_then(|value| value.choice.clone().map(|draft| (draft, value.steps.clone()))) {
         let now = now_millis()?;

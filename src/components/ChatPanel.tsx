@@ -275,6 +275,7 @@ export function ChatPanel({ records, pendingChoice = null, pendingLibrarySearch 
       {contextPreviewOpen && contextPreview && <div className="context-inspector" aria-label="本轮上下文预览">
         <div className="context-inspector-head"><strong>本轮上下文 / 发送前预览</strong><span>{contextPreview.textChars.toLocaleString()} / {contextPreview.limitChars.toLocaleString()} 字符{contextPreview.reservedChars > 0 ? ` · 预留 ${contextPreview.reservedChars.toLocaleString()}` : ''}</span></div>
         <p>参考资料 {contextPreview.referencedRecordCount} 条 · 对话消息 {contextPreview.referencedMessageCount} 条 · {activeDeepMode ? `字幕约 ${contextPreview.candidateChunkCount} 批 · 待逐批读取` : contextPreview.explorationMode ? `目录候选 ${contextPreview.candidateChunkCount} 段 · 正文待工具读取` : `实际片段 ${contextPreview.sources.length} / 候选 ${contextPreview.candidateChunkCount}`}{contextPreview.imageAttached ? ' · 附带图片' : ''}</p>
+        {contextPreview.semanticPending && <p>发送后会尝试语义排序；这里暂显示词法预览，实际片段可能变化，并会增加向量 API 用量。</p>}
         {(contextPreview.omittedHistoryCount > 0 || contextPreview.shortenedHistoryCount > 0 || contextPreview.shortenedSourceCount > 0) && <p>较早消息未纳入 {contextPreview.omittedHistoryCount} 条 · 缩短历史 {contextPreview.shortenedHistoryCount} 条 · 缩短片段 {contextPreview.shortenedSourceCount} 条</p>}
         <p>字符上限用于控制文本长度，不等于模型的 token 数；图片另计。</p>
         <details><summary>人格与回答规则</summary><pre>{contextPreview.systemText}</pre></details>

@@ -1,7 +1,14 @@
 // Agent 配置、人格与状态读取。
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct AgentConfig { base_url: String, model: String, #[serde(default = "default_explore_references")] explore_references: bool, #[serde(default)] context_tier: ContextTier }
+struct AgentConfig {
+    base_url: String, model: String,
+    #[serde(default = "default_explore_references")] explore_references: bool,
+    #[serde(default)] context_tier: ContextTier,
+    #[serde(default)] semantic_retrieval: bool,
+    #[serde(default)] embedding_base_url: String,
+    #[serde(default)] embedding_model: String,
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -14,12 +21,14 @@ impl ContextTier {
 fn default_explore_references() -> bool { true }
 
 impl Default for AgentConfig {
-    fn default() -> Self { Self { base_url: "https://api.openai.com/v1".into(), model: String::new(), explore_references: true, context_tier: ContextTier::Small } }
+    fn default() -> Self { Self { base_url: "https://api.openai.com/v1".into(), model: String::new(), explore_references: true,
+        context_tier: ContextTier::Small, semantic_retrieval: false, embedding_base_url: String::new(), embedding_model: String::new() } }
 }
 
 pub struct AgentState {
     config: Mutex<AgentConfig>,
     key: Mutex<Option<String>>,
+    embedding_key: Mutex<Option<String>>,
     key_warning: Mutex<Option<String>>,
     pub(crate) sessions: Mutex<ChatStore>,
     persona: Mutex<String>,
@@ -27,6 +36,7 @@ pub struct AgentState {
     auto_compact_failures: Mutex<HashMap<String, usize>>,
     config_path: PathBuf,
     key_path: PathBuf,
+    embedding_key_path: PathBuf,
     pub(crate) sessions_path: PathBuf,
     persona_path: PathBuf,
 }
@@ -39,6 +49,7 @@ impl AgentState {
         fs::create_dir_all(&dir)?;
         let config_path = dir.join("agent-config.json");
         let key_path = dir.join("agent-key.bin");
+        let embedding_key_path = dir.join("embedding-key.bin");
         let legacy_messages_path = dir.join("chat.json");
         let sessions_path = dir.join(crate::db::FILE_NAME);
         let persona_path = dir.join("persona.md");
@@ -47,11 +58,15 @@ impl AgentState {
             Ok(key) => (key, None),
             Err(_) => (None, Some("保存的密钥无法读取，请重新填写并保存".into())),
         };
+        let embedding_key = crate::secret::load(&embedding_key_path).unwrap_or(None);
         let sessions = load_chat_store(&sessions_path, &legacy_messages_path)?;
         if !persona_path.exists() { fs::write(&persona_path, DEFAULT_PERSONA)?; }
         let persona = fs::read_to_string(&persona_path)?;
         let persona = if valid_persona(&persona) { persona } else { DEFAULT_PERSONA.into() };
-        Ok(Self { config: Mutex::new(config), key: Mutex::new(key), key_warning: Mutex::new(key_warning), sessions: Mutex::new(sessions), persona: Mutex::new(persona), busy: Mutex::new(false), auto_compact_failures: Mutex::new(HashMap::new()), config_path, key_path, sessions_path, persona_path })
+        Ok(Self { config: Mutex::new(config), key: Mutex::new(key), embedding_key: Mutex::new(embedding_key),
+            key_warning: Mutex::new(key_warning), sessions: Mutex::new(sessions), persona: Mutex::new(persona),
+            busy: Mutex::new(false), auto_compact_failures: Mutex::new(HashMap::new()), config_path, key_path,
+            embedding_key_path, sessions_path, persona_path })
     }
 }
 
@@ -130,14 +145,20 @@ fn persist_chat_store(path: &PathBuf, store: &ChatStore) -> Result<(), String> {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct AgentStatus { base_url: String, model: String, explore_references: bool, context_tier: ContextTier, has_key: bool, key_persistent: bool, key_warning: Option<String> }
+pub struct AgentStatus { base_url: String, model: String, explore_references: bool, context_tier: ContextTier,
+    semantic_retrieval: bool, embedding_base_url: String, embedding_model: String, embedding_has_key: bool,
+    has_key: bool, key_persistent: bool, key_warning: Option<String> }
 
 #[tauri::command]
 pub fn get_agent_status(state: State<'_, AgentState>) -> Result<AgentStatus, String> {
     let config = state.config.lock().map_err(|_| "模型配置暂不可用")?.clone();
     let has_key = state.key.lock().map_err(|_| "模型密钥暂不可用")?.is_some();
     let key_warning = state.key_warning.lock().map_err(|_| "密钥状态暂不可用")?.clone();
-    Ok(AgentStatus { base_url: config.base_url, model: config.model, explore_references: config.explore_references, context_tier: config.context_tier, has_key, key_persistent: cfg!(windows), key_warning })
+    let embedding_has_key = state.embedding_key.lock().map_err(|_| "向量密钥状态暂不可用")?.is_some();
+    Ok(AgentStatus { base_url: config.base_url, model: config.model, explore_references: config.explore_references,
+        context_tier: config.context_tier, semantic_retrieval: config.semantic_retrieval,
+        embedding_base_url: config.embedding_base_url, embedding_model: config.embedding_model,
+        embedding_has_key, has_key, key_persistent: cfg!(windows), key_warning })
 }
 
 #[tauri::command]
@@ -156,7 +177,10 @@ pub fn save_agent_config(state: State<'_, AgentState>, base_url: String, model: 
         if !key.is_empty() && (key.trim() != key || key.len() > 4096 || key.chars().any(char::is_control)) { return Err("API 密钥格式无效".into()); }
     }
     let mut saved_config = state.config.lock().map_err(|_| "模型配置暂不可用")?;
-    let config = AgentConfig { base_url: url.as_str().trim_end_matches('/').into(), model: model.into(), explore_references: saved_config.explore_references, context_tier: saved_config.context_tier };
+    let config = AgentConfig { base_url: url.as_str().trim_end_matches('/').into(), model: model.into(),
+        explore_references: saved_config.explore_references, context_tier: saved_config.context_tier,
+        semantic_retrieval: saved_config.semantic_retrieval, embedding_base_url: saved_config.embedding_base_url.clone(),
+        embedding_model: saved_config.embedding_model.clone() };
     let data = serde_json::to_vec_pretty(&config).map_err(|_| "模型配置无法编码")?;
     if let Some(ref key) = api_key {
         crate::secret::save(&state.key_path, key)?;
@@ -193,6 +217,72 @@ pub fn save_context_tier(state: State<'_, AgentState>, tier: ContextTier) -> Res
     *saved = next;
     drop(saved);
     get_agent_status(state)
+}
+
+#[tauri::command]
+pub fn save_semantic_retrieval(state: State<'_, AgentState>, enabled: bool, base_url: String,
+    model: String, api_key: Option<String>) -> Result<AgentStatus, String> {
+    let base_url = base_url.trim();
+    let url = if base_url.is_empty() { String::new() } else {
+        let url = Url::parse(base_url).map_err(|_| "向量 API 地址无效")?;
+        let localhost = matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"));
+        if url.scheme() != "https" && !(localhost && url.scheme() == "http") {
+            return Err("云端向量 API 必须使用 HTTPS；本机地址可以使用 HTTP".into());
+        }
+        if url.host_str().is_none() || !url.username().is_empty() || url.password().is_some()
+            || url.query().is_some() || url.fragment().is_some() { return Err("向量 API 地址不能包含账号或参数".into()); }
+        url.as_str().trim_end_matches('/').to_string()
+    };
+    let model = model.trim();
+    if model.len() > 100 || model.chars().any(char::is_whitespace) || (enabled && model.is_empty()) {
+        return Err("请填写有效的向量模型 ID".into());
+    }
+    if let Some(ref key) = api_key {
+        if !key.is_empty() && (key.trim() != key || key.len() > 4096 || key.chars().any(char::is_control)) {
+            return Err("向量 API 密钥格式无效".into());
+        }
+    }
+    let mut saved = state.config.lock().map_err(|_| "模型配置暂不可用")?;
+    let mut next = saved.clone();
+    next.semantic_retrieval = enabled;
+    next.embedding_base_url = url;
+    next.embedding_model = model.into();
+    let data = serde_json::to_vec_pretty(&next).map_err(|_| "语义检索设置无法编码")?;
+    if let Some(ref key) = api_key { crate::secret::save(&state.embedding_key_path, key)?; }
+    fs::write(&state.config_path, data).map_err(|error| format!("语义检索设置保存失败：{error}"))?;
+    *saved = next;
+    drop(saved);
+    if let Some(key) = api_key {
+        *state.embedding_key.lock().map_err(|_| "向量密钥状态暂不可用")? = if key.is_empty() { None } else { Some(key) };
+    }
+    get_agent_status(state)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SemanticProbe { supported: bool, dimensions: usize, cases: usize, top_one: usize,
+    recall_three: usize, elapsed_ms: u128, reason: String }
+
+#[tauri::command]
+pub async fn test_semantic_retrieval(state: State<'_, AgentState>) -> Result<SemanticProbe, String> {
+    let config = state.config.lock().map_err(|_| "模型配置暂不可用")?.clone();
+    if config.embedding_model.is_empty() { return Err("请先保存向量模型 ID".into()); }
+    let custom = !config.embedding_base_url.is_empty();
+    let base_url = if custom { &config.embedding_base_url } else { &config.base_url };
+    let key = if custom { state.embedding_key.lock().map_err(|_| "向量密钥暂不可用")?.clone() }
+        else { state.key.lock().map_err(|_| "模型密钥暂不可用")?.clone() };
+    let local = Url::parse(base_url).ok().and_then(|url| url.host_str().map(|host| matches!(host, "localhost" | "127.0.0.1" | "[::1]"))).unwrap_or(false);
+    if key.is_none() && !local { return Ok(SemanticProbe { supported: false, dimensions: 0, cases: 0, top_one: 0, recall_three: 0, elapsed_ms: 0,
+        reason: "当前向量服务没有可用密钥；问答仍可使用词法检索".into() }); }
+    let client = reqwest::Client::builder().connect_timeout(Duration::from_secs(5)).timeout(Duration::from_secs(20))
+        .build().map_err(|_| "无法初始化向量服务连接")?;
+    let start = Instant::now();
+    let metrics = crate::semantic::probe(&client, base_url, &config.embedding_model, key.as_deref().unwrap_or("")).await;
+    Ok(SemanticProbe { supported: metrics.is_some(), dimensions: metrics.as_ref().map_or(0, |m| m.dimensions),
+        cases: metrics.as_ref().map_or(0, |m| m.cases), top_one: metrics.as_ref().map_or(0, |m| m.top_one),
+        recall_three: metrics.as_ref().map_or(0, |m| m.recall_three), elapsed_ms: start.elapsed().as_millis(),
+        reason: if metrics.is_some() { "这是虚构短句的排序结果；真实资料仍需用实际问题检验".into() }
+            else { "向量接口不可用或响应格式不兼容；问答会自动使用词法检索".into() } })
 }
 
 #[tauri::command]
