@@ -180,7 +180,7 @@ export function AdvancedNotePanel({ note, records, onClose, onRevealRecord, onAp
   return <section className="advanced-note" aria-label="高级笔记预览">
     <div className="advanced-note-head">
       <div><span className="advanced-note-eyebrow">GEARNOTE / READING EDITION</span><h3>高级笔记</h3><p>原文美化只改变展示方式，不修改笔记正文。</p></div>
-      <HudButton type="button" onClick={onClose}>返回编辑</HudButton>
+      <HudButton type="button" onClick={onClose}>返回笔记</HudButton>
     </div>
     <div className="advanced-note-restructure"><div><strong>整理内容并排版</strong><p>模型只重排这篇笔记已有的原文片段。核对删减和顺序后，由你确认写入；可撤销。</p></div>
       {!restructure && <HudButton type="button" disabled={busy || note.body.length > 3200} onClick={() => { void makeRestructure() }}>生成整理草稿</HudButton>}
