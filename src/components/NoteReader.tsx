@@ -26,7 +26,7 @@ function bodyBlocks(body: string): ReactNode[] {
     const claim = /^[-*]\s+(.+?)。「(.+)」\[(\d+)\]$/.exec(line)
     if (heading) {
       flush(); section += 1
-      blocks.push(<h3 className="note-reader-heading" key={`h-${blocks.length}`}><span><GearIcon kind="brand" size={16} /> SEC-{String(section).padStart(2, '0')}</span>{inlineText(heading[2])}</h3>)
+      blocks.push(<h4 className="note-reader-heading" key={`h-${blocks.length}`}><span><GearIcon kind="brand" size={16} /> SEC-{String(section).padStart(2, '0')}</span>{inlineText(heading[2])}</h4>)
     } else if (claim) {
       flush()
       blocks.push(<div className="note-reader-claim" key={`c-${blocks.length}`}><p>{inlineText(claim[1])}</p><blockquote><span>笔记引文 [{claim[3]}]</span>{claim[2]}</blockquote></div>)

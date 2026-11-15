@@ -5,7 +5,7 @@ import { composeNoteFromSources } from '../notes'
 import { HudButton } from './HudButton'
 import { GearIcon } from './GearIcon'
 import { PanelHeading } from './PanelHeading'
-import { AdvancedNotePanel } from './AdvancedNotePanel'
+import { AdvancedNoteStudio } from './AdvancedNoteStudio'
 import { NoteReader } from './NoteReader'
 import './notes.css'
 
@@ -113,6 +113,11 @@ export function NotesPanel({ notes, folders, records, incomingDraft, onDraftCons
     setViewMode('edit')
     setError(''); setNotice('')
   }
+  const openStudio = () => {
+    if (!confirmDiscard()) return
+    setComposeOpen(false); setComposeCoverage(''); setOpenDesignAfterSave(false)
+    setDesignOpen(true); setError(''); setNotice(''); setExportPath('')
+  }
   const compose = async () => {
     setBusy(true); setError(''); setNotice('')
     try {
@@ -216,6 +221,13 @@ export function NotesPanel({ notes, folders, records, incomingDraft, onDraftCons
   const sourceTitle = (source: NoteSourceInput) => records.find(record => record.id === source.recordId)?.title
     ?? notes.flatMap(note => note.sources).find(item => keyOf(item) === keyOf(source))?.title ?? '来源已移除'
 
+  if (designOpen) return <section className="notes-panel" aria-label="高级笔记工作台"><AdvancedNoteStudio
+    notes={notes} records={records} initialNoteId={selectedId} onClose={() => setDesignOpen(false)}
+    onSelectNote={note => { setSelectedId(note.id); setDraft(noteDraft(note)); setViewMode('read') }}
+    onCreateFromSources={startCompose} onRevealRecord={onRevealRecord}
+    onApplyEdit={onApplyEdit} onRejectEdit={onRejectEdit} onUndoEdit={onUndoEdit}
+    onNoteChanged={updated => setDraft(noteDraft(updated))} /></section>
+
   return <section className="notes-panel" aria-label="资料库笔记">
     <div className="notes-layout">
       <aside className="notes-index" aria-label="已保存的笔记">
@@ -233,25 +245,23 @@ export function NotesPanel({ notes, folders, records, incomingDraft, onDraftCons
         <div className="notes-index-head"><span>笔记 <small>{visibleNotes.length}</small></span></div>
         {visibleNotes.length === 0 && <p className="notes-empty">{notes.length === 0 ? '暂无笔记。可新建笔记或从资料生成草稿。' : '这里还没有笔记。'}</p>}
         {visibleNotes.map(note => <button className="notes-index-item" type="button" key={note.id} disabled={busy} data-selected={selectedId === note.id} onClick={() => selectNote(note)}>
-          <span className="notes-index-item-title"><strong>{note.title}</strong><GearIcon kind="brand" size={16} /></span>
+          <span className="notes-index-item-title"><strong>{note.title}</strong><span className="notes-index-item-state"><GearIcon kind="brand" size={16} /><small>{selectedId === note.id && hasUnsavedChanges ? '草稿' : '已保存'}</small></span></span>
           <span className="notes-index-item-preview">{notePreview(note)}</span>
           <small>{new Date(note.updatedAt).toLocaleString('zh-CN')} · {note.sources.length} 个来源</small>
         </button>)}
         </div>
         <div className="notes-index-footer">
-          <button className="notes-compose-entry" type="button" disabled={busy} aria-pressed={composeOpen} onClick={() => composeOpen ? setComposeOpen(false) : startCompose()}><span>从资料生成高级笔记</span><GearIcon kind="brand" size={16} /></button>
+          <button className="notes-compose-entry" type="button" disabled={busy} onClick={openStudio}><span>从资料生成高级笔记</span><GearIcon kind="brand" size={16} /></button>
           <button className="notes-new-entry" type="button" disabled={busy} onClick={newNote}>＋ 新建笔记</button>
         </div>
       </aside>
       <div className="notes-workspace">
         <div className="notes-workspace-top"><span>文件夹 {folders.length} <i /> 来源 {viewMode === 'edit' ? draft.sources.length : saved?.sources.length ?? 0}</span><span>{saved ? hasUnsavedChanges ? '未保存的修改' : `已保存 ${new Date(saved.updatedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}` : hasNewDraft ? '尚未保存' : '新建笔记'}</span></div>
         <div className="notes-editor">
-        {designOpen && saved ? <AdvancedNotePanel note={saved} records={records} onClose={() => setDesignOpen(false)} onRevealRecord={onRevealRecord}
-          onApplyEdit={onApplyEdit} onRejectEdit={onRejectEdit} onUndoEdit={onUndoEdit}
-          onNoteChanged={updated => setDraft(noteDraft(updated))} /> : saved && viewMode === 'read' ? <div className="notes-reading">
+        {saved && viewMode === 'read' ? <div className="notes-reading">
           <header className="note-reader-header"><span className="note-reader-kicker"><GearIcon kind="brand" size={16} /> 阅读笔记</span><h2>{saved.title}</h2><div className="note-reader-meta"><time>{new Date(saved.updatedAt).toLocaleString('zh-CN')}</time><span>{saved.sources.length} 个来源</span><span>{saved.body.length.toLocaleString('zh-CN')} 字</span><span>{folders.find(folder => folder.id === saved.folderId)?.name ?? '未分类'}</span></div></header>
           {saved.sources.length > 0 && <section className="note-reader-sources" aria-label="笔记来源"><div className="note-reader-section-label"><GearIcon kind="brand" size={16} /> 来源资料 <span>{saved.sources.length}</span></div><div>{saved.sources.map((source, index) => <button type="button" key={`${keyOf(source)}:${index}`} onClick={() => onRevealRecord(source.recordId, source.atSeconds)} title={source.title}><span>{source.atSeconds == null ? '资料' : timeOf(source.atSeconds)}</span>{source.title}</button>)}</div></section>}
-          <NoteReader note={saved} />
+          <section className="note-reader-main" aria-labelledby="note-main-heading"><h3 id="note-main-heading" className="note-reader-section-label"><GearIcon kind="brand" size={16} /> 主要内容</h3><NoteReader note={saved} /></section>
         </div> : <>
         <div className="notes-editor-head"><span>{selectedId ? '编辑笔记' : '笔记草稿'}</span><span>{selectedId ? hasUnsavedChanges ? '未保存的修改' : '已保存' : '未保存'}</span></div>
         {composeOpen && <div className="notes-compose"><strong>选择资料生成草稿</strong><p>最多选择 3 条已完成的资料。模型仅会读取部分相关片段；生成后仍由你检查并保存。</p>
