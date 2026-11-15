@@ -37,6 +37,10 @@ fn inline(value: &str) -> String {
     }).collect::<String>()
 }
 
+fn display_char_count(value: &str) -> usize {
+    value.chars().filter(|ch| !ch.is_whitespace() && !"，。！？、；：,.!?;:".contains(*ch)).count()
+}
+
 fn citation_badges(value: &str) -> String {
     let mut out = String::new();
     let mut rest = value;
@@ -153,7 +157,7 @@ fn render_with_images(note: &Note, selected_theme: &str, images: &[ResolvedImage
     let selected_theme = valid_theme(selected_theme)?;
     let mut sources = String::new();
     if !note.sources.is_empty() {
-        sources.push_str("<section class=\"sources\"><h2>引用来源</h2><ol>");
+        sources.push_str("<section class=\"sources\" id=\"note-sources\"><h2>引用来源</h2><ol>");
         for (index, source) in note.sources.iter().enumerate() {
             let label = escape(&source.title);
             let time = source.at_seconds.map(|seconds| format!("{:02}:{:02}", seconds / 60, seconds % 60)).unwrap_or_else(|| "—".into());
@@ -171,10 +175,11 @@ fn render_with_images(note: &Note, selected_theme: &str, images: &[ResolvedImage
     let body = render_body(&note.body);
     let before_images = render_figures(images, "before");
     let after_images = render_figures(images, "after");
-    Ok(format!(r#"<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:"><title>{title} · GearNote</title><style>{CSS}</style></head><body data-theme="{selected_theme}"><div class="reader-rail" aria-hidden="true"><span>⚙<small>02<br>摘要</small></span><span>⚙<small>03<br>正文</small></span><span>⚙<small>04<br>行动</small></span><span>⚙<small>05<br>引用</small></span></div><main class="sheet"><div class="mast"><span>GEARNOTE / READING EDITION</span><span>知识笔记</span></div><div class="kicker">LIBRARY / NOTE 02</div><h1>{title}</h1><div class="meta"><span>本地笔记</span><span>来源 {count} 条</span><span>{word_count} 字</span><span>画面 {image_count} 张</span></div><div class="notch-rule" aria-hidden="true"></div><article>{before_images}{body}{after_images}</article>{sources}<div class="foot"><span>GEARNOTE · LOCAL KNOWLEDGE WORKSPACE</span><span>来源可回到原资料核对</span></div></main></body></html>"#,
+    Ok(format!(r#"<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:"><title>{title} · GearNote</title><style>{CSS}</style></head><body data-theme="{selected_theme}"><main class="sheet"><div class="mast"><span>GEARNOTE / READING EDITION</span><span>知识笔记</span></div><div class="kicker">LIBRARY / NOTE</div><h1 id="note-title">{title}</h1><div class="meta"><span>本地笔记</span><span>来源 {count} 条</span><span>{word_count} 字</span><span>预计 {reading_minutes} 分钟</span><span>画面 {image_count} 张</span></div><div class="notch-rule" aria-hidden="true"></div><article id="note-body">{before_images}{body}{after_images}</article>{sources}<div class="foot"><span>GEARNOTE · LOCAL KNOWLEDGE WORKSPACE</span><span>来源可回到原资料核对</span></div></main></body></html>"#,
         image_count = images.len(),
         count = note.sources.len(),
-        word_count = note.body.chars().filter(|ch| !ch.is_whitespace()).count()))
+        word_count = display_char_count(&note.body),
+        reading_minutes = display_char_count(&note.body).div_ceil(220).max(1)))
 }
 
 #[cfg(test)]
@@ -382,6 +387,21 @@ mod tests {
         assert!(html.contains("<strong>重点</strong>"));
         assert!(html.contains("<li>一</li><li>二</li>"));
         assert!(render(&note(), "unknown").is_err());
+    }
+
+    #[test]
+    fn reader_has_real_anchors_and_computed_metadata_without_app_controls() {
+        let mut value = note();
+        value.sources[0].at_seconds = Some(25);
+        let html = render(&value, "mono").unwrap();
+        assert!(html.contains("id=\"note-title\""));
+        assert!(html.contains("id=\"note-body\""));
+        assert!(html.contains("id=\"note-sources\""));
+        assert!(html.contains("00:25"));
+        assert!(html.contains("预计 1 分钟"));
+        assert!(!html.contains("NOTE 02"));
+        assert!(!html.contains("ESC 退出"));
+        assert!(!html.contains("自动保存"));
     }
 
     #[test]

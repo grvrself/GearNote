@@ -13,7 +13,7 @@ export function useRecords(onError: (message: string) => void, onCaptured: (id: 
   useEffect(() => {
     if (!isTauri()) return
     let disposed = false
-    let stop: UnlistenFn | undefined
+    const stops: UnlistenFn[] = []
     const refresh = async () => {
       try {
         const saved = await loadSavedRecords()
@@ -27,9 +27,13 @@ export function useRecords(onError: (message: string) => void, onCaptured: (id: 
       void refresh().then(() => onCaptured(event.payload))
     }).then(unlisten => {
       if (disposed) unlisten()
-      else stop = unlisten
+      else stops.push(unlisten)
     }).catch(() => { if (!disposed) onError('资料更新监听失败。') })
-    return () => { disposed = true; stop?.() }
+    void listen('gearnote:record-deleted', () => { void refresh() }).then(unlisten => {
+      if (disposed) unlisten()
+      else stops.push(unlisten)
+    }).catch(() => { if (!disposed) onError('资料删除监听失败。') })
+    return () => { disposed = true; stops.forEach(stop => stop()) }
   }, [])
 
   useEffect(() => {

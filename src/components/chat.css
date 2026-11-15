@@ -28,6 +28,7 @@
 .message-meta time { color: var(--muted); font: var(--fs-11) var(--font-mono); letter-spacing: normal; }
 .message-body { color: var(--paper); font-size: var(--fs-13); line-height: var(--chat-line-height); }
 .message-body p { margin: var(--space-3) 0 0; white-space:pre-wrap; overflow-wrap:anywhere; }
+.message-citation-warning { margin: var(--space-3) 0 0; padding: var(--space-2) var(--space-3); border-left: 2px solid var(--muted); color: var(--muted); background: var(--bg); font-size: var(--fs-12); line-height: 1.5; }
 .message-body ol { margin: var(--space-2) 0 0; padding-left: var(--space-5); }
 .message-body li { padding-left: var(--space-1); }
 .message-body li + li { margin-top: var(--space-1); }
@@ -153,7 +154,8 @@
 .reference-review button:focus-visible { outline:var(--edge) solid var(--accent); outline-offset:var(--focus-offset); }
 .message-reference-note { display:block; margin-top:var(--space-2); color:var(--muted); font-size:var(--fs-11); line-height:var(--chat-line-height); }
 .composer-frame { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); padding: var(--space-2); border: var(--edge) solid var(--accent); color: var(--paper); font-size: var(--fs-11); }
-.composer-frame > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.composer-frame img { flex: none; width: 64px; height: 40px; object-fit: cover; border: var(--edge) solid var(--line); }
+.composer-frame > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .composer-frame button { flex: none; border: 0; color: var(--accent); background: transparent; font: var(--fs-11) var(--font-body); }
 .composer-frame button:hover:not(:disabled) { color: var(--paper); }
 .composer-frame button:disabled { color: var(--muted); }

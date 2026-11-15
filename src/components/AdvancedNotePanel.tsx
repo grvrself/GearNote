@@ -1,4 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { isTauri } from '@tauri-apps/api/core'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 import type { Note, NoteEditProposal } from '../notes'
 import type { KnowledgeRecord } from '../data'
 import { getPendingNoteEdit, proposeNoteRestructure, reviseNoteRestructure } from '../notes'
@@ -55,9 +58,55 @@ export function AdvancedNotePanel({ note, records, onClose, returnLabel = '返�
   const [restructure, setRestructure] = useState<NoteEditProposal | null>(null)
   const [lastRestructureId, setLastRestructureId] = useState('')
   const [exportPath, setExportPath] = useState('')
+  const [focusMode, setFocusMode] = useState(false)
+  const [focusError, setFocusError] = useState(false)
+  const focusFrame = useRef<HTMLIFrameElement>(null)
+  const focusExit = useRef<HTMLButtonElement>(null)
   const videos = note.sources.filter(source => records.some(record => record.id === source.recordId && record.type === 'video' && record.status === 'ready' && !record.demo))
   const [captureRecordId, setCaptureRecordId] = useState('')
   const [captureTime, setCaptureTime] = useState('')
+
+  useEffect(() => {
+    if (!focusMode) return
+    let active = true
+    let changedWindow = false
+    const priorFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    const previousOverflow = document.body.style.overflow
+    const appRoot = document.getElementById('root')
+    const wasInert = appRoot?.inert ?? false
+    document.body.style.overflow = 'hidden'
+    if (appRoot) appRoot.inert = true
+    focusExit.current?.focus()
+    const windowHandle = isTauri() ? getCurrentWindow() : null
+    if (windowHandle) {
+      void windowHandle.isFullscreen().then(async wasFullscreen => {
+        if (!wasFullscreen) {
+          await windowHandle.setFullscreen(true)
+          changedWindow = true
+          if (!active) await windowHandle.setFullscreen(false)
+        }
+      }).catch(() => { if (active) setFocusError(true) })
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { event.preventDefault(); setFocusMode(false) }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      active = false
+      document.body.style.overflow = previousOverflow
+      if (appRoot) appRoot.inert = wasInert
+      window.removeEventListener('keydown', onKeyDown)
+      if (changedWindow && windowHandle) void windowHandle.setFullscreen(false).catch(() => {})
+      priorFocus?.focus()
+    }
+  }, [focusMode])
+
+  const focusFrameLoaded = (frame: HTMLIFrameElement) => {
+    frame.contentDocument?.addEventListener('keydown', event => {
+      if (event.key === 'Escape') { event.preventDefault(); setFocusMode(false) }
+    })
+  }
+  const jumpTo = (id: string) => focusFrame.current?.contentDocument?.getElementById(id)?.scrollIntoView({ behavior: 'smooth' })
 
   useEffect(() => {
     let active = true
@@ -220,6 +269,7 @@ export function AdvancedNotePanel({ note, records, onClose, returnLabel = '返�
     <div className="advanced-note-actions">
       {!previewIsCurrent && <HudButton type="button" disabled={busy} onClick={() => { void updatePreview(theme) }}>更新预览</HudButton>}
       <HudButton type="button" variant="primary" disabled={busy || !html || !previewIsCurrent || Boolean(savedCurrentTheme)} onClick={() => { void save() }}>{busy ? '处理中' : savedCurrentTheme ? '已保存' : '保存高级版'}</HudButton>
+      <HudButton type="button" disabled={!html} onClick={() => { setFocusError(false); setFocusMode(true) }}>专注阅读</HudButton>
       <HudButton type="button" disabled={busy || !savedCurrentTheme} onClick={() => { void exportDesign('html') }}>导出 HTML</HudButton>
       <HudButton type="button" disabled={busy || !savedCurrentTheme} onClick={() => { void exportDesign('pdf') }}>导出 PDF</HudButton>
       {saved && <HudButton type="button" disabled={busy} onClick={() => { void deleteDesign() }}>删除高级版</HudButton>}
@@ -230,5 +280,11 @@ export function AdvancedNotePanel({ note, records, onClose, returnLabel = '返�
     {exportPath && <div className="notes-export"><span>导出文件：{exportPath}</span><button type="button" onClick={() => { void navigator.clipboard.writeText(exportPath).then(() => setNotice('路径已复制。')).catch(() => setError('复制路径失败。')) }}>复制路径</button></div>}
     {note.sources.length > 0 && <div className="advanced-note-sources"><strong>来源</strong>{note.sources.map((source, index) => <button type="button" key={source.recordId + ':' + String(source.atSeconds ?? '') + ':' + index} onClick={() => onRevealRecord(source.recordId, source.atSeconds)}>{source.title}{source.atSeconds == null ? '' : ' · ' + Math.floor(source.atSeconds / 60) + ':' + String(source.atSeconds % 60).padStart(2, '0')}</button>)}</div>}
     {html && <iframe className="advanced-note-frame" sandbox="" srcDoc={html} title={'《' + note.title + '》高级版预览'} />}
+    {focusMode && html && createPortal(<div className="advanced-note-focus" role="dialog" aria-modal="true" aria-label={'《' + note.title + '》专注阅读'}>
+      <header className="advanced-note-focus-top"><div className="advanced-note-focus-brand">GEARNOTE <span>/ FOCUS</span></div><span className="advanced-note-focus-title" title={note.title}>{note.title}</span><div className="advanced-note-focus-controls"><span className="advanced-note-focus-save">{savedCurrentTheme ? '● 已保存' : '○ 预览未保存'}</span><button ref={focusExit} type="button" onClick={() => setFocusMode(false)}>退出专注 · Esc</button></div></header>
+      <nav className="advanced-note-focus-rail" aria-label="笔记章节"><button type="button" onClick={() => jumpTo('note-title')}>01 标题</button><button type="button" onClick={() => jumpTo('note-body')}>02 正文</button>{note.sources.length > 0 && <button type="button" onClick={() => jumpTo('note-sources')}>03 来源</button>}</nav>
+      <iframe ref={focusFrame} className="advanced-note-focus-frame" sandbox="allow-same-origin" srcDoc={html} title={'《' + note.title + '》专注阅读'} onLoad={event => focusFrameLoaded(event.currentTarget)} />
+      <footer className="advanced-note-focus-bottom"><span>字数 {Array.from(note.body).filter(char => !/\s|[，。！？、；：,.!?;:]/u.test(char)).length.toLocaleString('zh-CN')} · 来源 {note.sources.length}</span><span>{focusError ? '系统全屏未启用 · 窗口内阅读' : '本地阅读'} · {savedCurrentTheme ? '已保存' : '待保存'}</span></footer>
+    </div>, document.body)}
   </section>
 }

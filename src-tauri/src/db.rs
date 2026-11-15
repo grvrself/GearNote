@@ -340,6 +340,25 @@ pub fn upsert_record(path: &Path, record: &KnowledgeRecord, position: usize) -> 
     transaction.commit().map_err(|error| format!("资料事务提交失败：{error}"))
 }
 
+pub fn delete_record(path: &Path, expected: &KnowledgeRecord) -> Result<(), String> {
+    let mut connection = open(path)?;
+    let transaction = connection.transaction().map_err(|error| format!("资料事务启动失败：{error}"))?;
+    let previous: Option<(i64, String)> = transaction.query_row(
+        "SELECT ordinal,json FROM record_rows WHERE id=?1", [&expected.id],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    ).optional().map_err(|error| format!("资料读取失败：{error}"))?;
+    let Some((ordinal, json)) = previous else { return Err("资料已不存在".into()); };
+    let expected_json = serde_json::to_string(expected).map_err(|error| format!("资料编码失败：{error}"))?;
+    if json != expected_json { return Err("资料已更新，请刷新后再删除".into()); }
+    transaction.execute("DELETE FROM record_segments WHERE record_id=?1", [&expected.id])
+        .map_err(|error| format!("资料片段删除失败：{error}"))?;
+    transaction.execute("DELETE FROM record_rows WHERE id=?1", [&expected.id])
+        .map_err(|error| format!("资料删除失败：{error}"))?;
+    transaction.execute("UPDATE record_rows SET ordinal=ordinal-1 WHERE ordinal>?1", [ordinal])
+        .map_err(|error| format!("资料顺序更新失败：{error}"))?;
+    transaction.commit().map_err(|error| format!("资料删除提交失败：{error}"))
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RecordPage {
@@ -873,6 +892,29 @@ mod tests {
         serde_json::from_value(json!({"id":id,"type":"article","title":title,"site":"example.com",
             "savedAt":"2026-11-11T00:00:00Z","status":"ready","sourceUrl":"https://example.com",
             "contentText":"测试正文","excerpt":[]})).unwrap()
+    }
+
+    #[test]
+    fn deleting_record_removes_search_segments_and_preserves_other_records() {
+        let dir = std::env::temp_dir().join(format!("gearnote-delete-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(FILE_NAME);
+        let mut first = record("first", "第一条");
+        first.content_text = "独有检索片段删除验证".into();
+        let second = record("second", "第二条");
+        write_records(&path, &[first.clone(), second.clone()]).unwrap();
+        let mut stale = first.clone();
+        stale.title = "旧标题".into();
+        assert!(delete_record(&path, &stale).is_err());
+        assert_eq!(read_records(&path).unwrap().unwrap().len(), 2);
+        delete_record(&path, &first).unwrap();
+        let remaining = read_records(&path).unwrap().unwrap();
+        assert_eq!(remaining.iter().map(|item| item.id.as_str()).collect::<Vec<_>>(), vec!["second"]);
+        assert!(search_library_titles(&path, "独有检索片段", 8).unwrap().is_empty());
+        assert!(query_record_segments(&path, "first", None, None, "", 10).unwrap().is_empty());
+        assert_eq!(get_record(&path, "second").unwrap().title, second.title);
+        drop(remaining);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

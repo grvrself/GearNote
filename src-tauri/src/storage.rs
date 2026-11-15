@@ -6,7 +6,7 @@ use std::{
     sync::Mutex,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use url::Url;
 use uuid::Uuid;
 
@@ -596,6 +596,30 @@ pub fn list_records(state: State<'_, AppState>) -> Result<Vec<RecordSummary>, St
         source_url: record.source_url.clone(),
         duration_seconds: record.duration_seconds, caption_language: record.caption_language.clone(), fault_reason: record.fault_reason.clone(),
     }).collect())
+}
+
+#[tauri::command]
+pub fn delete_record(app: AppHandle, agent: State<'_, crate::agent::AgentState>, state: State<'_, AppState>, id: String) -> Result<(), String> {
+    let busy = agent.busy.lock().map_err(|_| "Agent 暂不可用")?;
+    if *busy { return Err("Agent 正在读取资料，请等回答结束后再删除".into()); }
+    let mut records = state.records.lock().map_err(|_| "资料库暂不可用")?;
+    let position = records.iter().position(|record| record.id == id).ok_or("资料已不存在")?;
+    let record = &records[position];
+    if matches!(record.status, crate::ProcessStatus::Extracting | crate::ProcessStatus::Summarizing) {
+        return Err("资料仍在处理中，完成后才能删除".into());
+    }
+    if state.records_path.extension().is_some_and(|value| value == "db") {
+        crate::db::delete_record(&state.records_path, record)?;
+    } else {
+        let mut next = records.clone();
+        next.remove(position);
+        persist_records(&state.records_path, &next)?;
+    }
+    records.remove(position);
+    drop(records);
+    drop(busy);
+    let _ = app.emit("gearnote:record-deleted", &id);
+    Ok(())
 }
 
 #[tauri::command]

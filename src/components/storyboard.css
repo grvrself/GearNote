@@ -6,8 +6,12 @@
 .storyboard-image span { color: var(--muted); font: var(--fs-11) var(--font-mono); }
 .storyboard-image img { width: 100%; height: auto; border: var(--edge) solid var(--line); background: var(--panel); }
 .storyboard-times { display: flex; flex-wrap: wrap; gap: var(--space-1); max-height: var(--transcript-height); overflow-y: auto; }
-.storyboard-times button { padding: var(--space-1) var(--space-2); border: var(--edge) solid var(--line); color: var(--paper); background: var(--panel); cursor: pointer; font: var(--fs-11) var(--font-mono); }
+.storyboard-time-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-1); width: 100%; }
+.storyboard-times button { min-height: 36px; padding: var(--space-1) var(--space-2); border: var(--edge) solid var(--line); color: var(--paper); background: var(--panel); cursor: pointer; font: var(--fs-11) var(--font-mono); }
+.storyboard-time-row button:first-child { min-width: 0; text-align: left; }
+.storyboard-time-row button:last-child { white-space: nowrap; }
 .storyboard-times button:hover { border-color: var(--accent); color: var(--accent); }
+.storyboard-times button:disabled { color: var(--muted); cursor: wait; }
 .storyboard-times button:focus-visible { outline: var(--edge) solid var(--accent); outline-offset: var(--focus-offset); }
 .storyboard-times button span { color: var(--accent); }
 .storyboard-auth { display: grid; gap: var(--space-2); padding: var(--space-3); border: var(--edge) solid var(--line); background: var(--panel); }

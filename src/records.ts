@@ -11,6 +11,7 @@ export const listCaptureJobs = (): Promise<CaptureJob[]> => invoke<CaptureJob[]>
 export const dismissCaptureJob = (id: string): Promise<boolean> => invoke<boolean>('dismiss_capture_job', { id })
 
 export const getRecord = (id: string): Promise<KnowledgeRecord> => invoke<KnowledgeRecord>('get_record', { id })
+export const deleteRecord = (id: string): Promise<void> => invoke<void>('delete_record', { id })
 
 export function queryRecordSegments(recordId: string, startAt: number | null, endAt: number | null, search: string, limit = 100): Promise<RecordSegment[]> {
   return invoke<RecordSegment[]>('query_record_segments', { recordId, startAt, endAt, search, limit })

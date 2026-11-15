@@ -67,7 +67,7 @@ export default function MiniApp() {
       setPendingCommand(chat.pendingCommand)
       setReferencedIds(chat.referencedIds)
       setStreaming(null)
-      if (!reply.frame && !(chat.pendingChoice?.status === 'open' && chat.pendingChoice.messageId === reply.id) && !(chat.pendingLibrarySearch?.status === 'open' && chat.pendingLibrarySearch.messageId === reply.id) && !(chat.pendingChatNoteEdit?.proposal.status === 'pending' && chat.pendingChatNoteEdit.messageId === reply.id) && !(chat.pendingCommand?.status === 'open' && chat.pendingCommand.messageId === reply.id)) {
+      if (!reply.frame && !reply.toolSteps?.some(step => (step.startsWith('深度阅读失败：') || step.startsWith('回答未完成：'))) && !(chat.pendingChoice?.status === 'open' && chat.pendingChoice.messageId === reply.id) && !(chat.pendingLibrarySearch?.status === 'open' && chat.pendingLibrarySearch.messageId === reply.id) && !(chat.pendingChatNoteEdit?.proposal.status === 'pending' && chat.pendingChatNoteEdit.messageId === reply.id) && !(chat.pendingCommand?.status === 'open' && chat.pendingCommand.messageId === reply.id)) {
         setSuggestingMessageId(reply.id)
         void suggestChatFollowups(chat.activeId, reply.id)
           .then(async () => {
@@ -124,7 +124,7 @@ export default function MiniApp() {
   useEffect(() => {
     if (!desktop) return
     let disposed = false
-    let unlisten: UnlistenFn | undefined
+    const stops: UnlistenFn[] = []
     const refresh = async () => {
       try {
         const saved = await loadSavedRecords()
@@ -135,9 +135,14 @@ export default function MiniApp() {
     }
     void refresh()
     void listen('knowflow:records-changed', () => { void refresh() })
-      .then(stop => { if (disposed) stop(); else unlisten = stop })
+      .then(stop => { if (disposed) stop(); else stops.push(stop) })
       .catch(() => { if (!disposed) setError('资料更新监听失败') })
-    return () => { disposed = true; unlisten?.() }
+    void listen<string>('gearnote:record-deleted', event => {
+      void refresh()
+      setReferencedIds(current => current.filter(id => id !== event.payload))
+    }).then(stop => { if (disposed) stop(); else stops.push(stop) })
+      .catch(() => { if (!disposed) setError('资料删除监听失败') })
+    return () => { disposed = true; stops.forEach(stop => stop()) }
   }, [desktop])
 
   useEffect(() => {

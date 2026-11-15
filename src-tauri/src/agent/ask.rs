@@ -66,6 +66,90 @@ pub fn preview_agent_context(app: AppHandle, agent: State<'_, AgentState>, stora
     Ok(prepared.preview)
 }
 
+struct GeneratedAnswer { text: String, warning: Option<String> }
+
+async fn generate_final_answer(app: &AppHandle, client: &reqwest::Client, config: &AgentConfig, key: &str,
+    request_id: &str, messages: &[serde_json::Value], explored: bool, has_attachment: bool) -> Result<GeneratedAnswer, String> {
+    let mut response = client.post(format!("{}/chat/completions", config.base_url)).bearer_auth(key)
+        .json(&answer_payload(config, messages, explored))
+        .send().await.map_err(|error| format!("模型请求失败：{error}"))?;
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        let detail = provider_error(status, &body, &config.base_url, &config.model);
+        if has_attachment && status == reqwest::StatusCode::BAD_REQUEST {
+            return Err(format!("图片提问被服务拒绝；请确认当前模型支持视觉输入。{detail}"));
+        }
+        return Err(detail);
+    }
+    let mut parser = SseParser::default();
+    let mut answer = String::new();
+    let mut warning = None;
+    loop {
+        let chunk = match response.chunk().await {
+            Ok(Some(chunk)) => chunk,
+            Ok(None) => break,
+            Err(error) if !answer.trim().is_empty() => {
+                warning = Some(format!("流式连接中断：{error}；已保留收到的正文"));
+                break;
+            }
+            Err(error) => return Err(format!("模型流式连接中断：{error}")),
+        };
+        let deltas = match parser.push(&chunk) {
+            Ok(deltas) => deltas,
+            Err(error) if !answer.trim().is_empty() => { warning = Some(format!("流式格式错误：{error}；已保留收到的正文")); break; }
+            Err(error) => return Err(error),
+        };
+        if let Err(error) = publish_deltas(app, request_id, &mut answer, deltas, true) {
+            if answer.trim().is_empty() { return Err(error); }
+            warning = Some(format!("回答超过显示上限：{error}；已保留收到的正文"));
+            break;
+        }
+        if parser.done { break; }
+    }
+    if warning.is_none() {
+        match parser.push(b"\n\n") {
+            Ok(tail) => {
+                if let Err(error) = publish_deltas(app, request_id, &mut answer, tail, true) {
+                    if answer.trim().is_empty() { return Err(error); }
+                    warning = Some(format!("回答超过显示上限：{error}；已保留收到的正文"));
+                }
+            }
+            Err(error) if !answer.trim().is_empty() => warning = Some(format!("流式格式错误：{error}；已保留收到的正文")),
+            Err(error) => return Err(error),
+        }
+    }
+    if !parser.done && parser.finish_reason.is_none() && warning.is_none() {
+        warning = Some("模型流式连接提前结束；已保留收到的正文".into());
+    }
+    if let Some(reason) = parser.finish_reason.as_deref() {
+        if reason != "stop" { warning = Some(format!("模型结束原因是 {reason}；已保留收到的正文")); }
+    }
+    let answer = answer.trim();
+    if answer.is_empty() { return Err("模型返回了空回答".into()); }
+    let text = answer.chars().take(20_000).collect();
+    Ok(GeneratedAnswer { text, warning })
+}
+
+
+fn save_final_failure_exchange(session: &mut ChatSession, question: &str, error: &str, now: &str, elapsed_ms: u64,
+    frame: Option<ChatFrame>, mut steps: Vec<String>, read_sources: Vec<ReadSource>, read_coverage: Option<ReadCoverage>,
+    choice_id: Option<&str>) -> ChatMessage {
+    let detail = error.chars().filter(|ch| !ch.is_control()).take(350).collect::<String>();
+    let user = ChatMessage { id: format!("msg-{}", Uuid::new_v4()), role: "user".into(), created_at: now.into(),
+        paragraphs: vec![question.into()], tool_steps: Vec::new(), citations: Vec::new(), frame, run: None, suggestions: Vec::new() };
+    steps.push(format!("回答未完成：{detail}"));
+    let assistant = ChatMessage { id: format!("msg-{}", Uuid::new_v4()), role: "agent".into(), created_at: now.into(),
+        paragraphs: vec![format!("本轮未收到可显示的模型正文。原因：{detail}")], tool_steps: steps,
+        citations: Vec::new(), frame: None,
+        run: Some(ChatRun { elapsed_ms, changed_files: Vec::new(), read_sources, read_coverage }), suggestions: Vec::new() };
+    answer_pending_choice(session, question, now, choice_id);
+    session.messages.push(user);
+    session.messages.push(assistant.clone());
+    session.updated_at = now.into();
+    assistant
+}
+
 #[tauri::command]
 pub async fn ask_agent(app: AppHandle, agent: State<'_, AgentState>, storage: State<'_, AppState>, notes: State<'_, NotesState>, question: String, referenced_ids: Vec<String>, request_id: String, frame_id: Option<String>, message_ids: Vec<String>, choice_id: Option<String>, deep_mode: bool) -> Result<ChatMessage, String> {
     let question = question.trim();
@@ -332,9 +416,27 @@ pub async fn ask_agent(app: AppHandle, agent: State<'_, AgentState>, storage: St
         if let Some(deep_prepared) = &mut deep_prepared { deep_prepared.system_text.push_str(&instruction); }
     }
     let (exploration, read_coverage) = if let (Some(record), Some(deep_prepared)) = (deep_record, deep_prepared.as_ref()) {
-        let (result, coverage) = explore_video_deep(|message| {
+        let outcome = explore_video_deep(|message| {
             let _ = app.emit("knowflow:agent-tool", ToolActivity { request_id: request_id.clone(), message: message.into() });
-        }, &config, &key, deep_prepared, record, question).await?;
+        }, &config, &key, deep_prepared, record, question).await;
+        let (result, coverage) = match outcome {
+            Ok(value) => value,
+            Err(error) => {
+                let now = now_millis()?;
+                let mut store = agent.sessions.lock().map_err(|_| "会话暂不可用")?;
+                let mut next = store.clone();
+                if next.active_id != request_session_id { return Err("会话已切换，深度阅读失败记录未保存".into()); }
+                let active = next.sessions.iter_mut().find(|item| item.id == request_session_id).ok_or("当前会话不存在")?;
+                if active.messages.is_empty() && active.title == "新会话" { active.title = session_title(question); }
+                let assistant = save_deep_failure_exchange(active, question, &error, &now,
+                    started_at.elapsed().as_millis().min(u64::MAX as u128) as u64, choice_id.as_deref());
+                persist_chat_store(&agent.sessions_path, &next)?;
+                *store = next;
+                drop(store);
+                let _ = app.emit("knowflow:chat-changed", ());
+                return Ok(assistant);
+            }
+        };
         (Some(result), Some(coverage))
     } else if let (Some(index), Some(exploration_prepared)) = (index.as_ref(), exploration_prepared.as_ref()) {
         (explore_references_with_semantic(|message| {
@@ -357,7 +459,7 @@ pub async fn ask_agent(app: AppHandle, agent: State<'_, AgentState>, storage: St
         return Ok(assistant);
     }
     let explored = exploration.is_some();
-    let (request_messages, sources, tool_steps) = if let Some(exploration) = exploration {
+    let (request_messages, sources, mut tool_steps) = if let Some(exploration) = exploration {
         (exploration.messages, exploration.sources, exploration.steps)
     } else {
         let user_content = request_user_content(prepared.user_text, attachment.as_ref().map(|(_, image_url)| image_url.as_str()));
@@ -367,38 +469,35 @@ pub async fn ask_agent(app: AppHandle, agent: State<'_, AgentState>, storage: St
     let read_sources = if explored { sources.iter().enumerate().map(|(index, source)| ReadSource {
         source_index: index + 1, record_id: source.record_id.clone(), title: source.title.clone(), at_seconds: source.at_seconds,
     }).collect() } else { Vec::new() };
-    let mut response = client.post(format!("{}/chat/completions", config.base_url)).bearer_auth(key)
-        .json(&answer_payload(&config, &request_messages, explored))
-        .send().await.map_err(|error| format!("模型请求失败：{error}"))?;
-    if !response.status().is_success() {
-        let status = response.status();
-        let body = response.text().await.unwrap_or_default();
-        let detail = provider_error(status, &body, &config.base_url, &config.model);
-        if attachment.is_some() && status == reqwest::StatusCode::BAD_REQUEST {
-            return Err(format!("图片提问被服务拒绝；请确认当前模型支持视觉输入。{detail}"));
+    let _ = app.emit("knowflow:agent-tool", ToolActivity { request_id: request_id.clone(), message: "正在生成回答…".into() });
+    let final_result = generate_final_answer(&app, &client, &config, &key, &request_id,
+        &request_messages, explored, attachment.is_some()).await;
+    let generated = match final_result {
+        Ok(value) => value,
+        Err(error) => {
+            let now = now_millis()?;
+            let mut store = agent.sessions.lock().map_err(|_| "会话暂不可用")?;
+            let mut next = store.clone();
+            if next.active_id != request_session_id { return Err("会话已切换，本轮失败记录未保存".into()); }
+            let active = next.sessions.iter_mut().find(|item| item.id == request_session_id).ok_or("当前会话不存在")?;
+            if active.messages.is_empty() && active.title == "新会话" { active.title = session_title(question); }
+            let assistant = save_final_failure_exchange(active, question, &error, &now,
+                started_at.elapsed().as_millis().min(u64::MAX as u128) as u64,
+                attachment.as_ref().map(|(frame, _)| frame.clone()), tool_steps, read_sources, read_coverage, choice_id.as_deref());
+            persist_chat_store(&agent.sessions_path, &next)?;
+            *store = next;
+            drop(store);
+            let _ = app.emit("knowflow:chat-changed", ());
+            return Ok(assistant);
         }
-        return Err(detail);
-    }
-    let mut parser = SseParser::default();
-    let mut answer = String::new();
-    while let Some(chunk) = response.chunk().await.map_err(|error| format!("模型流式连接中断：{error}"))? {
-        let deltas = parser.push(&chunk)?;
-        publish_deltas(&app, &request_id, &mut answer, deltas)?;
-        if parser.done { break; }
-    }
-    let tail = parser.push(b"\n\n")?;
-    publish_deltas(&app, &request_id, &mut answer, tail)?;
-    if !parser.done && parser.finish_reason.is_none() { return Err("模型流式连接提前结束，回答未保存".into()); }
-    if let Some(reason) = parser.finish_reason.as_deref() {
-        if reason != "stop" { return Err(format!("模型结束原因是 {reason}，回答未保存")); }
-    }
-    let answer = answer.trim();
-    if answer.is_empty() { return Err("模型返回了空回答".into()); }
-    if answer.chars().count() > 20_000 { return Err("模型回答过长，未保存".into()); }
-    let citations = validate_answer_evidence(answer, &sources, general_chat)?;
+    };
+    let (citations, evidence_notice) = assess_answer_evidence(&generated.text, &sources);
+    if let Some(notice) = evidence_notice { tool_steps.push(notice); }
+    if let Some(warning) = generated.warning { tool_steps.push(format!("回答提醒：{warning}")); }
+    let answer = generated.text;
     let now = now_millis()?;
     let user = ChatMessage { id: format!("msg-{}", Uuid::new_v4()), role: "user".into(), created_at: now.to_string(), paragraphs: vec![question.into()], tool_steps: Vec::new(), citations: Vec::new(), frame: attachment.as_ref().map(|(frame, _)| frame.clone()), run: None, suggestions: Vec::new() };
-    let assistant = ChatMessage { id: format!("msg-{}", Uuid::new_v4()), role: "agent".into(), created_at: now.to_string(), paragraphs: vec![answer.into()], tool_steps, citations, frame: None,
+    let assistant = ChatMessage { id: format!("msg-{}", Uuid::new_v4()), role: "agent".into(), created_at: now.to_string(), paragraphs: vec![answer], tool_steps, citations, frame: None,
         run: Some(ChatRun { elapsed_ms: started_at.elapsed().as_millis().min(u64::MAX as u128) as u64, changed_files: Vec::new(), read_sources, read_coverage }), suggestions: Vec::new() };
     {
         let mut store = agent.sessions.lock().map_err(|_| "会话暂不可用")?;

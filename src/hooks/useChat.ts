@@ -4,7 +4,7 @@ import { isTauri } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { askAgent, getAgentStatus, getChatState, resolveCommandProposal, resolveLibrarySearch, setChatReferences,
   suggestChatFollowups, type AgentStatus, type ChatSessionSummary, type ChatState } from '../agent'
-import type { ChatMessage, ChatStreaming } from '../chat-data'
+import type { ChatFrame, ChatMessage, ChatStreaming } from '../chat-data'
 import { rejectNoteEdit } from '../notes'
 
 export function useChat(openChat: () => void, applyNoteEditAndRefresh: (proposalId: string) => Promise<unknown>) {
@@ -57,7 +57,7 @@ export function useChat(openChat: () => void, applyNoteEditAndRefresh: (proposal
       const saved = await getChatState()
       applyChatState(saved)
       setStreaming(null)
-      if (!reply.frame && !(saved.pendingChoice?.status === 'open' && saved.pendingChoice.messageId === reply.id) && !(saved.pendingLibrarySearch?.status === 'open' && saved.pendingLibrarySearch.messageId === reply.id) && !(saved.pendingChatNoteEdit?.proposal.status === 'pending' && saved.pendingChatNoteEdit.messageId === reply.id) && !(saved.pendingCommand?.status === 'open' && saved.pendingCommand.messageId === reply.id)) {
+      if (!reply.frame && !reply.toolSteps?.some(step => (step.startsWith('深度阅读失败：') || step.startsWith('回答未完成：'))) && !(saved.pendingChoice?.status === 'open' && saved.pendingChoice.messageId === reply.id) && !(saved.pendingLibrarySearch?.status === 'open' && saved.pendingLibrarySearch.messageId === reply.id) && !(saved.pendingChatNoteEdit?.proposal.status === 'pending' && saved.pendingChatNoteEdit.messageId === reply.id) && !(saved.pendingCommand?.status === 'open' && saved.pendingCommand.messageId === reply.id)) {
         setSuggestingMessageId(reply.id)
         void suggestChatFollowups(saved.activeId, reply.id)
           .then(async () => applyChatState(await getChatState()))
@@ -73,6 +73,32 @@ export function useChat(openChat: () => void, applyNoteEditAndRefresh: (proposal
     } finally {
       sendingRef.current = false
       setSending(false)
+    }
+  }
+  const captureStoryboardFrame = async (recordId: string, atSeconds: number): Promise<ChatFrame> => {
+    if (sendingRef.current) throw new Error('上一条提问仍在处理，请稍候')
+    const seconds = Math.floor(atSeconds)
+    if (!Number.isSafeInteger(seconds) || seconds < 0 || seconds > 864000) throw new Error('分镜时间无效')
+    const stamp = seconds >= 3600
+      ? `${String(Math.floor(seconds / 3600)).padStart(2, '0')}:${String(Math.floor(seconds / 60) % 60).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`
+      : `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`
+    const question = `截取 ${stamp} 的画面`
+    sendingRef.current = true
+    setSending(true)
+    setStreaming({ question, answer: '', startedAt: Date.now(), activities: [] })
+    setAgentError('')
+    try {
+      const reply = await askAgent(question, [recordId], () => {})
+      if (!reply.frame) throw new Error('取帧没有返回图片')
+      applyChatState(await getChatState())
+      return reply.frame
+    } catch (error) {
+      setAgentError(String(error))
+      throw error
+    } finally {
+      setStreaming(null)
+      setSending(false)
+      sendingRef.current = false
     }
   }
   const decideLibrarySearch = async (proposalId: string, accept: boolean, question: string) => {
@@ -120,5 +146,5 @@ export function useChat(openChat: () => void, applyNoteEditAndRefresh: (proposal
   return { referencedIds, setReferencedIds, agentStatus, setAgentStatus, messages, pendingChoice, pendingLibrarySearch,
     pendingChatNoteEdit, pendingCommand, sessions, activeSessionId, sessionError, workingContext, projectMemory,
     compactedSummary, compactedCount, sending, streaming, suggestingMessageId, suggestionErrorId, agentError,
-    sendQuestion, decideLibrarySearch, decideChatNoteEdit, decideCommand, manageSession }
+    sendQuestion, captureStoryboardFrame, decideLibrarySearch, decideChatNoteEdit, decideCommand, manageSession }
 }

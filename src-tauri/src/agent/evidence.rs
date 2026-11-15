@@ -1,6 +1,5 @@
 // 回答引用与证据校验。
 use super::*;
-#[cfg(test)]
 pub(super) fn citations_from_answer(answer: &str, sources: &[SourceChunk]) -> Vec<ChatCitation> {
     let mut result = Vec::new();
     let mut document_index = 0;
@@ -16,6 +15,33 @@ pub(super) fn citations_from_answer(answer: &str, sources: &[SourceChunk]) -> Ve
         }
     }
     result
+}
+
+// 回答允许自然段落；这里只检查实际写出的编号与引句，不要求逐行引用。
+pub(super) fn assess_answer_evidence(answer: &str, sources: &[SourceChunk]) -> (Vec<ChatCitation>, Option<String>) {
+    let citations = citations_from_answer(answer, sources);
+    let documents = sources.iter().filter(|source| !source.visual && !source.record_id.starts_with("chat:")).collect::<Vec<_>>();
+    let invalid = invalid_citation_numbers(answer, documents.len());
+    if !invalid.is_empty() {
+        return (citations, Some(format!("引用提醒：{}；模型原文已保留，请自行核实。",
+            invalid.iter().map(|number| format!("[{number}]")).collect::<Vec<_>>().join("、"))));
+    }
+    for (index, source) in documents.iter().enumerate() {
+        let marker = format!("[{}]", index + 1);
+        for (offset, _) in answer.match_indices(&marker) {
+            let before = answer[..offset].rsplit('\n').next().unwrap_or_default().trim_end();
+            let pair = [('「', '」'), ('“', '”'), ('『', '』'), ('‘', '’'), ('"', '"')]
+                .into_iter().find(|(_, close)| before.ends_with(*close));
+            let Some((open, close)) = pair else { continue; };
+            let end = before.len() - close.len_utf8();
+            let Some(start) = before[..end].rfind(open) else { continue; };
+            let quote = &before[start + open.len_utf8()..end];
+            if !quote.trim().is_empty() && !compact_whitespace(&source.text).contains(&compact_whitespace(quote)) {
+                return (citations, Some(format!("引用提醒：{marker} 前的引句未在对应片段中找到；模型原文已保留，请自行核实。")));
+            }
+        }
+    }
+    (citations, None)
 }
 
 pub(super) fn invalid_citation_numbers(answer: &str, source_count: usize) -> Vec<usize> {
@@ -38,23 +64,27 @@ pub(super) fn invalid_citation_numbers(answer: &str, source_count: usize) -> Vec
     invalid
 }
 
+#[cfg(test)]
 pub(crate) fn validate_citation_numbers(answer: &str, source_count: usize) -> Result<(), String> {
     let invalid = invalid_citation_numbers(answer, source_count);
     if invalid.is_empty() { Ok(()) } else {
-        Err(format!("模型使用了未提供的资料编号 {}，本轮回答未保存；请重试或缩小参考范围", invalid.iter().map(|number| format!("[{number}]")).collect::<Vec<_>>().join("、")))
+        Err(format!("模型使用了未提供的资料编号 {}", invalid.iter().map(|number| format!("[{number}]")).collect::<Vec<_>>().join("、")))
     }
 }
 
+#[cfg(test)]
 fn evidence_error(reason: &str) -> String {
-    format!("模型回答的资料依据未通过本地核对（{reason}），本轮回答未保存；请重试或缩小参考范围")
+    format!("模型回答的资料依据未通过本地核对（{reason}）")
 }
 
 fn compact_whitespace(text: &str) -> String { text.chars().filter(|ch| !ch.is_whitespace()).collect() }
 
+#[cfg(test)]
 fn one_claim(text: &str) -> bool {
     !text.trim().is_empty() && text.chars().filter(|ch| matches!(ch, '。' | '！' | '？' | '!' | '?')).count() <= 1
 }
 
+#[cfg(test)]
 fn validate_insufficient_answer(answer: &str) -> Result<(), String> {
     let body = answer.strip_prefix("资料不足：").ok_or_else(|| evidence_error("缺少可核对的原文；请只说明资料不足"))?;
     if !one_claim(body) || body.lines().count() != 1 || body.contains(['[', ']', '「', '」', '“', '”']) {
@@ -63,6 +93,7 @@ fn validate_insufficient_answer(answer: &str) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(test)]
 pub(super) fn validate_answer_evidence(answer: &str, sources: &[SourceChunk], allow_background_answer: bool) -> Result<Vec<ChatCitation>, String> {
     let documents = sources.iter().filter(|source| !source.visual && !source.record_id.starts_with("chat:")).collect::<Vec<_>>();
     let chats = sources.iter().filter(|source| source.record_id.starts_with("chat:")).collect::<Vec<_>>();

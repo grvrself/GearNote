@@ -41,3 +41,19 @@
 .advanced-note-capture { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 12px 0; }
 .advanced-note-capture select { flex: 1 1 210px; min-width: 0; }
 .advanced-note-capture input { width: 96px; }
+
+.advanced-note-focus { position:fixed; z-index:10000; inset:0; display:grid; grid-template-columns:72px minmax(0,1fr); grid-template-rows:56px minmax(0,1fr) 40px; overflow:hidden; color:var(--paper); background:#0b0c0e; font-family:var(--font-body); }
+.advanced-note-focus-top { grid-column:1/-1; display:flex; align-items:center; justify-content:space-between; gap:16px; min-width:0; padding:0 20px; border-bottom:1px solid var(--line); background:#0b0c0e; }
+.advanced-note-focus-brand { flex:none; font:600 13px var(--font-label); letter-spacing:.14em; }
+.advanced-note-focus-brand span { color:var(--muted); }
+.advanced-note-focus-title { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--muted); font-size:12px; }
+.advanced-note-focus-controls { display:flex; align-items:center; gap:18px; flex:none; font:11px var(--font-mono); }
+.advanced-note-focus-save { color:var(--muted); }
+.advanced-note-focus-controls button { padding:7px 10px; border:1px solid var(--line); color:var(--paper); background:transparent; cursor:pointer; }
+.advanced-note-focus-controls button:hover,.advanced-note-focus-rail button:hover { color:var(--paper); border-color:var(--paper); }
+.advanced-note-focus-rail { display:flex; flex-direction:column; align-items:center; gap:34px; min-height:0; padding-top:42px; border-right:1px solid var(--line); }
+.advanced-note-focus-rail button { border:0; border-left:1px solid transparent; padding:4px; writing-mode:vertical-rl; color:var(--muted); background:transparent; font:10px var(--font-mono); letter-spacing:.16em; cursor:pointer; }
+.advanced-note-focus-frame { display:block; width:100%; height:100%; min-width:0; min-height:0; border:0; background:#0b0b0b; }
+.advanced-note-focus-bottom { grid-column:1/-1; display:flex; justify-content:space-between; align-items:center; gap:12px; padding:0 20px; border-top:1px solid var(--line); color:var(--muted); font:10px var(--font-mono); }
+.advanced-note-focus :focus-visible { outline:2px solid var(--paper); outline-offset:2px; }
+@media(max-width:700px) { .advanced-note-focus { grid-template-columns:42px minmax(0,1fr); } .advanced-note-focus-top { padding:0 10px; } .advanced-note-focus-title,.advanced-note-focus-save { display:none; } .advanced-note-focus-rail { gap:20px; } }

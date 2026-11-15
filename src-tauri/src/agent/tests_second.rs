@@ -11,6 +11,22 @@
         assert_eq!(invalid_citation_numbers("数组 item[2] 与引用 [0]、[9]、[9]", 1), vec![0, 9]);
     }
 
+    #[test]
+    fn citation_problems_do_not_discard_generated_answer() {
+        let sources = [evidence_source("rec", "视频", "原句确实存在。")];
+        let (citations, notice) = assess_answer_evidence("我认为这段视频主要在介绍攻击方式。", &sources);
+        assert!(citations.is_empty());
+        assert!(notice.is_none());
+        for answer in ["结论。『不在字幕中的引句』[1]", "结论。『原句确实存在。』[9]"] {
+            let (citations, notice) = assess_answer_evidence(answer, &sources);
+            assert!(notice.as_deref().is_some_and(|text| text.contains("模型原文已保留")));
+            assert!(citations.iter().all(|citation| citation.record_id == "rec"));
+        }
+        let (citations, notice) = assess_answer_evidence("结论。『原句确实存在。』[1]", &sources);
+        assert_eq!(citations.len(), 1);
+        assert!(notice.is_none());
+    }
+
     fn evidence_source(id: &str, title: &str, text: &str) -> SourceChunk {
         SourceChunk { record_id: id.into(), title: title.into(), source_url: String::new(), captured_at: String::new(),
             at_seconds: None, text: text.into(), search_text: text.into(), score: 1, visual: false }

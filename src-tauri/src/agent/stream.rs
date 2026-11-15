@@ -40,11 +40,11 @@ impl SseParser {
     }
 }
 
-fn publish_deltas(app: &AppHandle, request_id: &str, answer: &mut String, deltas: Vec<String>) -> Result<(), String> {
+fn publish_deltas(app: &AppHandle, request_id: &str, answer: &mut String, deltas: Vec<String>, emit: bool) -> Result<(), String> {
     for delta in deltas {
         answer.push_str(&delta);
-        if answer.chars().count() > 20_000 { return Err("模型回答超过 20000 字，已停止接收且未保存".into()); }
-        let _ = app.emit("knowflow:agent-stream", StreamDelta { request_id: request_id.into(), delta });
+        if answer.chars().count() > 20_000 { return Err("模型回答超过 20000 字，已停止接收".into()); }
+        if emit { let _ = app.emit("knowflow:agent-stream", StreamDelta { request_id: request_id.into(), delta }); }
     }
     Ok(())
 }

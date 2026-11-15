@@ -166,8 +166,8 @@ async fn explore_references_with_semantic<F: Fn(&str)>(
         activity("模型未调用资料工具，改用普通问答");
         return Ok(None);
     }
-    let final_instruction = if output_exhausted { "工具输出预算已满，不要再读取；请仅用已经读到的原文回答原问题。每条资料结论单独一行，附该片段连续原句和 [编号]。若无足够原文，只写一句以「资料不足：」开头的说明。" }
-        else { "请根据本轮已提供的资料和工具结果回答原问题。每条资料结论单独一行，附该片段连续原句和 [编号]。若无足够原文，只写一句以「资料不足：」开头的说明。" };
+    let final_instruction = if output_exhausted { "工具输出预算已满，不要再读取；请用已经读到的原文自然地回答原问题，引用时使用实际提供的 [编号]，不确定处请说明。" }
+        else { "请根据本轮已提供的资料和工具结果自然地回答原问题，引用时使用实际提供的 [编号]，不要编造引句或编号；资料不够时请说明。" };
     messages.push(serde_json::json!({"role":"user","content":final_instruction}));
     activity("资料读取完成，正在生成回答…");
     Ok(Some(Exploration { messages, sources, steps, choice: None }))

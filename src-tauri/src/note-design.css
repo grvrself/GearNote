@@ -42,7 +42,6 @@ article strong{font-weight:700}
 }
 
 /* The mono reading edition shares this HTML with the saved and exported copies. */
-.reader-rail{display:none}
 .sources li{display:grid;grid-template-columns:52px minmax(0,1fr) 28px;align-items:baseline;gap:12px;border-bottom:1px solid var(--line);list-style:none}
 .sources ol{padding:0;list-style:none}
 .source-time,.source-number{color:var(--muted);font:10px/1.6 Consolas,monospace}
@@ -51,9 +50,6 @@ article strong{font-weight:700}
 body[data-theme="mono"]{color-scheme:dark;--page:#0b0b0b;--ink:#f3f3f3;--muted:#898989;--line:#292929;--surface:#0b0b0b;background:#0b0b0b}
 body[data-theme="mono"] .sheet{position:relative;max-width:650px;margin:0 auto;padding:35px 24px 80px;background:transparent;box-shadow:none}
 body[data-theme="mono"] .sheet::before{content:"";position:fixed;right:-105px;top:100px;width:360px;height:360px;border-radius:50%;background:repeating-conic-gradient(#777 0deg 12deg,transparent 12deg 18deg);-webkit-mask:radial-gradient(circle,transparent 0 37%,#000 38% 53%,transparent 54%);mask:radial-gradient(circle,transparent 0 37%,#000 38% 53%,transparent 54%);opacity:.12;pointer-events:none}
-body[data-theme="mono"] .reader-rail{position:fixed;inset:0 auto 0 0;display:flex;flex-direction:column;align-items:center;justify-content:space-around;width:58px;border-right:1px solid #262626;color:#aaa;background:#0a0a0a;font:18px Consolas,monospace}
-body[data-theme="mono"] .reader-rail span{display:grid;justify-items:center;gap:4px}
-body[data-theme="mono"] .reader-rail small{color:#777;font:8px/1.3 Consolas,monospace;text-align:center;letter-spacing:.15em}
 body[data-theme="mono"] .mast{display:none}
 body[data-theme="mono"] .kicker{margin:0 0 16px;color:#777;font:10px Consolas,monospace;letter-spacing:.18em}
 body[data-theme="mono"] h1{position:relative;max-width:620px;margin:0 0 14px;font-size:clamp(27px,3vw,32px);font-weight:600;line-height:1.42;letter-spacing:0}
@@ -76,5 +72,14 @@ body[data-theme="mono"] .sources li{min-height:38px;padding:9px 0;color:#aaa;fon
 body[data-theme="mono"] .sources a{color:#ccc;text-decoration:none}
 body[data-theme="mono"] .sources a:hover{text-decoration:underline}
 body[data-theme="mono"] .foot{margin-top:56px;border-color:#262626;color:#666;font:9px Consolas,monospace}
-@media(max-width:760px){body[data-theme="mono"] .reader-rail{width:38px}body[data-theme="mono"] .sheet{margin-left:38px;padding:30px 20px 60px}body[data-theme="mono"] .sheet::before{display:none}}
-@media print{body[data-theme="mono"]{--page:#fff;--ink:#171717;--muted:#666;--line:#ddd;--surface:#fff;color-scheme:light;background:#fff}body[data-theme="mono"] .reader-rail,body[data-theme="mono"] .sheet::before{display:none}body[data-theme="mono"] .sheet{margin:0;padding:0}body[data-theme="mono"] article p,body[data-theme="mono"] article li,body[data-theme="mono"] article>p:first-of-type,body[data-theme="mono"] article blockquote p,body[data-theme="mono"] .sources a{color:#171717}body[data-theme="mono"] article h1,body[data-theme="mono"] article h2,body[data-theme="mono"] article h3{color:#171717}body[data-theme="mono"] .notch-rule{background:repeating-linear-gradient(90deg,#888 0 8px,transparent 8px 12px)}}
+@media(max-width:760px){body[data-theme="mono"] .sheet{padding:30px 20px 60px}body[data-theme="mono"] .sheet::before{display:none}}
+@media print{body[data-theme="mono"] .sheet{margin:0;padding:0}}
+@media print{
+  html:has(body[data-theme="mono"]),body[data-theme="mono"]{background:#0b0b0b!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  body[data-theme="mono"]{--page:#0b0b0b;--ink:#f3f3f3;--muted:#898989;--line:#292929;--surface:#0b0b0b;color-scheme:dark}
+  body[data-theme="mono"] .sheet{background:#0b0b0b!important}
+  body[data-theme="mono"] .sheet::before{display:block;opacity:.03}
+  body[data-theme="mono"] article p,body[data-theme="mono"] article li,body[data-theme="mono"] .sources a{color:#bdbdbd}
+  body[data-theme="mono"] article>p:first-of-type,body[data-theme="mono"] article blockquote p,body[data-theme="mono"] article h1,body[data-theme="mono"] article h2,body[data-theme="mono"] article h3{color:#dedede}
+  body[data-theme="mono"] .notch-rule{background:repeating-linear-gradient(90deg,#3b3b3b 0 8px,transparent 8px 12px)}
+}

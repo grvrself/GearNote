@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { ChatFrame, ChatMessage, ChatStreaming } from '../chat-data'
 import type { KnowledgeRecord } from '../data'
 import type { ContextPreview, PendingChoice, PendingLibrarySearch, PendingChatNoteEdit, PendingCommand, ProjectMemory, WorkingContext } from '../agent'
+import { getChatFrameImage } from '../agent'
 import { isCaptureCommand } from '../capture-command'
 import { CapturedFrame } from './CapturedFrame'
 import { ChamferCard } from './ChamferCard'
@@ -18,6 +19,8 @@ type Props = {
   pendingCommand?: PendingCommand | null
   onResolveCommand?: (proposalId: string, accept: boolean) => Promise<void>
   records: KnowledgeRecord[]
+  frameToAttach?: { frame: ChatFrame; sessionId: string } | null
+  onFrameAttached?: () => void
   sessionId?: string
   referencedIds: string[]
   workingContext?: WorkingContext
@@ -89,7 +92,7 @@ function StreamingRun({ streaming }: { streaming: ChatStreaming }) {
   </div>
 }
 
-export function ChatPanel({ records, pendingChoice = null, pendingLibrarySearch = null, onResolveLibrarySearch, pendingChatNoteEdit = null, onResolveChatNoteEdit, pendingCommand = null, onResolveCommand, sessionId, referencedIds, workingContext = { goal: '', completed: '', nextStep: '', updatedAt: '' }, projectMemory = [], compactedSummary = '', compactedCount = 0, historyOpen, agentAvailable, sending = false, streaming = null, suggestingMessageId = null, suggestionErrorId = null, error = '', onSend, onPreviewContext, onOpenAgentSetup, onSummarize, onRemoveReference, onRevealRecord, onToggleHistory, onShowHistory, onCreateNoteDraft, messages = [], compact = false }: Props) {
+export function ChatPanel({ records, frameToAttach = null, onFrameAttached, pendingChoice = null, pendingLibrarySearch = null, onResolveLibrarySearch, pendingChatNoteEdit = null, onResolveChatNoteEdit, pendingCommand = null, onResolveCommand, sessionId, referencedIds, workingContext = { goal: '', completed: '', nextStep: '', updatedAt: '' }, projectMemory = [], compactedSummary = '', compactedCount = 0, historyOpen, agentAvailable, sending = false, streaming = null, suggestingMessageId = null, suggestionErrorId = null, error = '', onSend, onPreviewContext, onOpenAgentSetup, onSummarize, onRemoveReference, onRevealRecord, onToggleHistory, onShowHistory, onCreateNoteDraft, messages = [], compact = false }: Props) {
   const [draft, setDraft] = useState('')
   const [deepMode, setDeepMode] = useState(false)
   const [choiceSubmitting, setChoiceSubmitting] = useState(false)
@@ -97,6 +100,7 @@ export function ChatPanel({ records, pendingChoice = null, pendingLibrarySearch 
   const [noteSubmitting, setNoteSubmitting] = useState(false)
   const [commandSubmitting, setCommandSubmitting] = useState(false)
   const [attachedFrame, setAttachedFrame] = useState<ChatFrame | null>(null)
+  const [attachedFramePreview, setAttachedFramePreview] = useState('')
   const [selectedMessageIds, setSelectedMessageIds] = useState<string[]>([])
   const [dismissedNotes, setDismissedNotes] = useState<string[]>([])
   const [contextPreview, setContextPreview] = useState<ContextPreview | null>(null)
@@ -122,7 +126,23 @@ export function ChatPanel({ records, pendingChoice = null, pendingLibrarySearch 
   const canSend = agentAvailable || isCaptureCommand(draft)
 
   useEffect(() => { setDraft(''); setAttachedFrame(null); setSelectedMessageIds([]); setDeepMode(false); setDismissedNotes([]); setContextPreview(null); setContextPreviewOpen(false) }, [sessionId])
+  useEffect(() => {
+    if (!frameToAttach || frameToAttach.sessionId !== sessionId) return
+    setAttachedFrame(frameToAttach.frame)
+    setDeepMode(false)
+    setContextPreview(null)
+    setContextPreviewOpen(false)
+    draftRef.current?.focus()
+    onFrameAttached?.()
+  }, [frameToAttach])
   useEffect(() => { setDeepMode(false); setContextPreview(null); setContextPreviewOpen(false) }, [referencedIds.join('|')])
+  useEffect(() => {
+    if (!attachedFrame) { setAttachedFramePreview(''); return }
+    let active = true
+    setAttachedFramePreview('')
+    void getChatFrameImage(attachedFrame.imageId).then(image => { if (active) setAttachedFramePreview(image) })
+    return () => { active = false }
+  }, [attachedFrame?.imageId])
   useEffect(() => { setContextPreview(null); setContextPreviewOpen(false) }, [workingContext, projectMemory, compactedSummary])
 
   useEffect(() => {
@@ -200,6 +220,7 @@ export function ChatPanel({ records, pendingChoice = null, pendingLibrarySearch 
           {message.role === 'agent' && <MessageRun message={message} onRevealRecord={onRevealRecord} />}
           <div className="message-reference-control"><button type="button" aria-pressed={selectedMessageIds.includes(message.id)} disabled={sending || (!selectedMessageIds.includes(message.id) && selectedMessageIds.length >= 4)} title={selectedMessageIds.includes(message.id) ? '移出本轮参考' : '将这条消息加入本轮参考'} onClick={() => toggleMessageReference(message.id)}>{selectedMessageIds.includes(message.id) ? '✓ 已选为参考 · 移除' : '＋ 选此消息为参考'}</button></div>
           <div className="message-body">{message.paragraphs.map((paragraph, index) => <p key={index}>{paragraph}</p>)}{message.points && <ol>{message.points.map(point => <li key={point}>{point}</li>)}</ol>}{message.frame && <CapturedFrame frame={message.frame} title={records.find(record => record.id === message.frame?.recordId)?.title ?? '视频'} selected={attachedFrame?.imageId === message.frame.imageId} onAttach={() => { setAttachedFrame(message.frame ?? null); setContextPreview(null); setContextPreviewOpen(false); draftRef.current?.focus() }} />}</div>
+          {message.role === 'agent' && message.toolSteps?.filter(step => step.startsWith('引用提醒：') || step.startsWith('回答提醒：')).map((step, index) => <p className="message-citation-warning" role="note" key={`${index}-${step}`}>{step}</p>)}
           {message.citations && <div className="message-citations"><span>引用</span><div>{message.citations.map((citation, index) => {
             const record = records.find(item => item.id === citation.recordId)
             if (citation.kind === 'chat' || citation.recordId.startsWith('chat:')) {
@@ -254,7 +275,7 @@ export function ChatPanel({ records, pendingChoice = null, pendingLibrarySearch 
     {!compact && <GearDivider area="composer" />}
     <div className="chat-composer" id="cmd-01">
       <div className="composer-head"><label htmlFor="agent-draft">向 Agent 提问</label><div>{onPreviewContext && <button className="context-preview-toggle" type="button" aria-expanded={contextPreviewOpen} disabled={sending || contextPreviewBusy || !draft.trim() || isCaptureCommand(draft)} onClick={() => { void previewContext() }}>{contextPreviewBusy ? '读取中' : contextPreviewOpen ? '收起上下文' : '本轮上下文'}</button>}<span data-available={canSend}>{sending ? isCaptureCommand(draft) ? '正在截取' : '正在回答' : canSend ? '可以发送' : '尚未接入'}</span></div></div>
-      {attachedFrame && <div className="composer-frame"><span>已选截图 / {formatElapsed(attachedFrame.atSeconds)} · 发送时会交给当前模型</span><button type="button" disabled={sending} aria-label="移除已选截图" onClick={() => { setAttachedFrame(null); setContextPreview(null); setContextPreviewOpen(false) }}>移除</button></div>}
+      {attachedFrame && <div className="composer-frame">{attachedFramePreview && <img src={attachedFramePreview} alt="待发送的视频截图" />}<span>已选截图 / {formatElapsed(attachedFrame.atSeconds)} · 发送时会交给当前模型</span><button type="button" disabled={sending} aria-label="移除已选截图" onClick={() => { setAttachedFrame(null); setContextPreview(null); setContextPreviewOpen(false) }}>移除</button></div>}
       {referenceCount > 0 && <details className="reference-review" aria-label="本轮参考">
         <summary className="reference-review-summary" title={referenceLabel}><strong>本轮参考</strong><span>{referenceLabel}</span><small aria-live="polite">{referenceCount} 条</small></summary>
         {referencedRecords.length > 0 && <div className="reference-review-section"><div className="reference-review-head"><strong>资料</strong><span>{referencedRecords.length} 条</span></div>

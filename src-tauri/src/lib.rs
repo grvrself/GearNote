@@ -48,7 +48,7 @@ pub fn run() {
             bridge::start(app.handle().clone());
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![open_extension_folder, storage::list_records, storage::list_capture_jobs, storage::dismiss_capture_job, storage::query_record_page, storage::get_record, storage::query_record_segments, storage::get_bridge_status,
+        .invoke_handler(tauri::generate_handler![open_extension_folder, storage::list_records, storage::delete_record, storage::list_capture_jobs, storage::dismiss_capture_job, storage::query_record_page, storage::get_record, storage::query_record_segments, storage::get_bridge_status,
             storyboard::analyze_video_storyboard, storyboard::get_storyboard_image, storyboard::open_video_at,
             agent::get_agent_status, agent::save_agent_config, agent::save_explore_references, agent::save_context_tier, agent::save_semantic_retrieval, agent::test_semantic_retrieval, agent::test_agent_tools, agent::list_chat_messages, agent::get_chat_state,
             agent::create_chat_session, agent::switch_chat_session, agent::rename_chat_session,

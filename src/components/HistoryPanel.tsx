@@ -53,10 +53,12 @@ type Props = {
   onOpenMini: () => void
   searchRef?: RefObject<HTMLInputElement | null>
   onRecordsChanged: () => Promise<void>
+  onAskFrame: (recordId: string, atSeconds: number) => Promise<void>
+  onDeleteRecord: (record: KnowledgeRecord) => Promise<void>
   onDismissCaptureJob?: (id: string) => Promise<void>
 }
 
-export function HistoryPanel({ records = recordFixtures, captureJobs = [], selectedId, referencedIds, focusRequest, onSelect, onReference, onRemoveReference, onCollapse, miniAvailable, onOpenMini, searchRef, onRecordsChanged, onDismissCaptureJob }: Props) {
+export function HistoryPanel({ records = recordFixtures, captureJobs = [], selectedId, referencedIds, focusRequest, onSelect, onReference, onRemoveReference, onCollapse, miniAvailable, onOpenMini, searchRef, onRecordsChanged, onAskFrame, onDeleteRecord, onDismissCaptureJob }: Props) {
   const [filter, setFilter] = useState<Filter>('all')
   const [query, setQuery] = useState('')
   const [activeMoment, setActiveMoment] = useState<number | null>(null)
@@ -166,6 +168,8 @@ export function HistoryPanel({ records = recordFixtures, captureJobs = [], selec
           onMoment={setActiveMoment}
           onReference={() => referencedIds.includes(record.id) ? onRemoveReference(record.id) : onReference(record.id)}
           onRecordsChanged={onRecordsChanged}
+          onAskFrame={atSeconds => onAskFrame(record.id, atSeconds)}
+          onDeleteRecord={() => onDeleteRecord(record)}
         />
       </div>)}
     </div>
@@ -182,10 +186,13 @@ type CardProps = {
   onMoment: (seconds: number) => void
   onReference: () => void
   onRecordsChanged: () => Promise<void>
+  onAskFrame: (atSeconds: number) => Promise<void>
+  onDeleteRecord: () => Promise<void>
 }
 
-function RecordCard({ record, expanded, referenced, activeMoment, onToggle, onMoment, onReference, onRecordsChanged }: CardProps) {
+function RecordCard({ record, expanded, referenced, activeMoment, onToggle, onMoment, onReference, onRecordsChanged, onAskFrame, onDeleteRecord }: CardProps) {
   const [sourceMessage, setSourceMessage] = useState('')
+  const [deleting, setDeleting] = useState(false)
   const [fullRecord, setFullRecord] = useState<KnowledgeRecord | null>(null)
   const [detailError, setDetailError] = useState('')
   const [segmentQuery, setSegmentQuery] = useState('')
@@ -217,6 +224,14 @@ function RecordCard({ record, expanded, referenced, activeMoment, onToggle, onMo
       setSourceMessage('复制失败，请稍后重试')
     }
   }
+  const deleteSavedRecord = async () => {
+    if (!window.confirm(`确定删除《${record.title}》吗？资料正文和字幕将从资料库移除，已有笔记或对话中的来源链接可能失效。`)) return
+    setDeleting(true)
+    setSourceMessage('')
+    try { await onDeleteRecord() }
+    catch (error) { setSourceMessage(`删除失败：${String(error)}`) }
+    finally { setDeleting(false) }
+  }
   const searchSegments = async () => {
     try {
       const start = parseTime(fromTime)
@@ -246,12 +261,13 @@ function RecordCard({ record, expanded, referenced, activeMoment, onToggle, onMo
       {record.type === 'video' && detail?.transcript && !record.demo && <details className="record-segment-search"><summary>按时间检索字幕</summary><form onSubmit={event => { event.preventDefault(); void searchSegments() }}><input value={segmentQuery} onChange={event => setSegmentQuery(event.target.value)} aria-label="字幕关键词" placeholder="字幕关键词（可留空）" /><input value={fromTime} onChange={event => setFromTime(event.target.value)} aria-label="开始时间" placeholder="开始 mm:ss" /><input value={toTime} onChange={event => setToTime(event.target.value)} aria-label="结束时间" placeholder="结束 mm:ss" /><HudButton type="submit" disabled={segmentLoading}>{segmentLoading ? '检索中…' : '检索'}</HudButton></form>{segmentError && <p role="alert" className="record-source-message">{segmentError}</p>}{segmentResults && <div className="record-segment-results">{segmentResults.length === 0 ? <p>该时间段没有匹配字幕</p> : segmentResults.map(segment => <button key={segment.ordinal} type="button" onClick={() => segment.atSeconds != null && onMoment(segment.atSeconds)}><time>{segment.atSeconds == null ? '—' : formatElapsed(segment.atSeconds)}</time><span>{segment.text}</span></button>)}{segmentResults.length === 100 && <p>仅显示前 100 条，请缩小时间范围或添加关键词。</p>}</div>}</details>}
       {Boolean(detail?.excerpt?.length) && <section className="record-section"><h3>EXCERPT / 正文摘录</h3><div className="transcript-list excerpt-list">{detail?.excerpt?.map((text, index) => <p key={index}>{text}</p>)}</div></section>}
       {detail?.contentText && <details className="record-full"><summary>{record.type === 'video' ? '阅读已保存字幕' : '阅读已保存正文'}</summary><pre>{detail.contentText}</pre></details>}
-      {record.type === 'video' && !record.demo && detail && <StoryboardSection record={detail} onChanged={onRecordsChanged} />}
+      {record.type === 'video' && !record.demo && detail && <StoryboardSection record={detail} onChanged={onRecordsChanged} onAskFrame={onAskFrame} />}
       {record.status === 'extracting' && <p className="record-process-note">字幕提取进行中，摘录完成后显示。</p>}
       <div className="record-actions">
         <HudButton variant={record.status === 'ready' && !referenced ? 'primary' : 'default'} type="button" aria-pressed={referenced} disabled={record.status !== 'ready'} onClick={onReference}>{referenced ? '移出本轮参考' : '加入本轮参考'}</HudButton>
         <HudButton type="button" disabled={!record.sourceUrl} onClick={() => { void copySource() }}>{record.type === 'video' ? '复制视频链接' : '复制原文链接'}</HudButton>
         {record.status === 'fault' && <HudButton type="button" disabled title="请返回原页面再次点击浏览器扩展图标">重试</HudButton>}
+        {!record.demo && <HudButton type="button" disabled={deleting || record.status === 'extracting' || record.status === 'summarizing'} onClick={() => { void deleteSavedRecord() }}>{deleting ? '删除中…' : '删除资料'}</HudButton>}
       </div>
       {record.status === 'fault' && record.type === 'video' && !record.demo && <p className="record-source-message">请返回视频页面，再次点击扩展图标重试。</p>}
       {sourceMessage && <p className="record-source-message" role="status">{sourceMessage}</p>}

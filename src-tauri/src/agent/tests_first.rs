@@ -87,6 +87,120 @@
     }
 
     #[test]
+    fn deep_video_failure_keeps_question_and_error_in_session() {
+        let mut session = new_session().unwrap();
+        let reply = save_deep_failure_exchange(&mut session, "你看看这个视频", "摘要原句不在字幕中", "100", 1200, None);
+        assert_eq!(session.messages.len(), 2);
+        assert_eq!(session.messages[0].paragraphs, vec!["你看看这个视频"]);
+        assert_eq!(session.messages[1].id, reply.id);
+        assert!(reply.paragraphs[0].contains("摘要原句不在字幕中"));
+        assert!(reply.citations.is_empty());
+        assert!(reply.tool_steps[0].starts_with("深度阅读失败："));
+        assert_eq!(reply.run.unwrap().elapsed_ms, 1200);
+    }
+
+    #[test]
+    fn final_request_without_any_model_text_keeps_question_and_error() {
+        let mut session = new_session().unwrap();
+        let reply = save_final_failure_exchange(&mut session, "你觉得讲得怎么样", "模型返回了空回答", "100", 2400,
+            None, vec!["深度阅读结束：已读完".into()],
+            vec![ReadSource { source_index: 1, record_id: "video".into(), title: "视频字幕".into(), at_seconds: Some(15) }],
+            Some(ReadCoverage { read_until_seconds: 15, total_seconds: 15, batch_count: 1, complete: true, reason: "字幕已读完".into() }), None);
+        assert_eq!(session.messages.len(), 2);
+        assert_eq!(session.messages[0].paragraphs, vec!["你觉得讲得怎么样"]);
+        assert_eq!(session.messages[1].id, reply.id);
+        assert!(reply.paragraphs[0].contains("未收到可显示的模型正文"));
+        assert!(reply.citations.is_empty());
+        assert_eq!(reply.run.unwrap().read_coverage.unwrap().batch_count, 1);
+        assert!(reply.tool_steps.last().unwrap().starts_with("回答未完成："));
+    }
+
+
+    #[test]
+    fn deep_video_retries_one_invalid_checkpoint_without_accepting_fake_quote() {
+        use std::io::{BufRead, Read, Write};
+        use std::net::TcpListener;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            let mut prompts = Vec::new();
+            for attempt in 0..2 {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                let mut length = 0;
+                loop {
+                    line.clear(); reader.read_line(&mut line).unwrap();
+                    if line == "\r\n" { break; }
+                    if let Some(value) = line.to_ascii_lowercase().strip_prefix("content-length:") { length = value.trim().parse::<usize>().unwrap(); }
+                }
+                let mut body = vec![0; length]; reader.read_exact(&mut body).unwrap();
+                let request: serde_json::Value = serde_json::from_slice(&body).unwrap();
+                prompts.push(request["messages"][1]["content"].as_str().unwrap().to_string());
+                let quote = if attempt == 0 { "不存在的原句" } else { "真实字幕原句" };
+                let content = format!("{{\"enough\":true,\"notes\":[{{\"sourceIndex\":1,\"quote\":\"{quote}\",\"finding\":\"事实\"}}]}}");
+                let response = serde_json::json!({"choices":[{"message":{"content":content}}]}).to_string();
+                write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", response.len(), response).unwrap();
+            }
+            prompts
+        });
+        let record: KnowledgeRecord = serde_json::from_value(serde_json::json!({"id":"video","type":"video","title":"测试","site":"example.com",
+            "savedAt":"1","status":"ready","sourceUrl":"https://example.com","contentText":"","excerpt":[],
+            "transcript":[{"atSeconds":0,"text":"真实字幕原句"}]})).unwrap();
+        let config = AgentConfig { base_url: format!("http://127.0.0.1:{port}/v1"), model: "mock".into(), ..AgentConfig::default() };
+        let prepared = context::build_exploration_limit("人格", "开头讲了什么", &[], 1, "深度模式".into(), 1,
+            &[], &WorkingContext::default(), "", config.context_tier.char_limit());
+        let (exploration, _) = tauri::async_runtime::block_on(explore_video_deep(|_| {}, &config, "test", &prepared, &record, "开头讲了什么")).unwrap();
+        let prompts = server.join().unwrap();
+        assert_eq!(prompts.len(), 2);
+        assert!(prompts[1].contains("上次检查点被拒绝"));
+        assert!(exploration.messages[1]["content"].as_str().unwrap().contains("真实字幕原句"));
+        assert!(!exploration.messages[1]["content"].as_str().unwrap().contains("不存在的原句"));
+        assert_eq!(exploration.sources.len(), 1);
+        assert!(exploration.sources[0].text.contains("真实字幕原句"));
+    }
+
+    #[test]
+    fn deep_video_continues_after_two_invalid_checkpoints() {
+        use std::io::{BufRead, Read, Write};
+        use std::net::TcpListener;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            for _ in 0..2 {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                let mut length = 0;
+                loop {
+                    line.clear(); reader.read_line(&mut line).unwrap();
+                    if line == "\r\n" { break; }
+                    if let Some(value) = line.to_ascii_lowercase().strip_prefix("content-length:") { length = value.trim().parse::<usize>().unwrap(); }
+                }
+                let mut body = vec![0; length]; reader.read_exact(&mut body).unwrap();
+                let content = r#"{"enough":true,"notes":[{"sourceIndex":1,"quote":"不存在的原句","finding":"虚假事实"}]}"#;
+                let response = serde_json::json!({"choices":[{"message":{"content":content}}]}).to_string();
+                write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", response.len(), response).unwrap();
+            }
+        });
+        let record: KnowledgeRecord = serde_json::from_value(serde_json::json!({"id":"video","type":"video","title":"测试","site":"example.com",
+            "savedAt":"1","status":"ready","sourceUrl":"https://example.com","contentText":"","excerpt":[],
+            "transcript":[{"atSeconds":0,"text":"真实字幕原句"}]})).unwrap();
+        let config = AgentConfig { base_url: format!("http://127.0.0.1:{port}/v1"), model: "mock".into(), ..AgentConfig::default() };
+        let prepared = context::build_exploration_limit("人格", "总结一下", &[], 1, "深度模式".into(), 1,
+            &[], &WorkingContext::default(), "", config.context_tier.char_limit());
+        let (exploration, coverage) = tauri::async_runtime::block_on(explore_video_deep(|_| {}, &config, "test", &prepared, &record, "总结一下")).unwrap();
+        server.join().unwrap();
+        assert!(coverage.complete);
+        assert!(exploration.steps.iter().any(|step| step.contains("忽略 1 条无法核对")));
+        assert!(!exploration.messages[1]["content"].as_str().unwrap().contains("不存在的原句"));
+        assert!(exploration.messages[1]["content"].as_str().unwrap().contains("真实字幕原句"));
+        assert_eq!(exploration.sources.len(), 1);
+    }
+
+    #[test]
     fn deep_video_stops_after_verified_enough_and_reports_partial_coverage() {
         use std::io::{BufRead, Read, Write};
         use std::net::TcpListener;

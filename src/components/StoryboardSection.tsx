@@ -4,18 +4,20 @@ import { analyzeVideoStoryboard, getStoryboardImage, openVideoAt } from '../reco
 import { HudButton } from './HudButton'
 import './storyboard.css'
 
-type Props = { record: KnowledgeRecord; onChanged: () => Promise<void> }
+type Props = { record: KnowledgeRecord; onChanged: () => Promise<void>; onAskFrame: (atSeconds: number) => Promise<void> }
 
 function stamp(seconds: number) {
   const total = Math.floor(seconds)
   return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`
 }
 
-export function StoryboardSection({ record, onChanged }: Props) {
+export function StoryboardSection({ record, onChanged, onAskFrame }: Props) {
   const [result, setResult] = useState<StoryboardResult | undefined>(record.storyboard)
   const [images, setImages] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
+  const [askingCell, setAskingCell] = useState<number | null>(null)
   const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
   const [cookiesFile, setCookiesFile] = useState<File | null>(null)
   const isBilibili = record.sourceUrl?.includes('bilibili.com') ?? false
   const needsLogin = isBilibili && (error.includes('HTTP 567') || cookiesFile !== null)
@@ -57,11 +59,26 @@ export function StoryboardSection({ record, onChanged }: Props) {
     catch (failure) { setError(String(failure)) }
   }
 
+  const askAboutFrame = async (cell: StoryboardResult['cells'][number]) => {
+    setAskingCell(cell.cell)
+    setError('')
+    setNotice('')
+    try {
+      await onAskFrame(cell.frameAt ?? cell.from)
+      setNotice(`${stamp(cell.frameAt ?? cell.from)} 的画面已放进聊天输入栏；写好问题后再发送。`)
+    } catch (failure) {
+      setError(`无法加入画面：${String(failure)}`)
+    } finally {
+      setAskingCell(null)
+    }
+  }
+
   return <section className="record-section storyboard-section" aria-label="视频画面分析">
     <h3>STORYBOARD / 画面分镜</h3>
     <p className="storyboard-note">按镜头提取代表画面。首次分析需要 Node.js、FFmpeg 和 yt-dlp；只处理可访问的视频。</p>
     {!result && <HudButton type="button" disabled={busy || record.demo} onClick={() => { void analyze() }}>{busy ? '正在分析画面…' : '分析画面'}</HudButton>}
     {error && <p className="storyboard-error" role="alert">{error}</p>}
+    {notice && <p className="storyboard-note" role="status">{notice}</p>}
     {!result && needsLogin && <div className="storyboard-auth">
       <p>此视频需要 B 站登录态。在浏览器登录 B 站后，导出仅含 B 站域名的 Netscape 格式 cookies.txt；它包含登录凭据，请勿分享。</p>
       <label>选择 cookies.txt <input type="file" accept=".txt,text/plain" disabled={busy} onChange={event => setCookiesFile(event.target.files?.[0] ?? null)} /></label>
@@ -75,9 +92,14 @@ export function StoryboardSection({ record, onChanged }: Props) {
         <img src={src} alt={`第 ${index + 1} 张视频分镜图`} />
       </div>)}
       <div className="storyboard-times" aria-label="分镜时间点">
-        {result.cells.map(cell => <button key={`${cell.sheet}-${cell.cell}`} type="button" onClick={() => { void openAt(cell.frameAt ?? cell.from) }} title="在浏览器中打开原视频的对应时间点">
-          <span>{String(cell.cell).padStart(2, '0')}</span> {stamp(cell.from)}–{stamp(cell.to)} ↗
-        </button>)}
+        {result.cells.map(cell => <div className="storyboard-time-row" key={`${cell.sheet}-${cell.cell}`}>
+          <button type="button" onClick={() => { void openAt(cell.frameAt ?? cell.from) }} title="在浏览器中打开原视频的对应时间点">
+            <span>{String(cell.cell).padStart(2, '0')}</span> {stamp(cell.from)}–{stamp(cell.to)} ↗
+          </button>
+          <button type="button" disabled={busy || askingCell !== null} onClick={() => { void askAboutFrame(cell) }} aria-label={`将第 ${cell.cell} 段 ${stamp(cell.frameAt ?? cell.from)} 的画面加入提问`}>
+            {askingCell === cell.cell ? '取帧中…' : '用此画面提问'}
+          </button>
+        </div>)}
       </div>
     </>}
   </section>

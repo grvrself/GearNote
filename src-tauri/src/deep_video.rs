@@ -53,20 +53,37 @@ pub fn batches(record: &KnowledgeRecord) -> Vec<VideoBatch> {
     result
 }
 
+fn note_is_verifiable(note: &Finding, read: &[VideoBatch], first_index: usize) -> bool {
+    let Some(batch) = note.source_index.checked_sub(first_index).and_then(|index| read.get(index)) else { return false; };
+    let quote = note.quote.trim();
+    !quote.is_empty() && quote.chars().count() <= 300 && !note.finding.trim().is_empty()
+        && note.finding.chars().count() <= 200
+        && batch.source.text.chars().filter(|ch| !ch.is_whitespace()).collect::<String>()
+            .contains(&quote.chars().filter(|ch| !ch.is_whitespace()).collect::<String>())
+}
+
 pub fn parse_checkpoint(answer: &str, read: &[VideoBatch], first_index: usize) -> Result<Checkpoint, String> {
     let checkpoint: Checkpoint = serde_json::from_str(answer.trim()).map_err(|_| "深度模式检查点必须是完整 JSON 对象")?;
     if checkpoint.notes.len() > 8 { return Err("深度模式单轮摘要超过 8 条".into()); }
     for note in &checkpoint.notes {
-        let batch = note.source_index.checked_sub(first_index).and_then(|index| read.get(index))
-            .ok_or("深度模式摘要引用了本轮未读的字幕批次")?;
-        let quote = note.quote.trim();
-        if quote.is_empty() || quote.chars().count() > 300 || note.finding.trim().is_empty() || note.finding.chars().count() > 200 ||
-            !batch.source.text.chars().filter(|ch| !ch.is_whitespace()).collect::<String>()
-                .contains(&quote.chars().filter(|ch| !ch.is_whitespace()).collect::<String>()) {
+        if note.source_index.checked_sub(first_index).and_then(|index| read.get(index)).is_none() {
+            return Err("深度模式摘要引用了本轮未读的字幕批次".into());
+        }
+        if !note_is_verifiable(note, read, first_index) {
             return Err("深度模式摘要的原句不在对应字幕批次中".into());
         }
     }
     Ok(checkpoint)
+}
+
+pub fn keep_verified_notes(answer: &str, read: &[VideoBatch], first_index: usize) -> Result<(Checkpoint, usize), String> {
+    let mut checkpoint: Checkpoint = serde_json::from_str(answer.trim()).map_err(|_| "深度模式检查点必须是完整 JSON 对象")?;
+    let original_count = checkpoint.notes.len();
+    checkpoint.notes = checkpoint.notes.into_iter().take(8)
+        .filter(|note| note_is_verifiable(note, read, first_index)).collect();
+    let rejected = original_count - checkpoint.notes.len();
+    if rejected > 0 || checkpoint.notes.is_empty() { checkpoint.enough = false; }
+    Ok((checkpoint, rejected))
 }
 
 pub fn needs_full_coverage(question: &str) -> bool {
@@ -108,5 +125,21 @@ mod tests {
         assert!(parse_checkpoint(&format!("```json\n{valid}\n```"), &pieces, 1).is_err());
         assert!(needs_full_coverage("总结整条视频"));
         assert!(!needs_full_coverage("开头说了什么"));
+    }
+
+    #[test]
+    fn invalid_checkpoint_notes_are_discarded_without_accepting_fake_quotes() {
+        let record = video(vec![(12, "这句来自字幕。".into())]);
+        let pieces = batches(&record);
+        let mixed = r#"{"enough":true,"notes":[{"sourceIndex":1,"quote":"这句来自字幕。","finding":"真实事实"},{"sourceIndex":1,"quote":"编造的原句","finding":"虚假事实"}]}"#;
+        let (checkpoint, rejected) = keep_verified_notes(mixed, &pieces, 1).unwrap();
+        assert_eq!(rejected, 1);
+        assert_eq!(checkpoint.notes.len(), 1);
+        assert_eq!(checkpoint.notes[0].quote, "这句来自字幕。");
+        assert!(!checkpoint.enough);
+        let (empty, rejected) = keep_verified_notes(&mixed.replace("这句来自字幕。", "另一个假引句"), &pieces, 1).unwrap();
+        assert_eq!(rejected, 2);
+        assert!(empty.notes.is_empty());
+        assert!(!empty.enough);
     }
 }
