@@ -50,6 +50,7 @@
 .studio-editor { width:100%; height:100%; overflow-y:auto; padding:var(--space-5); }
 .studio-editor .advanced-note { max-width:1000px; margin:0 auto; }
 .studio-editor .advanced-note-capture input,.studio-editor .advanced-note-capture select,.studio-editor .advanced-note-image-edit input,.studio-editor .advanced-note-image-edit select,.studio-editor .advanced-note-diff textarea { min-height:var(--control-height); padding:var(--space-2); border:var(--edge) solid var(--line); border-radius:0; color:var(--paper); background:var(--panel-2); font-size:var(--fs-13); }
+.studio-editor .advanced-note-diff textarea { min-height:300px; line-height:1.6; }
 .advanced-studio button:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
 @media (max-width:900px) { .advanced-studio { grid-template-columns:minmax(0,1fr) 290px; } .studio-main-gear { top:28%; left:2%; } .studio-gear-1 { top:14%; left:40%; } .studio-gear-2 { top:45%; left:55%; } .studio-gear-3 { top:63%; left:59%; } }
 @media (prefers-reduced-motion:reduce) { .advanced-studio[data-working='true'] .studio-gear { animation:none; } }

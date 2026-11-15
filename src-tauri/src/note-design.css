@@ -65,8 +65,8 @@ body[data-theme="mono"] article p,body[data-theme="mono"] article li{color:#bdbd
 body[data-theme="mono"] article>p:first-of-type{color:#dedede;font-size:15.5px;line-height:2.05}
 body[data-theme="mono"] article h1,body[data-theme="mono"] article h2,body[data-theme="mono"] article h3{color:#dedede;font-size:13px;font-weight:600;letter-spacing:.08em}
 body[data-theme="mono"] article ul,body[data-theme="mono"] article ol{padding:0;list-style:none;counter-reset:note-step}
-body[data-theme="mono"] article li{display:grid;grid-template-columns:28px minmax(0,1fr);gap:4px;counter-increment:note-step}
-body[data-theme="mono"] article li::before{content:counter(note-step,decimal-leading-zero);color:#777;font:10px/2.8 Consolas,monospace}
+body[data-theme="mono"] article li{position:relative;display:block;padding-left:32px;counter-increment:note-step}
+body[data-theme="mono"] article li::before{content:counter(note-step,decimal-leading-zero);position:absolute;left:0;top:0;color:#777;font:10px/2.8 Consolas,monospace}
 body[data-theme="mono"] article blockquote{margin:30px 0;padding:2px 0 2px 16px;border-left:2px solid #eee;background:transparent}
 body[data-theme="mono"] article blockquote p{color:#eee;font-size:15px}
 body[data-theme="mono"] article hr{border-color:#303030}

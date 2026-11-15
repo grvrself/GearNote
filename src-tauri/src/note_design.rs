@@ -205,12 +205,12 @@ pub fn preview_note_design(app: AppHandle, state: State<'_, NotesState>, agent: 
 
 #[tauri::command]
 pub fn save_note_design(app: AppHandle, state: State<'_, NotesState>, agent: State<'_, AgentState>,
-    note_id: String, theme: String, expected_updated_at: u128, images: Option<Vec<ImageSelection>>) -> Result<NoteDesign, String> {
+    note_id: String, theme: String, expected_updated_at: u64, images: Option<Vec<ImageSelection>>) -> Result<NoteDesign, String> {
     let note = current_note(&state, &note_id)?;
     let data_dir = app.path().app_data_dir().map_err(|error| error.to_string())?;
     let session = active_session(&agent)?;
     let resolved = note_images::resolve_images(&data_dir, &state.path, Some(&session), &note, &images.unwrap_or_default())?;
-    save_design(&state.path, &data_dir, &note, &theme, expected_updated_at, &resolved)
+    save_design(&state.path, &data_dir, &note, &theme, u128::from(expected_updated_at), &resolved)
 }
 
 fn save_design(path: &Path, data_dir: &Path, note: &Note, selected_theme: &str,
