@@ -33,8 +33,29 @@ fn inline(value: &str) -> String {
     let parts = safe.split("**").collect::<Vec<_>>();
     if parts.len() % 2 == 0 { return safe; }
     parts.into_iter().enumerate().map(|(index, part)| {
-        if index % 2 == 1 { format!("<strong>{part}</strong>") } else { part.to_string() }
+        if index % 2 == 1 { format!("<strong>{}</strong>", citation_badges(part)) } else { citation_badges(part) }
     }).collect::<String>()
+}
+
+fn citation_badges(value: &str) -> String {
+    let mut out = String::new();
+    let mut rest = value;
+    while let Some(start) = rest.find('[') {
+        out.push_str(&rest[..start]);
+        let tail = &rest[start + 1..];
+        if let Some(end) = tail.find(']') {
+            let number = &tail[..end];
+            if !number.is_empty() && number.len() <= 3 && number.bytes().all(|byte| byte.is_ascii_digit()) {
+                out.push_str(&format!("<sup class=\"ref-badge\">[{number}]</sup>"));
+                rest = &tail[end + 1..];
+                continue;
+            }
+        }
+        out.push('[');
+        rest = tail;
+    }
+    out.push_str(rest);
+    out
 }
 
 fn flush_paragraph(out: &mut String, lines: &mut Vec<String>) {
@@ -53,7 +74,7 @@ fn is_fence(line: &str) -> bool {
 fn render_body(body: &str) -> String {
     let mut out = String::new();
     let mut paragraph = Vec::new();
-    let mut list_open = false;
+    let mut list_open = None::<&str>;
     let mut code = None::<String>;
     for line in body.lines() {
         let trimmed = line.trim();
@@ -67,37 +88,43 @@ fn render_body(body: &str) -> String {
         }
         if is_fence(trimmed) {
             flush_paragraph(&mut out, &mut paragraph);
-            if list_open { out.push_str("</ul>"); list_open = false; }
+            if let Some(kind) = list_open.take() { out.push_str(&format!("</{kind}>")); }
             code = Some(String::new());
             continue;
         }
         if trimmed.is_empty() {
             flush_paragraph(&mut out, &mut paragraph);
-            if list_open { out.push_str("</ul>"); list_open = false; }
+            if let Some(kind) = list_open.take() { out.push_str(&format!("</{kind}>")); }
             continue;
         }
         let heading = trimmed.strip_prefix("### ").map(|text| (3, text))
             .or_else(|| trimmed.strip_prefix("## ").map(|text| (2, text)))
             .or_else(|| trimmed.strip_prefix("# ").map(|text| (1, text)));
         let bullet = trimmed.strip_prefix("- ").or_else(|| trimmed.strip_prefix("* "));
-        if heading.is_some() || bullet.is_some() || trimmed.starts_with("> ") || trimmed == "---" {
+        let numbered = trimmed.split_once(". ").filter(|(number, _)| !number.is_empty() && number.chars().all(|ch| ch.is_ascii_digit())).map(|(_, text)| text);
+        if heading.is_some() || bullet.is_some() || numbered.is_some() || trimmed.starts_with("> ") || trimmed == "---" {
             flush_paragraph(&mut out, &mut paragraph);
-            if bullet.is_none() && list_open { out.push_str("</ul>"); list_open = false; }
+            let next_kind = if bullet.is_some() { Some("ul") } else if numbered.is_some() { Some("ol") } else { None };
+            if list_open != next_kind {
+                if let Some(kind) = list_open.take() { out.push_str(&format!("</{kind}>")); }
+                if let Some(kind) = next_kind { out.push_str(&format!("<{kind}>")); list_open = Some(kind); }
+            }
             if let Some((level, text)) = heading {
                 out.push_str(&format!("<h{level}>{}</h{level}>", inline(text)));
             } else if let Some(text) = bullet {
-                if !list_open { out.push_str("<ul>"); list_open = true; }
+                out.push_str("<li>"); out.push_str(&inline(text)); out.push_str("</li>");
+            } else if let Some(text) = numbered {
                 out.push_str("<li>"); out.push_str(&inline(text)); out.push_str("</li>");
             } else if let Some(text) = trimmed.strip_prefix("> ") {
                 out.push_str("<blockquote><p>"); out.push_str(&inline(text)); out.push_str("</p></blockquote>");
             } else { out.push_str("<hr>"); }
         } else {
-            if list_open { out.push_str("</ul>"); list_open = false; }
+            if let Some(kind) = list_open.take() { out.push_str(&format!("</{kind}>")); }
             paragraph.push(trimmed.to_string());
         }
     }
     flush_paragraph(&mut out, &mut paragraph);
-    if list_open { out.push_str("</ul>"); }
+    if let Some(kind) = list_open { out.push_str(&format!("</{kind}>")); }
     if let Some(current) = code {
         out.push_str("<pre><code>"); out.push_str(&escape(current.trim_end_matches('\n')));
         out.push_str("</code></pre>");
@@ -126,15 +153,17 @@ fn render_with_images(note: &Note, selected_theme: &str, images: &[ResolvedImage
     let selected_theme = valid_theme(selected_theme)?;
     let mut sources = String::new();
     if !note.sources.is_empty() {
-        sources.push_str("<section class=\"sources\"><h2>来源与核对</h2><ol>");
-        for source in &note.sources {
+        sources.push_str("<section class=\"sources\"><h2>引用来源</h2><ol>");
+        for (index, source) in note.sources.iter().enumerate() {
             let label = escape(&source.title);
-            let time = source.at_seconds.map(|seconds| format!(" · {:02}:{:02}", seconds / 60, seconds % 60)).unwrap_or_default();
+            let time = source.at_seconds.map(|seconds| format!("{:02}:{:02}", seconds / 60, seconds % 60)).unwrap_or_else(|| "—".into());
+            sources.push_str(&format!("<li><span class=\"source-time\">{time}</span><span class=\"source-title\">"));
             if let Some(href) = source_url(&source.url) {
-                sources.push_str(&format!("<li><a href=\"{href}\" rel=\"noopener noreferrer\">{label}</a>{time}</li>"));
+                sources.push_str(&format!("<a href=\"{href}\" rel=\"noopener noreferrer\">{label}</a>"));
             } else {
-                sources.push_str(&format!("<li>{label}{time}</li>"));
+                sources.push_str(&label);
             }
+            sources.push_str(&format!("</span><span class=\"source-number\">{:02}</span></li>", index + 1));
         }
         sources.push_str("</ol></section>");
     }
@@ -142,9 +171,10 @@ fn render_with_images(note: &Note, selected_theme: &str, images: &[ResolvedImage
     let body = render_body(&note.body);
     let before_images = render_figures(images, "before");
     let after_images = render_figures(images, "after");
-    Ok(format!(r#"<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:"><title>{title} · GearNote</title><style>{CSS}</style></head><body data-theme="{selected_theme}"><main class="sheet"><div class="mast"><span>GEARNOTE / READING EDITION</span><span>知识笔记</span></div><div class="kicker">高级笔记 / 阅读版</div><h1>{title}</h1><div class="meta"><span>本地笔记</span><span>来源 {count} 条</span><span>画面 {image_count} 张</span></div><article>{before_images}{body}{after_images}</article>{sources}<div class="foot"><span>GEARNOTE · LOCAL KNOWLEDGE WORKSPACE</span><span>来源可回到原资料核对</span></div></main></body></html>"#,
+    Ok(format!(r#"<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:"><title>{title} · GearNote</title><style>{CSS}</style></head><body data-theme="{selected_theme}"><div class="reader-rail" aria-hidden="true"><span>⚙<small>02<br>摘要</small></span><span>⚙<small>03<br>正文</small></span><span>⚙<small>04<br>行动</small></span><span>⚙<small>05<br>引用</small></span></div><main class="sheet"><div class="mast"><span>GEARNOTE / READING EDITION</span><span>知识笔记</span></div><div class="kicker">LIBRARY / NOTE 02</div><h1>{title}</h1><div class="meta"><span>本地笔记</span><span>来源 {count} 条</span><span>{word_count} 字</span><span>画面 {image_count} 张</span></div><div class="notch-rule" aria-hidden="true"></div><article>{before_images}{body}{after_images}</article>{sources}<div class="foot"><span>GEARNOTE · LOCAL KNOWLEDGE WORKSPACE</span><span>来源可回到原资料核对</span></div></main></body></html>"#,
         image_count = images.len(),
-        count = note.sources.len()))
+        count = note.sources.len(),
+        word_count = note.body.chars().filter(|ch| !ch.is_whitespace()).count()))
 }
 
 #[cfg(test)]
@@ -352,6 +382,20 @@ mod tests {
         assert!(html.contains("<strong>重点</strong>"));
         assert!(html.contains("<li>一</li><li>二</li>"));
         assert!(render(&note(), "unknown").is_err());
+    }
+
+    #[test]
+    fn mono_reader_uses_saved_source_time_and_keeps_ordered_steps() {
+        let mut value = note();
+        value.body = "开头摘要。[2]\n\n1. 检查入口文件\n2. 记录配置\n\n> 原句".into();
+        value.sources[0].at_seconds = Some(85);
+        let html = render(&value, "mono").unwrap();
+        assert!(html.contains("<div class=\"notch-rule\""));
+        assert!(html.contains("<ol><li>检查入口文件</li><li>记录配置</li></ol>"));
+        assert!(html.contains("<span class=\"source-time\">01:25</span>"));
+        assert!(html.contains("<blockquote><p>原句</p></blockquote>"));
+        assert!(html.contains("<sup class=\"ref-badge\">[2]</sup>"));
+        assert!(!html.contains("次引用"));
     }
 
     #[test]

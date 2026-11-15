@@ -68,8 +68,9 @@ export function AdvancedNoteStudio({ notes, records, initialNoteId, onSelectNote
   return <section className="advanced-studio" aria-label="高级笔记工作台" data-working={working}>
     <div className="studio-canvas">
       <header className="studio-header"><span><GearIcon kind="brand" size={16} /> SEC-02 / 高级笔记工作台 <small>{String(notes.length).padStart(2, '0')}</small></span><button type="button" onClick={onClose}>返回资料库</button></header>
-      <div className="studio-gears" aria-hidden="true">{[0, 1, 2, 3].map(index => <StudioGear key={index} index={index} />)}</div>
-      <div className="studio-center"><span>{working ? 'GENERATING' : 'SELECTED NOTE'}</span><strong>{active?.title ?? '选择一篇笔记'}</strong><small>{working ? '正在生成高级版预览' : active ? `${active.sources.length} 条来源 · ${active.body.length.toLocaleString('zh-CN')} 字` : '从右侧选择已有笔记'}</small></div>
+      <div className="studio-gears"><div className="studio-main-gear"><StudioGear index={0} />
+        <div className="studio-center"><span>{working ? 'GENERATING' : 'SELECTED NOTE'}</span><strong>{active?.title ?? '选择一篇笔记'}</strong><small>{working ? '正在生成高级版预览' : active ? `${active.sources.length} 条来源 · ${active.body.length.toLocaleString('zh-CN')} 字` : '从右侧选择已有笔记'}</small></div>
+      </div>{[1, 2, 3].map(index => <StudioGear key={index} index={index} />)}</div>
       <div className="studio-canvas-caption"><strong>让内容更易阅读</strong><p>选中笔记后生成预览，再调整主题、配图和版式。保存前可逐项核对。</p></div>
       {working && <div className="studio-progress" role="status">正在制作《{active?.title}》的预览…</div>}
     </div>
