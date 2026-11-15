@@ -1,5 +1,5 @@
 .advanced-studio { display:grid; grid-template-columns:minmax(0,1fr) clamp(280px,31%,360px); width:100%; height:100%; min-height:0; color:var(--paper); background:var(--bg); }
-.studio-canvas { position:relative; min-width:0; overflow:hidden; background-color:var(--bg); background-image:radial-gradient(var(--line) .65px,transparent .65px); background-size:22px 22px; }
+.studio-canvas { position:relative; min-width:0; overflow:hidden; background-color:#080808; background-image:radial-gradient(circle,rgba(245,245,245,.24) .7px,transparent 1px),radial-gradient(ellipse 72% 64% at 34% 40%,rgba(245,245,245,.085),transparent 76%),linear-gradient(135deg,#181818 0%,#0d0d0d 58%,#060606 100%); background-size:22px 22px,100% 100%,100% 100%; box-shadow:inset 0 0 110px rgba(0,0,0,.72); }
 .studio-header { position:absolute; z-index:2; inset:0 0 auto; display:flex; justify-content:space-between; align-items:center; gap:12px; min-height:48px; padding:10px 20px; border-bottom:var(--edge) solid var(--line); background:var(--bg); font:var(--fs-11) var(--font-mono); }
 .studio-header span { display:flex; align-items:center; gap:8px; }
 .studio-header small { color:var(--muted); }

@@ -245,7 +245,7 @@ export function NotesPanel({ notes, folders, records, incomingDraft, onDraftCons
         <div className="notes-index-head"><span>笔记 <small>{visibleNotes.length}</small></span></div>
         {visibleNotes.length === 0 && <p className="notes-empty">{notes.length === 0 ? '暂无笔记。可新建笔记或从资料生成草稿。' : '这里还没有笔记。'}</p>}
         {visibleNotes.map(note => <button className="notes-index-item" type="button" key={note.id} disabled={busy} data-selected={selectedId === note.id} onClick={() => selectNote(note)}>
-          <span className="notes-index-item-title"><strong>{note.title}</strong><span className="notes-index-item-state"><GearIcon kind="brand" size={16} /><small>{selectedId === note.id && hasUnsavedChanges ? '草稿' : '已保存'}</small></span></span>
+          <span className="notes-index-item-title"><strong>{note.title}</strong><span className="notes-index-item-state"><GearIcon kind="brand" size={20} /><small>{selectedId === note.id && hasUnsavedChanges ? '草稿' : '已保存'}</small></span></span>
           <span className="notes-index-item-preview">{notePreview(note)}</span>
           <small>{new Date(note.updatedAt).toLocaleString('zh-CN')} · {note.sources.length} 个来源</small>
         </button>)}
