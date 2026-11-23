@@ -2,11 +2,12 @@ import { useEffect, useRef, useState } from 'react'
 import type { ChatFrame, ChatMessage, ChatStreaming } from '../chat-data'
 import type { KnowledgeRecord } from '../data'
 import type { ContextPreview, PendingChoice, PendingLibrarySearch, PendingChatNoteEdit, PendingCommand, ProjectMemory, WorkingContext } from '../agent'
-import { getChatFrameImage } from '../agent'
+import { getChatFrameImage, stopAgentReading } from '../agent'
 import { isCaptureCommand } from '../capture-command'
 import { CapturedFrame } from './CapturedFrame'
 import { ChamferCard } from './ChamferCard'
 import { GearDivider, GearIcon, PaperPlaneIcon } from './GearIcon'
+import { MechanicalGear } from './MechanicalGear'
 import { HudButton } from './HudButton'
 import './chat.css'
 
@@ -34,6 +35,7 @@ type Props = {
   suggestingMessageId?: string | null
   suggestionErrorId?: string | null
   error?: string
+  onContinueReading?: (messageId: string) => Promise<boolean>
   onSend?: (question: string, frameId?: string, messageIds?: string[], choiceId?: string, deepMode?: boolean) => Promise<boolean>
   onPreviewContext?: (question: string, frameId?: string, messageIds?: string[], deepMode?: boolean) => Promise<ContextPreview>
   onOpenAgentSetup?: () => void
@@ -92,8 +94,11 @@ function StreamingRun({ streaming }: { streaming: ChatStreaming }) {
   </div>
 }
 
-export function ChatPanel({ records, frameToAttach = null, onFrameAttached, pendingChoice = null, pendingLibrarySearch = null, onResolveLibrarySearch, pendingChatNoteEdit = null, onResolveChatNoteEdit, pendingCommand = null, onResolveCommand, sessionId, referencedIds, workingContext = { goal: '', completed: '', nextStep: '', updatedAt: '' }, projectMemory = [], compactedSummary = '', compactedCount = 0, historyOpen, agentAvailable, sending = false, streaming = null, suggestingMessageId = null, suggestionErrorId = null, error = '', onSend, onPreviewContext, onOpenAgentSetup, onSummarize, onRemoveReference, onRevealRecord, onToggleHistory, onShowHistory, onCreateNoteDraft, messages = [], compact = false }: Props) {
+export function ChatPanel({ records, frameToAttach = null, onFrameAttached, pendingChoice = null, pendingLibrarySearch = null, onResolveLibrarySearch, pendingChatNoteEdit = null, onResolveChatNoteEdit, pendingCommand = null, onResolveCommand, sessionId, referencedIds, workingContext = { goal: '', completed: '', nextStep: '', updatedAt: '' }, projectMemory = [], compactedSummary = '', compactedCount = 0, historyOpen, agentAvailable, sending = false, streaming = null, suggestingMessageId = null, suggestionErrorId = null, error = '', onContinueReading, onSend, onPreviewContext, onOpenAgentSetup, onSummarize, onRemoveReference, onRevealRecord, onToggleHistory, onShowHistory, onCreateNoteDraft, messages = [], compact = false }: Props) {
   const [draft, setDraft] = useState('')
+  const [stoppingReading, setStoppingReading] = useState(false)
+  const [stopReadingError, setStopReadingError] = useState('')
+  useEffect(() => { if (!streaming?.reading) { setStoppingReading(false); setStopReadingError('') } }, [streaming?.reading])
   const [deepMode, setDeepMode] = useState(false)
   const [choiceSubmitting, setChoiceSubmitting] = useState(false)
   const [librarySubmitting, setLibrarySubmitting] = useState(false)
@@ -201,7 +206,8 @@ export function ChatPanel({ records, frameToAttach = null, onFrameAttached, pend
   }
 
   return <section className="chat-panel" aria-label="Agent 对话">
-    {!compact && <header className="chat-page-head"><div><span>AGENT / DIALOGUE</span><h1>Agent 对话</h1><p>只依据本轮资料回答，引用可回到原文。</p></div><span className={`chat-agent-status${canSend ? ' is-ready' : ''}`}><i />{canSend ? 'Agent 已就绪' : 'Agent 未配置'}</span></header>}
+    {!compact && <MechanicalGear className="mech-chat-watermark" teeth={20} speed="42s" reverse />}
+    {!compact && <header className="chat-page-head"><div><span>AGENT / DIALOGUE</span><h1>Agent 对话</h1><p>只依据本轮资料回答，引用可回到原文。</p></div><span className={`chat-agent-status${canSend ? ' is-ready' : ''}`}><i />{canSend ? 'Agent 已就绪' : 'Agent 未配置'}</span><MechanicalGear className="mech-heading-gear" teeth={16} speed="22s" reverse /></header>}
     {(compact || referencedRecords.length > 0 || !historyOpen) && <div className="context-bar" id="ctx-01">
       {!compact && <span className="context-bar-label">本轮参考</span>}
       <div className="context-items" aria-label="当前引用资料">
@@ -224,6 +230,7 @@ export function ChatPanel({ records, frameToAttach = null, onFrameAttached, pend
           <div className="message-reference-control"><button type="button" aria-pressed={selectedMessageIds.includes(message.id)} disabled={sending || (!selectedMessageIds.includes(message.id) && selectedMessageIds.length >= 4)} title={selectedMessageIds.includes(message.id) ? '移出本轮参考' : '将这条消息加入本轮参考'} onClick={() => toggleMessageReference(message.id)}>{selectedMessageIds.includes(message.id) ? '✓ 已选为参考 · 移除' : '＋ 选此消息为参考'}</button></div>
           {message.role === 'agent' && <MessageRun message={message} onRevealRecord={onRevealRecord} />}
           {message.role === 'agent' && message.toolSteps?.filter(step => step.startsWith('引用提醒：') || step.startsWith('回答提醒：')).map((step, index) => <p className="message-citation-warning" role="note" key={`${index}-${step}`}>{step}</p>)}
+          {message.id === latestAgentId && message.toolSteps?.some(step => step.startsWith('可继续读取：')) && <div className="message-citation-warning"><span>本次自动阅读已结束；如需更多内容，可另开一轮阅读预算。</span><HudButton type="button" disabled={sending || Boolean(streaming) || !agentAvailable} onClick={() => { void onContinueReading?.(message.id) }}>继续读取</HudButton></div>}
           {message.citations && <div className="message-citations"><span>引用</span><div>{message.citations.map((citation, index) => {
             const record = records.find(item => item.id === citation.recordId)
             if (citation.kind === 'chat' || citation.recordId.startsWith('chat:')) {
@@ -277,7 +284,7 @@ export function ChatPanel({ records, frameToAttach = null, onFrameAttached, pend
 
     {!compact && <GearDivider area="composer" />}
     <div className="chat-composer" id="cmd-01">
-      <div className="composer-head"><label htmlFor="agent-draft">向 Agent 提问</label><div>{onPreviewContext && <button className="context-preview-toggle" type="button" aria-expanded={contextPreviewOpen} disabled={sending || contextPreviewBusy || !draft.trim() || isCaptureCommand(draft)} onClick={() => { void previewContext() }}>{contextPreviewBusy ? '读取中' : contextPreviewOpen ? '收起上下文' : '本轮上下文'}</button>}<span data-available={canSend}>{sending ? isCaptureCommand(draft) ? '正在截取' : '正在回答' : canSend ? '可以发送' : '尚未接入'}</span></div></div>
+      <div className="composer-head"><label htmlFor="agent-draft"><MechanicalGear className="mech-inline-gear" teeth={12} speed="10s" />向 Agent 提问</label><div>{onPreviewContext && <button className="context-preview-toggle" type="button" aria-expanded={contextPreviewOpen} disabled={sending || contextPreviewBusy || !draft.trim() || isCaptureCommand(draft)} onClick={() => { void previewContext() }}>{contextPreviewBusy ? '读取中' : contextPreviewOpen ? '收起上下文' : '本轮上下文'}</button>}<span data-available={canSend}>{sending ? isCaptureCommand(draft) ? '正在截取' : '正在回答' : canSend ? '可以发送' : '尚未接入'}</span></div></div>
       {attachedFrame && <div className="composer-frame">{attachedFramePreview && <img src={attachedFramePreview} alt="待发送的视频截图" />}<span>已选截图 / {formatElapsed(attachedFrame.atSeconds)} · 发送时会交给当前模型</span><button type="button" disabled={sending} aria-label="移除已选截图" onClick={() => { setAttachedFrame(null); setContextPreview(null); setContextPreviewOpen(false) }}>移除</button></div>}
       {referenceCount > 0 && <details className="reference-review" aria-label="本轮参考">
         <summary className="reference-review-summary" title={referenceLabel}><strong>本轮参考</strong><span>{referenceLabel}</span><small aria-live="polite">{referenceCount} 条</small></summary>
@@ -294,7 +301,11 @@ export function ChatPanel({ records, frameToAttach = null, onFrameAttached, pend
         <small className="message-reference-note">仅引用所选消息的文字。Agent 回答会标明来源于对话，不代表已核实的外部事实。</small></div>}
       </details>}
       <textarea id="agent-draft" ref={draftRef} value={draft} readOnly={sending} onChange={event => { setDraft(event.target.value); setContextPreview(null); setContextPreviewOpen(false) }} onKeyDown={event => { if (event.ctrlKey && event.key === 'Enter') { event.preventDefault(); void send() } }} placeholder="提问，或输入「截取 01:20 的画面」" />
-      {deepEligible && <label className="deep-mode-toggle"><input type="checkbox" checked={deepMode} disabled={sending} onChange={event => { setDeepMode(event.target.checked); setContextPreview(null); setContextPreviewOpen(false) }} /><span>深度模式</span><small>顺序读这条视频的字幕，最多 32 批或 120 秒；可能增加 API 用量</small></label>}
+      {streaming?.reading && streaming.requestId && <div className="reading-stop-control"><span role="status">自动读取中，达到任务预算后会回答。停止后保留已读部分。</span><HudButton type="button" disabled={stoppingReading} onClick={() => {
+        setStoppingReading(true); setStopReadingError('')
+        void stopAgentReading(streaming.requestId!).catch(error => { setStopReadingError(String(error)); setStoppingReading(false) })
+      }}>{stoppingReading ? '正在转入回答…' : '停止阅读并回答'}</HudButton>{stopReadingError && <p role="alert">{stopReadingError}</p>}</div>}
+      {deepEligible && <label className="deep-mode-toggle"><input type="checkbox" checked={deepMode} disabled={sending} onChange={event => { setDeepMode(event.target.checked); setContextPreview(null); setContextPreviewOpen(false) }} /><span>深度模式</span><small>顺序自动读取字幕；阅读策略与整项预算可在设置中调整，可能增加 API 用量</small></label>}
       {contextPreviewError && <p className="chat-error" role="alert">{contextPreviewError}</p>}
       {contextPreviewOpen && contextPreview && <div className="context-inspector" aria-label="本轮上下文预览">
         <div className="context-inspector-head"><strong>本轮上下文 / 发送前预览</strong><span>{contextPreview.textChars.toLocaleString()} / {contextPreview.limitChars.toLocaleString()} 字符{contextPreview.reservedChars > 0 ? ` · 预留 ${contextPreview.reservedChars.toLocaleString()}` : ''}</span></div>

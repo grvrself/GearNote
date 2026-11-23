@@ -5,6 +5,7 @@ struct AgentConfig {
     base_url: String, model: String,
     #[serde(default = "default_explore_references")] explore_references: bool,
     #[serde(default)] context_tier: ContextTier,
+    #[serde(default)] reading_budget: ReadingBudget,
     #[serde(default)] semantic_retrieval: bool,
     #[serde(default)] embedding_base_url: String,
     #[serde(default)] embedding_model: String,
@@ -22,7 +23,7 @@ fn default_explore_references() -> bool { true }
 
 impl Default for AgentConfig {
     fn default() -> Self { Self { base_url: "https://api.openai.com/v1".into(), model: String::new(), explore_references: true,
-        context_tier: ContextTier::Small, semantic_retrieval: false, embedding_base_url: String::new(), embedding_model: String::new() } }
+        context_tier: ContextTier::Small, reading_budget: ReadingBudget::default(), semantic_retrieval: false, embedding_base_url: String::new(), embedding_model: String::new() } }
 }
 
 pub struct AgentState {
@@ -33,6 +34,7 @@ pub struct AgentState {
     pub(crate) sessions: Mutex<ChatStore>,
     persona: Mutex<String>,
     pub(crate) busy: Mutex<bool>,
+    reading: Mutex<Option<std::sync::Arc<ReadingControl>>>,
     auto_compact_failures: Mutex<HashMap<String, usize>>,
     config_path: PathBuf,
     key_path: PathBuf,
@@ -65,7 +67,7 @@ impl AgentState {
         let persona = if valid_persona(&persona) { persona } else { DEFAULT_PERSONA.into() };
         Ok(Self { config: Mutex::new(config), key: Mutex::new(key), embedding_key: Mutex::new(embedding_key),
             key_warning: Mutex::new(key_warning), sessions: Mutex::new(sessions), persona: Mutex::new(persona),
-            busy: Mutex::new(false), auto_compact_failures: Mutex::new(HashMap::new()), config_path, key_path,
+            busy: Mutex::new(false), reading: Mutex::new(None), auto_compact_failures: Mutex::new(HashMap::new()), config_path, key_path,
             embedding_key_path, sessions_path, persona_path })
     }
 }
@@ -146,6 +148,7 @@ fn persist_chat_store(path: &PathBuf, store: &ChatStore) -> Result<(), String> {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentStatus { base_url: String, model: String, explore_references: bool, context_tier: ContextTier,
+    reading_budget: ReadingBudget,
     semantic_retrieval: bool, embedding_base_url: String, embedding_model: String, embedding_has_key: bool,
     has_key: bool, key_persistent: bool, key_warning: Option<String> }
 
@@ -156,7 +159,7 @@ pub fn get_agent_status(state: State<'_, AgentState>) -> Result<AgentStatus, Str
     let key_warning = state.key_warning.lock().map_err(|_| "密钥状态暂不可用")?.clone();
     let embedding_has_key = state.embedding_key.lock().map_err(|_| "向量密钥状态暂不可用")?.is_some();
     Ok(AgentStatus { base_url: config.base_url, model: config.model, explore_references: config.explore_references,
-        context_tier: config.context_tier, semantic_retrieval: config.semantic_retrieval,
+        context_tier: config.context_tier, reading_budget: config.reading_budget.effective(), semantic_retrieval: config.semantic_retrieval,
         embedding_base_url: config.embedding_base_url, embedding_model: config.embedding_model,
         embedding_has_key, has_key, key_persistent: cfg!(windows), key_warning })
 }
@@ -179,6 +182,7 @@ pub fn save_agent_config(state: State<'_, AgentState>, base_url: String, model: 
     let mut saved_config = state.config.lock().map_err(|_| "模型配置暂不可用")?;
     let config = AgentConfig { base_url: url.as_str().trim_end_matches('/').into(), model: model.into(),
         explore_references: saved_config.explore_references, context_tier: saved_config.context_tier,
+        reading_budget: saved_config.reading_budget.clone(),
         semantic_retrieval: saved_config.semantic_retrieval, embedding_base_url: saved_config.embedding_base_url.clone(),
         embedding_model: saved_config.embedding_model.clone() };
     let data = serde_json::to_vec_pretty(&config).map_err(|_| "模型配置无法编码")?;

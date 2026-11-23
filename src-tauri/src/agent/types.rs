@@ -112,6 +112,8 @@ pub struct ChatSession {
     pub pending_chat_note_edit: Option<PendingChatNoteEdit>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pending_command: Option<PendingCommand>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub read_continuation: Option<ReadContinuation>,
 }
 
 fn default_project_id() -> String { "project-default".into() }
@@ -151,7 +153,7 @@ fn now_millis() -> Result<String, String> {
 
 fn new_session() -> Result<ChatSession, String> {
     let now = now_millis()?;
-    Ok(ChatSession { id: format!("chat-{}", Uuid::new_v4()), title: "新会话".into(), created_at: now.clone(), updated_at: now.clone(), project_id: default_project_id(), working_context: WorkingContext::default(), compacted_summary: String::new(), compacted_count: 0, compacted_at: String::new(), referenced_ids: Vec::new(), messages: Vec::new(), pending_choice: None, pending_library_search: None, pending_chat_note_edit: None, pending_command: None })
+    Ok(ChatSession { id: format!("chat-{}", Uuid::new_v4()), title: "新会话".into(), created_at: now.clone(), updated_at: now.clone(), project_id: default_project_id(), working_context: WorkingContext::default(), compacted_summary: String::new(), compacted_count: 0, compacted_at: String::new(), referenced_ids: Vec::new(), messages: Vec::new(), pending_choice: None, pending_library_search: None, pending_chat_note_edit: None, pending_command: None, read_continuation: None })
 }
 
 fn session_title(question: &str) -> String { question.chars().take(28).collect() }

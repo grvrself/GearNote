@@ -1,7 +1,10 @@
+import { useEffect, useState } from 'react'
 import { isTauri } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
+import { applyMotion, readMotion, type MotionPreference } from '../theme'
 import { HudButton } from './HudButton'
 import { GearIcon } from './GearIcon'
+import { MechanicalGear } from './MechanicalGear'
 import './topbar.css'
 
 export type BrowserChoice = 'Chrome' | 'Edge'
@@ -23,6 +26,19 @@ function WindowGlyph({ kind }: { kind: 'minimize' | 'maximize' | 'close' }) {
 export function Topbar({ sectionId, browser, onBrowserChange, extensionConnected, onOpenExtensionSetup }: Props) {
   const desktop = isTauri()
   const window = desktop ? getCurrentWindow() : null
+  const [motion, setMotion] = useState<MotionPreference>(readMotion)
+
+  useEffect(() => {
+    const onMotion = (event: Event) => setMotion((event as CustomEvent<MotionPreference>).detail)
+    globalThis.addEventListener('knowflow:motion', onMotion)
+    return () => globalThis.removeEventListener('knowflow:motion', onMotion)
+  }, [])
+
+  const cycleMotion = () => {
+    const next = motion === 'full' ? 'reduced' : motion === 'reduced' ? 'off' : 'full'
+    applyMotion(next)
+    setMotion(next)
+  }
 
   return <header className="hud-topbar">
     <div className="hud-title-strip" data-tauri-drag-region>
@@ -43,6 +59,8 @@ export function Topbar({ sectionId, browser, onBrowserChange, extensionConnected
     <div className="hud-command-strip">
       <label className="hud-browser-control"><span>浏览器</span><select value={browser} onChange={event => onBrowserChange(event.target.value as BrowserChoice)}><option value="Chrome">Chrome</option><option value="Edge">Edge</option></select></label>
       <div className="hud-extension-state" data-connected={extensionConnected} role="status"><span className="hud-extension-mark" aria-hidden="true" /><span>{extensionConnected ? '扩展已连接' : '扩展未连接'}</span></div>
+      <div className="mech-command-gears" aria-hidden="true"><MechanicalGear teeth={12} speed="12s" /><i /><MechanicalGear teeth={16} speed="12s" reverse /><i /><MechanicalGear teeth={12} speed="12s" /></div>
+      <button className="mech-motion-toggle" type="button" data-motion={motion} aria-label={`齿轮动效：${motion === 'full' ? '完整' : motion === 'reduced' ? '减弱' : '关闭'}，点击切换`} title="点击切换完整、减弱和关闭" onClick={cycleMotion}><i />MOTION / {motion === 'full' ? 'FULL' : motion === 'reduced' ? 'LOW' : 'OFF'}</button>
       <div className="hud-capture-actions">
         <HudButton type="button" onClick={onOpenExtensionSetup}>▣ 字幕说明</HudButton>
         <HudButton type="button" variant="primary" onClick={onOpenExtensionSetup}>↓ 网页捕获</HudButton>

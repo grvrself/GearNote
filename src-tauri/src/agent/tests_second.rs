@@ -190,6 +190,60 @@
     }
 
     #[test]
+    fn seventh_tool_call_stops_exploration_without_losing_the_answer_path() {
+        use std::io::{BufRead, Read, Write};
+        use std::net::TcpListener;
+        for read_first in [true, false] {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let port = listener.local_addr().unwrap().port();
+            let server = std::thread::spawn(move || {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                let mut length = 0;
+                loop {
+                    line.clear(); reader.read_line(&mut line).unwrap();
+                    if line == "\r\n" { break; }
+                    if let Some(value) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                        length = value.trim().parse::<usize>().unwrap();
+                    }
+                }
+                let mut body = vec![0; length]; reader.read_exact(&mut body).unwrap();
+                let calls = (0..7).map(|number| {
+                    let (name, arguments) = if read_first && number == 0 {
+                        ("read_reference", r#"{"chunk_id":"rec-selected:0"}"#)
+                    } else { ("search_references", r#"{"query":"不存在的检索词"}"#) };
+                    serde_json::json!({"id":format!("call-{number}"),"type":"function",
+                        "function":{"name":name,"arguments":arguments}})
+                }).collect::<Vec<_>>();
+                let response = serde_json::json!({"choices":[{"message":{"role":"assistant","content":null,"tool_calls":calls}}]}).to_string();
+                write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", response.len(), response).unwrap();
+            });
+            let record: KnowledgeRecord = serde_json::from_value(serde_json::json!({"id":"rec-selected","type":"article",
+                "title":"测试资料","site":"example.com","savedAt":"1","status":"ready",
+                "sourceUrl":"https://example.com","contentText":"一段可以读取的正文。","excerpt":[]})).unwrap();
+            let ids = vec![record.id.clone()];
+            let index = ReadIndex::new(&[record.clone()], &ids);
+            let prepared = context::build_exploration("人格", "资料说了什么", &[], 1,
+                index.directory(&[record], &ids, 6_000), index.len(), &[], &WorkingContext::default(), "");
+            let config = AgentConfig { base_url: format!("http://127.0.0.1:{port}/v1"), model: "mock".into(), ..AgentConfig::default() };
+            let result = tauri::async_runtime::block_on(explore_references(|_| {}, &reqwest::Client::new(),
+                &config, "test", &prepared, &index, true)).unwrap();
+            server.join().unwrap();
+            if read_first {
+                let exploration = result.expect("已读到正文时继续生成回答");
+                assert_eq!(exploration.sources.len(), 1);
+                assert_eq!(exploration.messages[2]["tool_calls"].as_array().unwrap().len(), 6);
+                assert!(exploration.steps.iter().any(|step| step.contains("6 次工具调用上限")));
+                assert!(exploration.messages.last().unwrap()["content"].as_str().unwrap().contains("回答原问题"));
+            } else {
+                assert!(result.is_none(), "只有搜索、尚未读取时应回退到普通上下文");
+            }
+        }
+    }
+
+    #[test]
     fn output_budget_stops_reading_and_keeps_only_returned_sources() {
         use std::io::{BufRead, Read, Write};
         use std::net::TcpListener;

@@ -44,7 +44,7 @@ export function useChat(openChat: () => void, applyNoteEditAndRefresh: (proposal
     setCompactedCount(state.compactedCount)
   }, [])
 
-  const sendQuestion = async (question: string, frameId?: string, messageIds: string[] = [], choiceId?: string, deepMode = false, referenceOverride?: string[]) => {
+  const sendQuestion = async (question: string, frameId?: string, messageIds: string[] = [], choiceId?: string, deepMode = false, referenceOverride?: string[], continueMessageId?: string) => {
     if (sendingRef.current) return false
     sendingRef.current = true
     setSending(true)
@@ -53,7 +53,7 @@ export function useChat(openChat: () => void, applyNoteEditAndRefresh: (proposal
     setAgentError('')
     try {
       const reply = await askAgent(question, referenceOverride ?? referencedIds, delta => setStreaming(current => current && { ...current, answer: current.answer + delta }), frameId,
-        activity => setStreaming(current => current && { ...current, activity, activities: [...current.activities, activity] }), messageIds, choiceId, deepMode)
+        activity => setStreaming(current => current && { ...current, activity, activities: [...current.activities, activity] }), messageIds, choiceId, deepMode, continueMessageId, (requestId, reading) => setStreaming(current => current && { ...current, requestId, reading }))
       const saved = await getChatState()
       applyChatState(saved)
       setStreaming(null)

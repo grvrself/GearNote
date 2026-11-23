@@ -27,6 +27,9 @@ type Props = {
   onDeleteFolder: (id: string) => Promise<number>
   designOpen?: boolean
   onDesignOpenChange?: (open: boolean) => void
+  composeRequest?: { ids: string[]; nonce: number } | null
+  onComposeRequestConsumed?: () => void
+  requestedNoteId?: string | null
 }
 
 const emptyDraft = (folderId: string | null = null): NoteDraft => ({ title: '', body: '', sources: [], folderId })
@@ -42,7 +45,7 @@ const noteDraft = (note: Note): NoteDraft => ({ title: note.title, body: note.bo
   sources: note.sources.map(source => ({ recordId: source.recordId, atSeconds: source.atSeconds })), folderId: note.folderId ?? null })
 const notePreview = (note: Note) => note.body.split('\n').map(line => line.trim())
   .find(line => line && !line.startsWith('#') && !line.startsWith('['))?.replace(/^[-*>]\s*/, '').slice(0, 90) ?? '打开笔记查看内容'
-export function NotesPanel({ notes, folders, records, incomingDraft, onDraftConsumed, onSave, onDelete, onExport, onRevealRecord, onApplyEdit, onUndoEdit, onRejectEdit, onCreateFolder, onRenameFolder, onDeleteFolder, designOpen: controlledDesignOpen, onDesignOpenChange }: Props) {
+export function NotesPanel({ notes, folders, records, incomingDraft, onDraftConsumed, onSave, onDelete, onExport, onRevealRecord, onApplyEdit, onUndoEdit, onRejectEdit, onCreateFolder, onRenameFolder, onDeleteFolder, designOpen: controlledDesignOpen, onDesignOpenChange, composeRequest, onComposeRequestConsumed, requestedNoteId }: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [draft, setDraft] = useState<NoteDraft>(emptyDraft)
   const [viewMode, setViewMode] = useState<'read' | 'edit'>('edit')
@@ -96,6 +99,24 @@ export function NotesPanel({ notes, folders, records, incomingDraft, onDraftCons
     }
     setDesignOpenState(controlledDesignOpen)
   }, [controlledDesignOpen])
+  useEffect(() => {
+    if (!composeRequest) return
+    if (!confirmDiscard()) { onComposeRequestConsumed?.(); return }
+    initiallySelected.current = true
+    setDesignOpen(false)
+    setComposeOpen(true)
+    setComposeIds(composeRequest.ids.slice(0, 3))
+    setComposeFocus(''); setComposeCoverage(''); setOpenDesignAfterSave(false)
+    setSelectedId(null); setDraft(emptyDraft(folderForFilter(folderFilter)))
+    setViewMode('edit'); setError(''); setNotice('')
+    onComposeRequestConsumed?.()
+  }, [composeRequest])
+  useEffect(() => {
+    if (!controlledDesignOpen || !requestedNoteId) return
+    const note = notes.find(item => item.id === requestedNoteId)
+    if (!note) return
+    setSelectedId(note.id); setDraft(noteDraft(note)); setViewMode('read')
+  }, [controlledDesignOpen, requestedNoteId, notes])
   const changeFolderFilter = (filter: string) => {
     if (filter === folderFilter || !confirmDiscard()) return
     setDesignOpen(false)
@@ -140,7 +161,7 @@ export function NotesPanel({ notes, folders, records, incomingDraft, onDraftCons
       setDraft({ title: composed.title, body: composed.body, sources: composed.sources, folderId: folderForFilter(folderFilter) })
       setComposeCoverage(composed.coverage); setComposeOpen(false)
       setOpenDesignAfterSave(true)
-      setNotice('已生成待核对草稿。模型只读取列出的片段；请逐句检查引文，再保存笔记。')
+      setNotice(composed.warnings.length ? `草稿已保留。${composed.warnings.join('；')}。请核实后保存。` : '已生成待核对草稿。请检查后保存。')
     } catch (cause) { setError(String(cause)) } finally { setBusy(false) }
   }
   const submitFolder = async () => {

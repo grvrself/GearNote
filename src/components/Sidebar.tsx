@@ -4,7 +4,7 @@ import { GearIcon } from './GearIcon'
 import './sidebar.css'
 
 export type View = 'chat' | 'library' | 'studio' | 'skills' | 'plugins' | 'settings'
-export type SettingsSection = 'overview' | 'shortcuts'
+export type SettingsSection = 'overview' | 'agent' | 'reading' | 'persona' | 'appearance' | 'data' | 'shortcuts' | 'about'
 
 export const navigation: { id: View; label: string; icon: IconName }[] = [
   { id: 'chat', label: 'Agent 对话', icon: 'chat' },

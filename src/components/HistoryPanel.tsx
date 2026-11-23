@@ -7,6 +7,7 @@ import { HudButton } from './HudButton'
 import { PanelHeading } from './PanelHeading'
 import { StatusBadge } from './StatusBadge'
 import { GearDivider } from './GearIcon'
+import { MechanicalGear } from './MechanicalGear'
 import { StoryboardSection } from './StoryboardSection'
 import './history.css'
 
@@ -122,6 +123,7 @@ export function HistoryPanel({ records = recordFixtures, captureJobs = [], selec
   return <aside className="history-panel" id="rec-02" aria-labelledby="rec-02-title">
     <div className="history-head">
       <PanelHeading id="rec-02-title" serial="REC-02" overline="history" title="资料" count={records.length} />
+      <MechanicalGear className="mech-history-gear" teeth={12} speed="14s" reverse />
       <button className="history-collapse" type="button" aria-label="收起记录" onClick={onCollapse}>收起记录</button>
     </div>
     <GearDivider area="history" />
@@ -246,6 +248,7 @@ function RecordCard({ record, expanded, referenced, activeMoment, onToggle, onMo
     } finally { setSegmentLoading(false) }
   }
   return <ChamferCard className={`record-card ${expanded ? 'is-expanded' : ''} ${referenced ? 'is-referenced' : ''}`} id={record.id}>
+    <MechanicalGear className="mech-record-gear" teeth={12} speed="24s" reverse />
     <button className="record-summary" type="button" aria-expanded={expanded} aria-controls={`${record.id}-details`} onClick={onToggle}>
       <span className="record-topline"><span className="record-kind">{record.type === 'video' ? '■ VIDEO' : '◆ ARTICLE'}</span>{record.demo && <span className="record-demo">DEMO</span>}{record.durationSeconds != null && <time className="record-duration" dateTime={`PT${record.durationSeconds}S`}>{formatElapsed(record.durationSeconds)}</time>}{referenced && <span className="record-reference-flag">本轮参考</span>}<span className="record-expand" aria-hidden="true">{expanded ? '−' : '+'}</span></span>
       <strong className="record-title">{expanded && <span aria-hidden="true">⌜</span>}{record.title}</strong>

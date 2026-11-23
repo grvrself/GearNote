@@ -8,6 +8,17 @@ const MAX_SEARCH_RESULTS: usize = 6;
 pub struct ReadIndex { chunks: Vec<(String, SourceChunk)> }
 
 impl ReadIndex {
+    pub fn for_full_read(records: &[KnowledgeRecord], referenced_ids: &[String]) -> Self {
+        let mut chunks = Vec::new();
+        for record in referenced_ids.iter().filter_map(|id| records.iter().find(|record| &record.id == id))
+            .filter(|record| record.status == ProcessStatus::Ready) {
+            let sources = if record.record_type == "video" { crate::deep_video::batches(record).into_iter().map(|batch| batch.source).collect() }
+                else { context::chunks(record) };
+            for (number, source) in sources.into_iter().enumerate() { chunks.push((format!("{}:full:{number}", record.id), source)); }
+        }
+        Self { chunks }
+    }
+
     pub fn new(records: &[KnowledgeRecord], referenced_ids: &[String]) -> Self {
         let allowed: HashSet<&str> = referenced_ids.iter().map(String::as_str).collect();
         let mut chunks = Vec::new();
@@ -21,6 +32,8 @@ impl ReadIndex {
         }
         Self { chunks }
     }
+
+    pub fn exclude_read(&mut self, ids: &[String]) { self.chunks.retain(|(id, _)| !ids.contains(id)); }
 
     pub fn is_empty(&self) -> bool { self.chunks.is_empty() }
 

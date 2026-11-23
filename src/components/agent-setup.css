@@ -15,6 +15,13 @@
 .agent-explore-config label { display:flex; align-items:center; gap:var(--space-2); min-height:var(--control-height); cursor:pointer; }
 .agent-explore-config input { width:16px; height:16px; min-height:16px; margin:0; padding:0; border:0; flex:none; accent-color:var(--accent); }
 .agent-explore-config input:disabled { cursor:not-allowed; }
+.reading-budget-config { display:block; }
+.reading-budget-config summary { cursor:pointer; color:var(--paper); font-size:var(--fs-13); padding:var(--space-2) 0; }
+.reading-budget-config p,.reading-budget-config .agent-setup-actions { margin-top:var(--space-3); }
+.reading-budget-config label { display:grid; grid-template-columns:minmax(0,1fr) minmax(80px,120px) minmax(70px,90px); gap:var(--space-3); margin-top:var(--space-3); cursor:default; }
+.reading-budget-config input { width:100%; height:auto; min-height:var(--control-height); padding:var(--space-2); border:var(--edge) solid var(--line); }
+.reading-budget-config small { color:var(--muted); }
+@media(max-width:600px) { .reading-budget-config label { grid-template-columns:minmax(0,1fr) 100px; } .reading-budget-config small { grid-column:1/-1; } }
 .agent-explore-config .semantic-text-field { display:grid; align-items:stretch; min-height:0; cursor:default; }
 .agent-explore-config .semantic-text-field input { width:100%; height:auto; min-height:var(--control-height); padding:var(--space-2); border:var(--edge) solid var(--line); border-radius:var(--r); flex:auto; }
 .agent-explore-config .agent-setup-actions { flex-wrap:wrap; }

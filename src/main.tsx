@@ -5,11 +5,13 @@ import MiniApp from './MiniApp'
 import './tokens.css'
 import './mono-theme.css'
 import './refined-theme.css'
-import { initializeTheme } from './theme'
+import './mechanical-theme.css'
+import { initializeMotion, initializeTheme } from './theme'
 
 const mini = new URLSearchParams(window.location.search).get('window') === 'mini'
 document.body.dataset.window = mini ? 'mini' : 'main'
 initializeTheme()
+initializeMotion()
 
 createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

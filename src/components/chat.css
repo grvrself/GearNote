@@ -182,3 +182,6 @@
   .composer-foot > span { display: none; }
   .composer-foot > div { margin-left: auto; }
 }
+
+.reading-stop-control { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:var(--space-3); margin:var(--space-3) 0; color:var(--muted); font-size:var(--fs-12); }
+.reading-stop-control p { flex-basis:100%; }

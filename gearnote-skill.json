@@ -1,0 +1,23 @@
+{
+  "type": "gearnote-skill",
+  "schemaVersion": 1,
+  "id": "dev.gearnote.compare",
+  "version": "0.1.0",
+  "name": "多资料对比",
+  "description": "比较不同资料的观点、证据与分歧，不合并冲突。",
+  "author": "GearNote",
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/grvrself/GearNote/tree/main/packages/skills/compare",
+  "permissions": [
+    "records.read.selected",
+    "agent.chat",
+    "chat.write"
+  ],
+  "inputs": [
+    { "type": "records", "min": 2, "max": 4 }
+  ],
+  "steps": [
+    { "action": "agent.ask", "prompt": "packages/skills/compare/prompts/compare.md" }
+  ],
+  "output": "chat.message"
+}

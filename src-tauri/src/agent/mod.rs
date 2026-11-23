@@ -7,6 +7,8 @@ use url::Url;
 use uuid::Uuid;
 
 include!("types.rs");
+include!("budget.rs");
+include!("reading_task.rs");
 include!("state.rs");
 include!("chat.rs");
 mod evidence;
@@ -15,6 +17,7 @@ use evidence::*;
 pub(crate) use evidence::validate_citation_numbers;
 include!("stream.rs");
 include!("video_choice.rs");
+include!("full_read.rs");
 include!("proposals.rs");
 include!("explore.rs");
 include!("suggestions.rs");
@@ -25,4 +28,6 @@ include!("ask.rs");
 mod tests {
     include!("tests_first.rs");
     include!("tests_second.rs");
+    include!("tests_budget.rs");
+    include!("tests_auto_read.rs");
 }

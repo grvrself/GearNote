@@ -4,6 +4,7 @@ import type { Note } from '../notes'
 import { previewNoteDesign } from '../note-design'
 import { AdvancedNotePanel } from './AdvancedNotePanel'
 import { GearIcon } from './GearIcon'
+import { MechanicalTrain } from './MechanicalGear'
 import './advanced-note-studio.css'
 
 type Props = {
@@ -18,18 +19,6 @@ type Props = {
   onRejectEdit: (id: string) => Promise<void>
   onUndoEdit: (id: string) => Promise<Note>
   onNoteChanged: (note: Note) => void
-}
-
-const gearPoints = (teeth: number) => Array.from({ length: teeth * 4 }, (_, step) => {
-  const radius = [70, 70, 88, 88][step % 4]
-  const angle = (step / (teeth * 4)) * Math.PI * 2 - Math.PI / 2
-  return `${(100 + Math.cos(angle) * radius).toFixed(1)},${(100 + Math.sin(angle) * radius).toFixed(1)}`
-}).join(' ')
-
-function StudioGear({ index }: { index: number }) {
-  return <svg className={`studio-gear studio-gear-${index}`} viewBox="0 0 200 200" aria-hidden="true" focusable="false">
-    <polygon points={gearPoints(index === 3 ? 18 : 12)} /><circle cx="100" cy="100" r="48" />
-  </svg>
 }
 
 const previewText = (note: Note) => note.body.split('\n').map(line => line.trim())
@@ -68,7 +57,7 @@ export function AdvancedNoteStudio({ notes, records, initialNoteId, onSelectNote
   return <section className="advanced-studio" aria-label="高级笔记工作台" data-working={working}>
     <div className="studio-canvas">
       <header className="studio-header"><span><GearIcon kind="brand" size={16} /> SEC-02 / 高级笔记工作台 <small>{String(notes.length).padStart(2, '0')}</small></span><button type="button" onClick={onClose}>返回资料库</button></header>
-      <div className="studio-gears" aria-hidden="true"><div className="studio-main-gear"><StudioGear index={0} /></div><StudioGear index={1} /></div>
+      <MechanicalTrain />
       <div className="studio-center"><GearIcon kind="brand" size={20} /><span>{working ? 'GENERATING' : 'READING EDITION / MONO'}</span><h1>让笔记成为<br />可阅读的作品</h1><p>保留正文、引用与事实边界，只重新组织版式。先预览，再保存；原笔记不会被覆盖。</p><div className="studio-center-actions"><button type="button" className="studio-generate" disabled={!active || working} onClick={() => { void generate() }}>{working ? '生成中…' : '生成高级版 →'}</button><button type="button" disabled={!active || working} onClick={() => { if (active) { onSelectNote(active); onClose() } }}>打开原笔记</button></div></div>
       <div className="studio-canvas-caption"><span>SELECTED NOTE / {String(notes.findIndex(note => note.id === active?.id) + 1).padStart(2, '0')}</span><strong>{active?.title ?? '从右侧选择一篇笔记'}</strong><small>{active ? `${active.sources.length} 个来源 · ${active.body.length.toLocaleString('zh-CN')} 字` : '选择后开始生成'}</small></div>
       <div className="studio-status"><i />{working ? '正在生成高级版预览' : '本地生成 · 预览未保存'}</div>

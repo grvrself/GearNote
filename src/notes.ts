@@ -25,7 +25,7 @@ export const undoNoteEdit = (proposalId: string) => invoke<Note>('undo_note_edit
 export const rejectNoteEdit = (proposalId: string) => invoke<void>('reject_note_edit', { proposalId })
 export const listNoteWorkflowEvents = (noteId: string) => invoke<NoteWorkflowEvent[]>('list_note_workflow_events', { noteId })
 export const getPendingNoteEdit = (noteId: string) => invoke<NoteEditProposal | null>('get_pending_note_edit', { noteId })
-export type ComposedNote = { title: string; body: string; sources: NoteSourceInput[]; coverage: string }
+export type ComposedNote = { title: string; body: string; sources: NoteSourceInput[]; coverage: string; warnings: string[] }
 export const composeNoteFromSources = (selectedIds: string[], focus: string) =>
   invoke<ComposedNote>('compose_note_from_sources', { selectedIds, focus })
 export const proposeNoteRestructure = (noteId: string) =>

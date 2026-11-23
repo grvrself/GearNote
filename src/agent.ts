@@ -3,7 +3,17 @@ import { listen } from '@tauri-apps/api/event'
 import type { ChatMessage, ChatSuggestion } from './chat-data'
 import type { NoteEditProposal } from './notes'
 
-export type AgentStatus = { baseUrl: string; model: string; exploreReferences: boolean; contextTier: 'small' | 'medium';
+export type ReadingBudget = { toolCalls: number; explorationRounds: number; toolChars: number; deepSeconds: number; deepBatches: number; requestSeconds: number; answerChars: number; strategy: 'adaptive' | 'full'; effort: 'standard' | 'thorough' | 'custom' }
+export const defaultReadingBudget: ReadingBudget = { toolCalls: 24, explorationRounds: 12, toolChars: 16000, deepSeconds: 180, deepBatches: 64, requestSeconds: 180, answerChars: 20000, strategy: 'adaptive', effort: 'standard' }
+export const stopAgentReading = (requestId: string) => invoke<void>('stop_agent_reading', { requestId })
+export function readingPreset(current: ReadingBudget, effort: ReadingBudget['effort']): ReadingBudget {
+  if (effort === 'custom') return { ...current, effort }
+  return { ...current, effort, ...(effort === 'standard'
+    ? { toolCalls: 24, explorationRounds: 12, toolChars: 16000, deepSeconds: 180, deepBatches: 64 }
+    : { toolCalls: 48, explorationRounds: 24, toolChars: 32000, deepSeconds: 600, deepBatches: 128 }) }
+}
+export const saveReadingBudget = (budget: ReadingBudget) => invoke<AgentStatus>('save_reading_budget', { budget })
+export type AgentStatus = { baseUrl: string; model: string; exploreReferences: boolean; contextTier: 'small' | 'medium'; readingBudget: ReadingBudget;
   semanticRetrieval: boolean; embeddingBaseUrl: string; embeddingModel: string; embeddingHasKey: boolean;
   hasKey: boolean; keyPersistent: boolean; keyWarning: string | null }
 export type ToolProbe = { supported: boolean; searched: boolean; read: boolean; elapsedMs: number; steps: string[]; reason: string }
@@ -66,25 +76,32 @@ export const resolveLibrarySearch = (proposalId: string, accept: boolean) => inv
 export const resolveCommandProposal = (proposalId: string, accept: boolean) => invoke<ChatState>('resolve_command_proposal', { proposalId, accept })
 export const previewAgentContext = (question: string, referencedIds: string[], frameId?: string, messageIds: string[] = [], deepMode = false) =>
   invoke<ContextPreview>('preview_agent_context', { question, referencedIds, frameId: frameId ?? null, messageIds, deepMode })
-export async function askAgent(question: string, referencedIds: string[], onDelta: (delta: string) => void, frameId?: string, onActivity?: (message: string) => void, messageIds: string[] = [], choiceId?: string, deepMode = false) {
+export async function askAgent(question: string, referencedIds: string[], onDelta: (delta: string) => void, frameId?: string, onActivity?: (message: string) => void, messageIds: string[] = [], choiceId?: string, deepMode = false, continueMessageId?: string, onReading?: (requestId: string, reading: boolean) => void) {
   const requestId = crypto.randomUUID()
   const stop = await listen<StreamDelta>('knowflow:agent-stream', event => {
     if (event.payload.requestId === requestId) onDelta(event.payload.delta)
   })
-  let stopActivity: () => void
+  let stopActivity: () => void = () => {}
+  let stopReading: () => void = () => {}
   try {
     stopActivity = await listen<ToolActivity>('knowflow:agent-tool', event => {
       if (event.payload.requestId === requestId) onActivity?.(event.payload.message)
     })
+    stopReading = await listen<{ requestId: string; reading: boolean; message: string }>('knowflow:reading-state', event => {
+      if (event.payload.requestId === requestId) { onReading?.(requestId, event.payload.reading); onActivity?.(event.payload.message) }
+    })
   } catch (error) {
     stop()
+    stopActivity()
+    stopReading()
     throw error
   }
   try {
-    return await invoke<ChatMessage>('ask_agent', { question, referencedIds, requestId, frameId: frameId ?? null, messageIds, choiceId: choiceId ?? null, deepMode })
+    return await invoke<ChatMessage>('ask_agent', { question, referencedIds, requestId, frameId: frameId ?? null, messageIds, choiceId: choiceId ?? null, deepMode, continueMessageId: continueMessageId ?? null })
   } finally {
     stop()
     stopActivity()
+    stopReading()
   }
 }
 

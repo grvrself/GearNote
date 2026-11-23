@@ -17,7 +17,7 @@ struct Section { heading: String, claims: Vec<Claim> }
 struct Draft { title: String, sections: Vec<Section>, gaps: String }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ComposedNote { title: String, body: String, sources: Vec<NoteSourceInput>, coverage: String }
+pub struct ComposedNote { title: String, body: String, sources: Vec<NoteSourceInput>, coverage: String, warnings: Vec<String> }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -118,6 +118,21 @@ fn valid(text: &str, max: usize) -> bool {
 }
 
 fn parse_draft(answer: &str, chunks: &[SourceChunk]) -> Result<ComposedNote, String> {
+    if answer.trim().is_empty() { return Err("模型返回了空草稿".into()); }
+    match parse_structured_draft(answer, chunks) {
+        Ok(draft) => Ok(draft),
+        Err(error) => {
+            let mut seen = HashSet::new();
+            let sources = chunks.iter().filter(|chunk| seen.insert(chunk.record_id.clone()))
+                .map(|chunk| NoteSourceInput { record_id: chunk.record_id.clone(), at_seconds: chunk.at_seconds }).collect();
+            Ok(ComposedNote { title: "待核对草稿".into(), body: answer.into(), sources,
+                coverage: chunks.iter().map(|chunk| chunk.title.clone()).collect::<Vec<_>>().join("；"),
+                warnings: vec![format!("草稿格式未通过检查，已保留模型原文：{error}")] })
+        }
+    }
+}
+
+fn parse_structured_draft(answer: &str, chunks: &[SourceChunk]) -> Result<ComposedNote, String> {
     let draft: Draft = serde_json::from_str(answer.trim()).map_err(|_| "模型未返回完整的笔记草稿 JSON")?;
     if !valid(&draft.title, 120) || draft.sections.len() > 6 || draft.gaps.chars().count() > 400
         || (draft.sections.is_empty() && draft.gaps.trim().is_empty()) {
@@ -127,27 +142,29 @@ fn parse_draft(answer: &str, chunks: &[SourceChunk]) -> Result<ComposedNote, Str
     let mut sources = Vec::new();
     let mut seen = HashSet::new();
     let mut used_indices = HashSet::new();
-    for section in draft.sections {
+    let mut warnings = Vec::new();
+    for (section_index, section) in draft.sections.into_iter().enumerate() {
         if !valid(&section.heading, 80) || section.claims.is_empty() || section.claims.len() > 4 {
             return Err("草稿章节无效".into());
         }
         body.push_str(&format!("## {}\n\n", section.heading.trim()));
         for claim in section.claims {
-            let source = chunks.get(claim.source_index.checked_sub(1).ok_or("草稿引用编号无效")?)
-                .ok_or("草稿引用编号无效")?;
+            let source = claim.source_index.checked_sub(1).and_then(|index| chunks.get(index));
             let quote = claim.quote.trim();
-            if !valid(&claim.text, 300) || quote.chars().count() < 6 || quote.chars().count() > 350
-                || !source.text.contains(quote) || source.visual || source.record_id.starts_with("chat:") {
-                return Err("草稿含有无法在已读资料中核对的引句".into());
+            let verified = source.is_some_and(|source| !quote.is_empty() && source.text.contains(quote)
+                && !source.visual && !source.record_id.starts_with("chat:"));
+            if !verified {
+                warnings.push(format!("第 {} 节的一条引句或编号未通过核对，原文已保留", section_index + 1));
             }
             body.push_str(&format!("- {}。「{}」[{}]\n", claim.text.trim(), quote, claim.source_index));
+            let Some(source) = source.filter(|_| verified) else { continue; };
             used_indices.insert(claim.source_index);
             let key = (source.record_id.clone(), source.at_seconds);
             if seen.insert(key.clone()) { sources.push(NoteSourceInput { record_id: key.0, at_seconds: key.1 }); }
         }
         body.push('\n');
     }
-    if sources.is_empty() && draft.gaps.trim().is_empty() { return Err("草稿没有可核对的来源".into()); }
+    if body.trim().is_empty() && draft.gaps.trim().is_empty() { return Err("模型返回了空草稿".into()); }
     if sources.is_empty() {
         let mut linked = HashSet::new();
         for chunk in chunks {
@@ -169,7 +186,10 @@ fn parse_draft(answer: &str, chunks: &[SourceChunk]) -> Result<ComposedNote, Str
         Some(time) => format!("[{}] {} {:02}:{:02}", index + 1, source.title, time / 60, time % 60),
         None => format!("[{}] {}", index + 1, source.title),
     }).collect::<Vec<_>>().join("；");
-    Ok(ComposedNote { title: draft.title.trim().into(), body, sources, coverage })
+    if !warnings.is_empty() {
+        body.push_str("\n## 核对提醒\n\n部分引句或编号未通过自动核对，以上模型草稿已保留，请自行核实后保存。\n");
+    }
+    Ok(ComposedNote { title: draft.title.trim().into(), body, sources, coverage, warnings })
 }
 
 #[tauri::command]
@@ -202,13 +222,20 @@ mod tests {
         captured_at: "".into(), at_seconds: Some(83), text: "这项操作先建立索引，然后检查结果。".into(),
         search_text: "".into(), score: 0, visual: false } }
     #[test]
-    fn only_verifiable_source_lines_become_a_draft() {
+    fn unverifiable_lines_remain_in_draft_with_warnings() {
         let good = r#"{"title":"索引步骤","sections":[{"heading":"过程","claims":[{"text":"先建立索引","sourceIndex":1,"quote":"先建立索引，然后检查结果"}]}],"gaps":"尚未读取整个视频"}"#;
         let draft = parse_draft(good, &[chunk()]).unwrap();
+        assert!(draft.warnings.is_empty());
         assert!(draft.body.contains("「先建立索引，然后检查结果」[1]"));
         assert_eq!(draft.sources[0].at_seconds, Some(83));
-        assert!(parse_draft(&good.replace("先建立索引，然后检查结果", "并不存在的连续原句"), &[chunk()]).is_err());
-        assert!(parse_draft(&good.replace("\"sourceIndex\":1", "\"sourceIndex\":2"), &[chunk()]).is_err());
+        let unverified = parse_draft(&good.replace("先建立索引，然后检查结果", "并不存在的连续原句"), &[chunk()]).unwrap();
+        assert!(unverified.body.contains("并不存在的连续原句"));
+        assert!(!unverified.warnings.is_empty());
+        let plain = "模型未遵循 JSON 格式，但这是已经生成的完整草稿。";
+        let preserved = parse_draft(plain, &[chunk()]).unwrap();
+        assert_eq!(preserved.body, plain);
+        assert!(!preserved.warnings.is_empty());
+        assert!(!parse_draft(&good.replace("\"sourceIndex\":1", "\"sourceIndex\":2"), &[chunk()]).unwrap().warnings.is_empty());
         let insufficient = r#"{"title":"待核对","sections":[],"gaps":"提供的片段没有回答这个问题"}"#;
         let draft = parse_draft(insufficient, &[chunk()]).unwrap();
         assert!(draft.body.contains("待补充"));
