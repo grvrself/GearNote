@@ -12,7 +12,7 @@ GearNote（简称 GN）是一款 Windows 优先的 Tauri 2 桌面知识工作台
 
 ## 工作目录与运行
 
-- 项目根目录：`C:\Users\grvr\Documents\Codex\2026-10-30\agent\outputs\KnowFlow`
+- 项目根目录：`C:\Users\grvr\Desktop\GearNote`
 - 正式构建命令：`npm run tauri -- build --no-bundle`；`--no-bundle` 产物本身不代表视频分镜资源已经作为安装包打包。开发完整功能建议先在项目根目录运行 `npm run tauri dev`。
 - 前端单独预览：`npm run dev`，地址 `http://127.0.0.1:1420/`。纯网页预览使用演示数据，不能代表 Tauri 原生功能已可用。
 - 安装依赖：`npm install`。Windows 开发需 Node.js、Rust 工具链、Microsoft C++ Build Tools；画面分镜/取帧另需 Node.js、FFmpeg/ffprobe、yt-dlp。
@@ -105,4 +105,4 @@ GearNote（简称 GN）是一款 Windows 优先的 Tauri 2 桌面知识工作台
 - `src-tauri/tauri.distribution.conf.json` 与 `scripts/build-windows-release.ps1` 生成 NSIS 安装包，内含浏览器扩展、分镜引擎、Node、FFmpeg、ffprobe、yt-dlp 和许可文件。Tauri 打包工具缓存使用项目 `target/.tauri/`，避免受限的用户缓存目录。试用者可在设置里点击「打开扩展文件夹」。
 - 安装包在 `src-tauri/target/release/bundle/nsis/GearNote_0.1.0_x64-setup.exe`；同目录有 `SHA256.txt` 和 `试用说明.txt`。本机 80 项 Rust 测试与前端构建通过；用打包时同一套媒体工具对临时视频生成了分镜图。安装包尚未在另一台干净 Windows 电脑上安装验收，也没有用试用者模型服务做兼容测试。无字幕视频的本地语音识别尚未实施。
 
-> 请接手 `C:\Users\grvr\Documents\Codex\2026-10-30\agent\outputs\KnowFlow` 项目。先读根目录的 `HANDOFF.md`、`README.md`，再检查实际代码。阶段 0–5、选择题、深度视频模式及 Windows NSIS 试用包均已实现；先核对 GitHub 最新提交和安装包，再在另一台干净 Windows 电脑上验收安装、浏览器扩展、模型服务与真实资料。请以代码为准，不要假定模型已有任意文件写入或命令执行能力。
+> 请接手 `C:\Users\grvr\Desktop\GearNote` 项目。先读根目录的 `HANDOFF.md`、`README.md`，再检查实际代码。阶段 0–5、选择题、深度视频模式及 Windows NSIS 试用包均已实现；先核对 GitHub 最新提交和安装包，再在另一台干净 Windows 电脑上验收安装、浏览器扩展、模型服务与真实资料。请以代码为准，不要假定模型已有任意文件写入或命令执行能力。
