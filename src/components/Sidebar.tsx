@@ -3,23 +3,25 @@ import type { ChatSessionSummary } from '../agent'
 import { GearIcon } from './GearIcon'
 import './sidebar.css'
 
-export type View = 'chat' | 'library' | 'skills' | 'plugins' | 'settings'
+export type View = 'chat' | 'library' | 'studio' | 'skills' | 'plugins' | 'settings'
 export type SettingsSection = 'overview' | 'shortcuts'
 
 export const navigation: { id: View; label: string; icon: IconName }[] = [
   { id: 'chat', label: 'Agent 对话', icon: 'chat' },
   { id: 'library', label: '资料库', icon: 'library' },
+  { id: 'studio', label: '高级笔记', icon: 'studio' },
   { id: 'skills', label: '技能', icon: 'skills' },
   { id: 'plugins', label: '插件', icon: 'plugins' },
   { id: 'settings', label: '设置', icon: 'settings' },
 ]
 
-type IconName = 'chat' | 'library' | 'skills' | 'plugins' | 'settings' | 'search' | 'capture' | 'video' | 'summary' | 'mini' | 'shortcut'
+type IconName = 'chat' | 'library' | 'studio' | 'skills' | 'plugins' | 'settings' | 'search' | 'capture' | 'video' | 'summary' | 'mini' | 'shortcut'
 
 function SidebarIcon({ name }: { name: IconName }) {
   const paths: Record<IconName, ReactNode> = {
     chat: <path d="M3 4.5h10v7H7l-3.5 2v-2H3z" />,
     library: <><path d="M3 3h4v4H3zM9 3h4v4H9zM3 9h4v4H3zM9 9h4v4H9z" /></>,
+    studio: <><path d="M3 2.5h7v11H3zM5 6h3M5 9h3" /><circle cx="12" cy="12" r="3.2" /><path d="M12 7.5v1.2M12 15.3v1.2M7.5 12h1.2M15.3 12h1.2" /></>,
     skills: <><path d="M8 1.5v3m0 7v3M1.5 8h3m7 0h3M3.4 3.4l2.1 2.1m5 5 2.1 2.1m0-9.2-2.1 2.1m-5 5-2.1 2.1" /><circle cx="8" cy="8" r="2" /></>,
     plugins: <path d="M3 3h3v-.5a1.5 1.5 0 0 1 3 0V3h3v3h.5a1.5 1.5 0 0 1 0 3H12v3H9v.5a1.5 1.5 0 0 1-3 0V12H3V9h-.5a1.5 1.5 0 0 1 0-3H3z" />,
     settings: <><path d="M3 4h10M3 8h10M3 12h10" /><path d="M6 2.5v3M10 6.5v3M7 10.5v3" /></>,

@@ -201,7 +201,9 @@ export function ChatPanel({ records, frameToAttach = null, onFrameAttached, pend
   }
 
   return <section className="chat-panel" aria-label="Agent 对话">
+    {!compact && <header className="chat-page-head"><div><span>AGENT / DIALOGUE</span><h1>Agent 对话</h1><p>只依据本轮资料回答，引用可回到原文。</p></div><span className={`chat-agent-status${canSend ? ' is-ready' : ''}`}><i />{canSend ? 'Agent 已就绪' : 'Agent 未配置'}</span></header>}
     {(compact || referencedRecords.length > 0 || !historyOpen) && <div className="context-bar" id="ctx-01">
+      {!compact && <span className="context-bar-label">本轮参考</span>}
       <div className="context-items" aria-label="当前引用资料">
         {referencedRecords.map(record => <div className="context-item" key={record.id}>
           <button className="context-open" type="button" title={`查看 ${record.title}`} onClick={() => onRevealRecord(record.id)}><span aria-hidden="true">{record.type === 'video' ? '■' : '◆'}</span><span>{record.title}</span></button>
@@ -213,13 +215,14 @@ export function ChatPanel({ records, frameToAttach = null, onFrameAttached, pend
 
     <div className="dialog-head"><span>对话记录</span><span>{messages.length + (streaming ? 2 : 0)} 条消息</span></div>
     <ol className="message-flow" id="dlg-01" ref={flowRef} aria-label="对话消息">
-      {messages.length === 0 && <li className="chat-empty">从右侧选择已保存的文章或字幕，添加到本轮参考，然后在下方提问。</li>}
+      {messages.length === 0 && <li className="chat-empty"><GearIcon kind="center" size={20} /><div><strong>从资料开始一次可追溯的对话</strong><p>从右侧选择已保存的文章或字幕，添加到本轮参考，然后在下方提问。</p></div></li>}
       {messages.map(message => <li className="message-row" data-role={message.role} key={message.id}>
         <ChamferCard className={`message-card${selectedMessageIds.includes(message.id) ? ' message-card-referenced' : ''}`} id={message.id}>
+          {message.role === 'agent' && <span className="message-agent-mark" aria-hidden="true"><GearIcon kind="brand" size={16} /></span>}
           <div className="message-meta"><span>{message.role === 'agent' ? 'GearNote' : '你'}</span><time dateTime={/^\d+$/.test(message.createdAt) ? new Date(Number(message.createdAt)).toISOString() : message.createdAt}>{timeFormatter.format(new Date(/^\d+$/.test(message.createdAt) ? Number(message.createdAt) : message.createdAt))}</time></div>
-          {message.role === 'agent' && <MessageRun message={message} onRevealRecord={onRevealRecord} />}
-          <div className="message-reference-control"><button type="button" aria-pressed={selectedMessageIds.includes(message.id)} disabled={sending || (!selectedMessageIds.includes(message.id) && selectedMessageIds.length >= 4)} title={selectedMessageIds.includes(message.id) ? '移出本轮参考' : '将这条消息加入本轮参考'} onClick={() => toggleMessageReference(message.id)}>{selectedMessageIds.includes(message.id) ? '✓ 已选为参考 · 移除' : '＋ 选此消息为参考'}</button></div>
           <div className="message-body">{message.paragraphs.map((paragraph, index) => <p key={index}>{paragraph}</p>)}{message.points && <ol>{message.points.map(point => <li key={point}>{point}</li>)}</ol>}{message.frame && <CapturedFrame frame={message.frame} title={records.find(record => record.id === message.frame?.recordId)?.title ?? '视频'} selected={attachedFrame?.imageId === message.frame.imageId} onAttach={() => { setAttachedFrame(message.frame ?? null); setContextPreview(null); setContextPreviewOpen(false); draftRef.current?.focus() }} />}</div>
+          <div className="message-reference-control"><button type="button" aria-pressed={selectedMessageIds.includes(message.id)} disabled={sending || (!selectedMessageIds.includes(message.id) && selectedMessageIds.length >= 4)} title={selectedMessageIds.includes(message.id) ? '移出本轮参考' : '将这条消息加入本轮参考'} onClick={() => toggleMessageReference(message.id)}>{selectedMessageIds.includes(message.id) ? '✓ 已选为参考 · 移除' : '＋ 选此消息为参考'}</button></div>
+          {message.role === 'agent' && <MessageRun message={message} onRevealRecord={onRevealRecord} />}
           {message.role === 'agent' && message.toolSteps?.filter(step => step.startsWith('引用提醒：') || step.startsWith('回答提醒：')).map((step, index) => <p className="message-citation-warning" role="note" key={`${index}-${step}`}>{step}</p>)}
           {message.citations && <div className="message-citations"><span>引用</span><div>{message.citations.map((citation, index) => {
             const record = records.find(item => item.id === citation.recordId)

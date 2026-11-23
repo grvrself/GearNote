@@ -4,6 +4,7 @@ import App from './App'
 import MiniApp from './MiniApp'
 import './tokens.css'
 import './mono-theme.css'
+import './refined-theme.css'
 import { initializeTheme } from './theme'
 
 const mini = new URLSearchParams(window.location.search).get('window') === 'mini'

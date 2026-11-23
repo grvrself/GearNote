@@ -68,11 +68,10 @@ export function AdvancedNoteStudio({ notes, records, initialNoteId, onSelectNote
   return <section className="advanced-studio" aria-label="高级笔记工作台" data-working={working}>
     <div className="studio-canvas">
       <header className="studio-header"><span><GearIcon kind="brand" size={16} /> SEC-02 / 高级笔记工作台 <small>{String(notes.length).padStart(2, '0')}</small></span><button type="button" onClick={onClose}>返回资料库</button></header>
-      <div className="studio-gears"><div className="studio-main-gear"><StudioGear index={0} />
-        <div className="studio-center"><span>{working ? 'GENERATING' : 'SELECTED NOTE'}</span><strong>{active?.title ?? '选择一篇笔记'}</strong><small>{working ? '正在生成高级版预览' : active ? `${active.sources.length} 条来源 · ${active.body.length.toLocaleString('zh-CN')} 字` : '从右侧选择已有笔记'}</small></div>
-      </div>{[1, 2, 3].map(index => <StudioGear key={index} index={index} />)}</div>
-      <div className="studio-canvas-caption"><strong>让内容更易阅读</strong><p>选中笔记后生成预览，再调整主题、配图和版式。保存前可逐项核对。</p></div>
-      {working && <div className="studio-progress" role="status">正在制作《{active?.title}》的预览…</div>}
+      <div className="studio-gears" aria-hidden="true"><div className="studio-main-gear"><StudioGear index={0} /></div><StudioGear index={1} /></div>
+      <div className="studio-center"><GearIcon kind="brand" size={20} /><span>{working ? 'GENERATING' : 'READING EDITION / MONO'}</span><h1>让笔记成为<br />可阅读的作品</h1><p>保留正文、引用与事实边界，只重新组织版式。先预览，再保存；原笔记不会被覆盖。</p><div className="studio-center-actions"><button type="button" className="studio-generate" disabled={!active || working} onClick={() => { void generate() }}>{working ? '生成中…' : '生成高级版 →'}</button><button type="button" disabled={!active || working} onClick={() => { if (active) { onSelectNote(active); onClose() } }}>打开原笔记</button></div></div>
+      <div className="studio-canvas-caption"><span>SELECTED NOTE / {String(notes.findIndex(note => note.id === active?.id) + 1).padStart(2, '0')}</span><strong>{active?.title ?? '从右侧选择一篇笔记'}</strong><small>{active ? `${active.sources.length} 个来源 · ${active.body.length.toLocaleString('zh-CN')} 字` : '选择后开始生成'}</small></div>
+      <div className="studio-status"><i />{working ? '正在生成高级版预览' : '本地生成 · 预览未保存'}</div>
     </div>
     <aside className="studio-rail" aria-label="选择笔记与预览">
       <header><span><GearIcon kind="brand" size={16} /> 笔记选择</span><small>READ ONLY</small></header>
@@ -88,7 +87,7 @@ export function AdvancedNoteStudio({ notes, records, initialNoteId, onSelectNote
         </section>}
         {error && <p className="studio-error" role="alert">{error}</p>}
       </div>
-      <footer><button type="button" disabled={!active || working} onClick={() => { if (active) { onSelectNote(active); onClose() } }}>打开笔记</button><button type="button" className="studio-generate" disabled={!active || working} onClick={() => { void generate() }}>{working ? '生成中…' : '生成高级版'}</button><button type="button" onClick={onCreateFromSources} disabled={working}>从资料生成</button></footer>
+      <footer><button type="button" disabled={!active || working} onClick={() => { if (active) { onSelectNote(active); onClose() } }}>打开笔记</button><button type="button" onClick={onCreateFromSources} disabled={working}>从资料生成</button><small>GENERATION DOES NOT MODIFY THE ORIGINAL NOTE</small></footer>
     </aside>
   </section>
 }

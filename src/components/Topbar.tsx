@@ -27,8 +27,9 @@ export function Topbar({ sectionId, browser, onBrowserChange, extensionConnected
   return <header className="hud-topbar">
     <div className="hud-title-strip" data-tauri-drag-region>
       <div className="hud-title-identity" data-tauri-drag-region>
+        <span className="mono-brand-gear" data-tauri-drag-region><GearIcon kind="brand" size={20} /></span>
+        <span className="hud-title-name" data-tauri-drag-region>GEARNOTE</span>
         <span className="hud-title-serial" data-tauri-drag-region>GN-001 / {sectionId.toUpperCase()}</span>
-        <span className="hud-title-name" data-tauri-drag-region>GEARNOTE</span><span className="mono-brand-gear" data-tauri-drag-region><GearIcon kind="brand" size={20} /></span>
         <span className="hud-title-section" data-tauri-drag-region>知识工作台</span>
       </div>
       <div className="hud-title-drag-space" data-tauri-drag-region aria-hidden="true" />
@@ -43,8 +44,8 @@ export function Topbar({ sectionId, browser, onBrowserChange, extensionConnected
       <label className="hud-browser-control"><span>浏览器</span><select value={browser} onChange={event => onBrowserChange(event.target.value as BrowserChoice)}><option value="Chrome">Chrome</option><option value="Edge">Edge</option></select></label>
       <div className="hud-extension-state" data-connected={extensionConnected} role="status"><span className="hud-extension-mark" aria-hidden="true" /><span>{extensionConnected ? '扩展已连接' : '扩展未连接'}</span></div>
       <div className="hud-capture-actions">
-        <HudButton type="button" variant="primary" onClick={onOpenExtensionSetup}>↓ 网页捕获说明</HudButton>
-        <HudButton type="button" onClick={onOpenExtensionSetup}>▣ 视频字幕说明</HudButton>
+        <HudButton type="button" onClick={onOpenExtensionSetup}>▣ 字幕说明</HudButton>
+        <HudButton type="button" variant="primary" onClick={onOpenExtensionSetup}>↓ 网页捕获</HudButton>
       </div>
     </div>
   </header>

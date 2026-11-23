@@ -25,6 +25,8 @@ type Props = {
   onCreateFolder: (name: string) => Promise<NoteFolder>
   onRenameFolder: (id: string, name: string) => Promise<void>
   onDeleteFolder: (id: string) => Promise<number>
+  designOpen?: boolean
+  onDesignOpenChange?: (open: boolean) => void
 }
 
 const emptyDraft = (folderId: string | null = null): NoteDraft => ({ title: '', body: '', sources: [], folderId })
@@ -40,7 +42,7 @@ const noteDraft = (note: Note): NoteDraft => ({ title: note.title, body: note.bo
   sources: note.sources.map(source => ({ recordId: source.recordId, atSeconds: source.atSeconds })), folderId: note.folderId ?? null })
 const notePreview = (note: Note) => note.body.split('\n').map(line => line.trim())
   .find(line => line && !line.startsWith('#') && !line.startsWith('['))?.replace(/^[-*>]\s*/, '').slice(0, 90) ?? '打开笔记查看内容'
-export function NotesPanel({ notes, folders, records, incomingDraft, onDraftConsumed, onSave, onDelete, onExport, onRevealRecord, onApplyEdit, onUndoEdit, onRejectEdit, onCreateFolder, onRenameFolder, onDeleteFolder }: Props) {
+export function NotesPanel({ notes, folders, records, incomingDraft, onDraftConsumed, onSave, onDelete, onExport, onRevealRecord, onApplyEdit, onUndoEdit, onRejectEdit, onCreateFolder, onRenameFolder, onDeleteFolder, designOpen: controlledDesignOpen, onDesignOpenChange }: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [draft, setDraft] = useState<NoteDraft>(emptyDraft)
   const [viewMode, setViewMode] = useState<'read' | 'edit'>('edit')
@@ -53,7 +55,12 @@ export function NotesPanel({ notes, folders, records, incomingDraft, onDraftCons
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [exportPath, setExportPath] = useState('')
-  const [designOpen, setDesignOpen] = useState(false)
+  const [designOpenState, setDesignOpenState] = useState(false)
+  const designOpen = controlledDesignOpen ?? designOpenState
+  const setDesignOpen = (open: boolean) => {
+    setDesignOpenState(open)
+    onDesignOpenChange?.(open)
+  }
   const [composeOpen, setComposeOpen] = useState(false)
   const [composeIds, setComposeIds] = useState<string[]>([])
   const [composeFocus, setComposeFocus] = useState('')
@@ -81,6 +88,14 @@ export function NotesPanel({ notes, folders, records, incomingDraft, onDraftCons
   }, [saved, viewMode])
 
   const confirmDiscard = () => !hasUnsavedChanges && !hasNewDraft || window.confirm('当前笔记有未保存的内容，确定放弃并切换吗？')
+  useEffect(() => {
+    if (controlledDesignOpen === undefined) return
+    if (controlledDesignOpen && !designOpenState && !confirmDiscard()) {
+      onDesignOpenChange?.(false)
+      return
+    }
+    setDesignOpenState(controlledDesignOpen)
+  }, [controlledDesignOpen])
   const changeFolderFilter = (filter: string) => {
     if (filter === folderFilter || !confirmDiscard()) return
     setDesignOpen(false)
@@ -231,7 +246,7 @@ export function NotesPanel({ notes, folders, records, incomingDraft, onDraftCons
   return <section className="notes-panel" aria-label="资料库笔记">
     <div className="notes-layout">
       <aside className="notes-index" aria-label="已保存的笔记">
-        <PanelHeading id="sec-01-library" serial="SEC-01" overline="library" title="资料库 / 笔记" count={notes.length} />
+        <PanelHeading id="sec-01-library" serial="SEC-01" overline="library" title="资料库" count={notes.length} />
         <div className="notes-index-scroll">
         <div className="notes-folder-head"><span>文件夹</span><button type="button" disabled={busy} onClick={() => { setFolderMode('create'); setFolderName(''); setFolderError('') }}>＋ 新建</button></div>
         <nav className="notes-folder-list" aria-label="笔记文件夹">
@@ -286,9 +301,9 @@ export function NotesPanel({ notes, folders, records, incomingDraft, onDraftCons
         </div>
         {(error || notice || exportPath) && <div className="notes-workspace-feedback">{error && <p className="notes-error" role="alert">{error}</p>}{notice && <p className="notes-notice" role="status">{notice}</p>}{exportPath && <div className="notes-export"><span>导出文件：{exportPath}</span><button type="button" onClick={() => { void navigator.clipboard.writeText(exportPath).then(() => setNotice('路径已复制。')).catch(() => setError('复制路径失败，请手动选择路径。')) }}>复制路径</button></div>}</div>}
         {!designOpen && <div className="notes-workspace-actions">{saved && viewMode === 'read' ? <>
-          <HudButton type="button" variant="primary" disabled={busy} onClick={() => setViewMode('edit')}>编辑笔记</HudButton>
+          <HudButton type="button" disabled={busy} onClick={() => setViewMode('edit')}>编辑笔记</HudButton>
           <HudButton type="button" disabled={busy} onClick={() => { void exportCurrent() }}>导出 Markdown</HudButton>
-          <HudButton type="button" disabled={busy} onClick={() => setDesignOpen(true)}>生成高级版</HudButton>
+          <HudButton type="button" variant="primary" disabled={busy} onClick={() => setDesignOpen(true)}>生成高级版</HudButton>
           <HudButton type="button" disabled={busy} onClick={() => { void removeCurrent() }}>删除笔记</HudButton>
         </> : <>
           <HudButton type="button" variant="primary" disabled={busy || !draft.title.trim() || !draft.body.trim()} onClick={() => { void save() }}>{busy ? '处理中' : '保存笔记'}</HudButton>

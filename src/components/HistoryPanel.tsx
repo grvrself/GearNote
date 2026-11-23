@@ -121,7 +121,7 @@ export function HistoryPanel({ records = recordFixtures, captureJobs = [], selec
 
   return <aside className="history-panel" id="rec-02" aria-labelledby="rec-02-title">
     <div className="history-head">
-      <PanelHeading id="rec-02-title" serial="REC-02" overline="history" title="历史记录" count={records.length} />
+      <PanelHeading id="rec-02-title" serial="REC-02" overline="history" title="资料" count={records.length} />
       <button className="history-collapse" type="button" aria-label="收起记录" onClick={onCollapse}>收起记录</button>
     </div>
     <GearDivider area="history" />
