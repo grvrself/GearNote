@@ -76,32 +76,37 @@ export const resolveLibrarySearch = (proposalId: string, accept: boolean) => inv
 export const resolveCommandProposal = (proposalId: string, accept: boolean) => invoke<ChatState>('resolve_command_proposal', { proposalId, accept })
 export const previewAgentContext = (question: string, referencedIds: string[], frameId?: string, messageIds: string[] = [], deepMode = false) =>
   invoke<ContextPreview>('preview_agent_context', { question, referencedIds, frameId: frameId ?? null, messageIds, deepMode })
-export async function askAgent(question: string, referencedIds: string[], onDelta: (delta: string) => void, frameId?: string, onActivity?: (message: string) => void, messageIds: string[] = [], choiceId?: string, deepMode = false, continueMessageId?: string, onReading?: (requestId: string, reading: boolean) => void) {
+export async function askAgent(question: string, referencedIds: string[], onDelta: (delta: string) => void, frameId?: string, onActivity?: (message: string) => void, messageIds: string[] = [], choiceId?: string, deepMode = false, continueMessageId?: string, onReading?: (requestId: string, reading: boolean) => void, signal?: AbortSignal) {
   const requestId = crypto.randomUUID()
-  const stop = await listen<StreamDelta>('knowflow:agent-stream', event => {
-    if (event.payload.requestId === requestId) onDelta(event.payload.delta)
-  })
-  let stopActivity: () => void = () => {}
-  let stopReading: () => void = () => {}
-  try {
-    stopActivity = await listen<ToolActivity>('knowflow:agent-tool', event => {
-      if (event.payload.requestId === requestId) onActivity?.(event.payload.message)
-    })
-    stopReading = await listen<{ requestId: string; reading: boolean; message: string }>('knowflow:reading-state', event => {
-      if (event.payload.requestId === requestId) { onReading?.(requestId, event.payload.reading); onActivity?.(event.payload.message) }
-    })
-  } catch (error) {
-    stop()
-    stopActivity()
-    stopReading()
-    throw error
+  const stops: (() => void)[] = []
+  let disposed = false
+  const cleanup = () => {
+    if (disposed) return
+    disposed = true
+    stops.splice(0).forEach(stop => stop())
   }
+  const subscribe = async <T>(eventName: string, handler: (payload: T) => void) => {
+    const stop = await listen<T>(eventName, event => { if (!disposed) handler(event.payload) })
+    if (disposed) stop()
+    else stops.push(stop)
+  }
+  signal?.addEventListener('abort', cleanup, { once: true })
   try {
+    if (signal?.aborted) throw new DOMException('The request was aborted', 'AbortError')
+    await subscribe<StreamDelta>('knowflow:agent-stream', payload => {
+      if (payload.requestId === requestId) onDelta(payload.delta)
+    })
+    await subscribe<ToolActivity>('knowflow:agent-tool', payload => {
+      if (payload.requestId === requestId) onActivity?.(payload.message)
+    })
+    await subscribe<{ requestId: string; reading: boolean; message: string }>('knowflow:reading-state', payload => {
+      if (payload.requestId === requestId) { onReading?.(requestId, payload.reading); onActivity?.(payload.message) }
+    })
+    if (signal?.aborted) throw new DOMException('The request was aborted', 'AbortError')
     return await invoke<ChatMessage>('ask_agent', { question, referencedIds, requestId, frameId: frameId ?? null, messageIds, choiceId: choiceId ?? null, deepMode, continueMessageId: continueMessageId ?? null })
   } finally {
-    stop()
-    stopActivity()
-    stopReading()
+    signal?.removeEventListener('abort', cleanup)
+    cleanup()
   }
 }
 

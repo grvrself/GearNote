@@ -518,3 +518,14 @@
         assert!(store.sessions[0].working_context.goal.is_empty());
         assert!(store.project_memory.is_empty());
     }
+    #[test]
+    fn duplicate_followup_requests_share_one_inflight_slot() {
+        let requests = SuggestionRequests::default();
+        let first = requests.begin("chat-a", "message-a").unwrap().unwrap();
+        assert!(requests.begin("chat-a", "message-a").unwrap().is_none());
+        let _second = requests.begin("chat-a", "message-b").unwrap().unwrap();
+        assert_eq!(requests.len(), 2);
+        drop(first);
+        assert_eq!(requests.len(), 1);
+        assert!(requests.begin("chat-a", "message-a").unwrap().is_some());
+    }

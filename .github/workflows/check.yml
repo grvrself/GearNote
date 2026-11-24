@@ -22,6 +22,8 @@ jobs:
           workspaces: src-tauri
       - name: Install frontend dependencies
         run: npm ci
+      - name: Test frontend behavior
+        run: npm run test:frontend
       - name: Check frontend build
         run: npm run build
       - name: Test browser extension

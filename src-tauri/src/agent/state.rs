@@ -36,6 +36,7 @@ pub struct AgentState {
     pub(crate) busy: Mutex<bool>,
     reading: Mutex<Option<std::sync::Arc<ReadingControl>>>,
     auto_compact_failures: Mutex<HashMap<String, usize>>,
+    pub(crate) suggestion_requests: SuggestionRequests,
     config_path: PathBuf,
     key_path: PathBuf,
     embedding_key_path: PathBuf,
@@ -67,7 +68,8 @@ impl AgentState {
         let persona = if valid_persona(&persona) { persona } else { DEFAULT_PERSONA.into() };
         Ok(Self { config: Mutex::new(config), key: Mutex::new(key), embedding_key: Mutex::new(embedding_key),
             key_warning: Mutex::new(key_warning), sessions: Mutex::new(sessions), persona: Mutex::new(persona),
-            busy: Mutex::new(false), reading: Mutex::new(None), auto_compact_failures: Mutex::new(HashMap::new()), config_path, key_path,
+            busy: Mutex::new(false), reading: Mutex::new(None), auto_compact_failures: Mutex::new(HashMap::new()),
+            suggestion_requests: SuggestionRequests::default(), config_path, key_path,
             embedding_key_path, sessions_path, persona_path })
     }
 }

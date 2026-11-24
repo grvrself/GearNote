@@ -1,10 +1,9 @@
 import { isTauri } from '@tauri-apps/api/core'
 import { emitTo, listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
-import { useEffect, useRef, useState } from 'react'
-import { askAgent, getAgentStatus, getChatState, resolveCommandProposal, resolveLibrarySearch, setChatReferences, suggestChatFollowups, type AgentStatus, type PendingChoice, type PendingLibrarySearch, type PendingChatNoteEdit, type PendingCommand } from './agent'
-import { applyNoteEdit, rejectNoteEdit } from './notes'
-import type { ChatMessage, ChatStreaming } from './chat-data'
+import { useEffect, useState } from 'react'
+import { applyNoteEdit } from './notes'
+import { useChat } from './hooks/useChat'
 import { ChatPanel } from './components/ChatPanel'
 import { recordFixtures } from './data'
 import type { KnowledgeRecord } from './data'
@@ -17,109 +16,13 @@ import {
 import './mini.css'
 
 export default function MiniApp() {
-  const [referencedIds, setReferencedIds] = useState<string[]>([])
   const [error, setError] = useState('')
   const [savedRecords, setSavedRecords] = useState<KnowledgeRecord[]>([])
-  const [messages, setMessages] = useState<ChatMessage[]>([])
-  const [activeSessionId, setActiveSessionId] = useState('')
-  const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null)
-  const [sending, setSending] = useState(false)
-  const [streaming, setStreaming] = useState<ChatStreaming | null>(null)
-  const [suggestingMessageId, setSuggestingMessageId] = useState<string | null>(null)
-  const [suggestionErrorId, setSuggestionErrorId] = useState<string | null>(null)
-  const [pendingChoice, setPendingChoice] = useState<PendingChoice | null>(null)
-  const [pendingLibrarySearch, setPendingLibrarySearch] = useState<PendingLibrarySearch | null>(null)
-  const [pendingChatNoteEdit, setPendingChatNoteEdit] = useState<PendingChatNoteEdit | null>(null)
-  const [pendingCommand, setPendingCommand] = useState<PendingCommand | null>(null)
-  const sendingRef = useRef(false)
   const desktop = isTauri()
   const records = desktop ? savedRecords : recordFixtures.map(record => ({ ...record, demo: true }))
-
-  useEffect(() => {
-    if (!desktop) return
-    let disposed = false
-    let stop: UnlistenFn | undefined
-    void Promise.all([getAgentStatus(), getChatState()]).then(([status, chat]) => {
-      if (!disposed) { setAgentStatus(status); setActiveSessionId(chat.activeId); setMessages(chat.messages); setPendingChoice(chat.pendingChoice); setPendingLibrarySearch(chat.pendingLibrarySearch); setPendingChatNoteEdit(chat.pendingChatNoteEdit); setPendingCommand(chat.pendingCommand); setReferencedIds(chat.referencedIds) }
-    }).catch(() => { if (!disposed) setError('对话或模型配置读取失败') })
-    void listen('knowflow:chat-changed', () => {
-      if (!sendingRef.current) void getChatState().then(chat => { if (!disposed) { setActiveSessionId(chat.activeId); setMessages(chat.messages); setPendingChoice(chat.pendingChoice); setPendingLibrarySearch(chat.pendingLibrarySearch); setPendingChatNoteEdit(chat.pendingChatNoteEdit); setPendingCommand(chat.pendingCommand); setReferencedIds(chat.referencedIds) } })
-    }).then(unlisten => { if (disposed) unlisten(); else stop = unlisten })
-    return () => { disposed = true; stop?.() }
-  }, [desktop])
-
-  const sendQuestion = async (question: string, frameId?: string, messageIds: string[] = [], choiceId?: string, deepMode = false, referenceOverride?: string[], continueMessageId?: string) => {
-    if (sendingRef.current) return false
-    sendingRef.current = true
-    setSending(true)
-    setStreaming({ question, answer: '', startedAt: Date.now(), activities: [] })
-    setSuggestionErrorId(null)
-    setError('')
-    try {
-      const reply = await askAgent(question, referenceOverride ?? referencedIds, delta => setStreaming(current => current && { ...current, answer: current.answer + delta }), frameId,
-        activity => setStreaming(current => current && { ...current, activity, activities: [...current.activities, activity] }), messageIds, choiceId, deepMode, continueMessageId, (requestId, reading) => setStreaming(current => current && { ...current, requestId, reading }))
-      const chat = await getChatState()
-      setActiveSessionId(chat.activeId)
-      setMessages(chat.messages)
-      setPendingChoice(chat.pendingChoice)
-      setPendingLibrarySearch(chat.pendingLibrarySearch)
-      setPendingChatNoteEdit(chat.pendingChatNoteEdit)
-      setPendingCommand(chat.pendingCommand)
-      setReferencedIds(chat.referencedIds)
-      setStreaming(null)
-      if (!reply.frame && !reply.toolSteps?.some(step => (step.startsWith('深度阅读失败：') || step.startsWith('回答未完成：'))) && !(chat.pendingChoice?.status === 'open' && chat.pendingChoice.messageId === reply.id) && !(chat.pendingLibrarySearch?.status === 'open' && chat.pendingLibrarySearch.messageId === reply.id) && !(chat.pendingChatNoteEdit?.proposal.status === 'pending' && chat.pendingChatNoteEdit.messageId === reply.id) && !(chat.pendingCommand?.status === 'open' && chat.pendingCommand.messageId === reply.id)) {
-        setSuggestingMessageId(reply.id)
-        void suggestChatFollowups(chat.activeId, reply.id)
-          .then(async () => {
-            const updated = await getChatState()
-            setActiveSessionId(updated.activeId)
-            setMessages(updated.messages)
-            setPendingChoice(updated.pendingChoice)
-            setPendingLibrarySearch(updated.pendingLibrarySearch)
-            setPendingChatNoteEdit(updated.pendingChatNoteEdit)
-            setPendingCommand(updated.pendingCommand)
-            setReferencedIds(updated.referencedIds)
-          })
-          .catch(() => setSuggestionErrorId(reply.id))
-          .finally(() => setSuggestingMessageId(current => current === reply.id ? null : current))
-      }
-      return true
-    } catch (cause) {
-      setStreaming(null)
-      setError(String(cause))
-      return false
-    } finally { sendingRef.current = false; setSending(false) }
-  }
-
-  const decideLibrarySearch = async (proposalId: string, accept: boolean, question: string) => {
-    try {
-      const chat = await resolveLibrarySearch(proposalId, accept)
-      setActiveSessionId(chat.activeId)
-      setMessages(chat.messages)
-      setPendingChoice(chat.pendingChoice)
-      setPendingLibrarySearch(chat.pendingLibrarySearch)
-      setPendingChatNoteEdit(chat.pendingChatNoteEdit)
-      setPendingCommand(chat.pendingCommand)
-      setReferencedIds(chat.referencedIds)
-      if (accept) await sendQuestion(question, undefined, [], undefined, false, chat.referencedIds)
-    } catch (cause) { setError(String(cause)) }
-  }
-  const decideChatNoteEdit = async (proposalId: string, accept: boolean) => {
-    try {
-      if (accept) await applyNoteEdit(proposalId)
-      else await rejectNoteEdit(proposalId)
-      const chat = await getChatState()
-      setMessages(chat.messages)
-      setPendingChatNoteEdit(chat.pendingChatNoteEdit)
-    } catch (cause) { setError(String(cause)) }
-  }
-  const decideCommand = async (proposalId: string, accept: boolean) => {
-    try {
-      const chat = await resolveCommandProposal(proposalId, accept)
-      setMessages(chat.messages)
-      setPendingCommand(chat.pendingCommand)
-    } catch (cause) { setError(String(cause)) }
-  }
+  const { referencedIds, setReferencedIds, agentStatus, messages, activeSessionId, sending, streaming,
+    suggestingMessageId, suggestionErrorId, pendingChoice, pendingLibrarySearch, pendingChatNoteEdit, pendingCommand,
+    agentError, clearAgentError, sendQuestion, decideLibrarySearch, decideChatNoteEdit, decideCommand } = useChat(() => {}, applyNoteEdit)
 
   useEffect(() => {
     if (!desktop) return
@@ -181,9 +84,7 @@ export default function MiniApp() {
   }
 
   const removeReference = (id: string) => {
-    const next = referencedIds.filter(value => value !== id)
-    setReferencedIds(next)
-    if (desktop && activeSessionId) void setChatReferences(activeSessionId, next).catch(() => setError('引用资料未能保存'))
+    setReferencedIds(current => current.filter(value => value !== id))
     if (desktop) void emitTo<MiniRemoveReferencePayload>('main', MINI_REMOVE_REFERENCE_EVENT, { id }).catch(() => setError('引用资料未能同步'))
   }
 
@@ -197,7 +98,7 @@ export default function MiniApp() {
         <button className="mini-window-close" type="button" aria-label="关闭小窗" title="关闭小窗" disabled={!desktop} onClick={() => { void getCurrentWindow().close() }}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 3.5l9 9m0-9l-9 9" /></svg></button>
       </div>
     </header>
-    {error && <div className="mini-error" role="alert"><span>{error}</span><button type="button" aria-label="关闭错误提示" onClick={() => setError('')}>×</button></div>}
+    {(error || agentError) && <div className="mini-error" role="alert"><span>{error || agentError}</span><button type="button" aria-label="关闭错误提示" onClick={() => { setError(''); clearAgentError() }}>×</button></div>}
     <ChatPanel compact records={records} pendingChoice={pendingChoice} pendingLibrarySearch={pendingLibrarySearch} onResolveLibrarySearch={decideLibrarySearch} pendingChatNoteEdit={pendingChatNoteEdit} onResolveChatNoteEdit={decideChatNoteEdit} pendingCommand={pendingCommand} onResolveCommand={decideCommand} sessionId={activeSessionId} referencedIds={referencedIds} historyOpen={false} agentAvailable={Boolean(agentStatus?.hasKey && agentStatus.model)} sending={sending} streaming={streaming} suggestingMessageId={suggestingMessageId} suggestionErrorId={suggestionErrorId} onSend={sendQuestion} onContinueReading={id => sendQuestion('继续读取', undefined, [], undefined, false, undefined, id)} onOpenAgentSetup={() => { void showMain() }} onRemoveReference={removeReference} onRevealRecord={revealRecord} onToggleHistory={() => { void showMain() }} onShowHistory={() => { void showMain() }} messages={messages} />
   </div>
 }
