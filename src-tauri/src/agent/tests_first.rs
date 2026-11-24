@@ -630,3 +630,27 @@
         assert!(!state_view(&switched).unwrap().read_continuation.unwrap().has_progress);
         fs::remove_dir_all(dir).unwrap();
     }
+
+    #[test]
+    fn has_progress_hides_when_record_content_fingerprint_changes() {
+        let record = budget_record();
+        let mut session = new_session().unwrap();
+        let message = ChatMessage { id: "msg-fp".into(), role: "agent".into(), created_at: "1".into(),
+            paragraphs: vec!["回答".into()], tool_steps: vec![], citations: vec![], frame: None, run: None, suggestions: vec![], outcome: None };
+        session.messages.push(message.clone());
+        session.referenced_ids = vec![record.id.clone()];
+        session.read_continuation = Some(ReadContinuation { message_id: message.id.clone(), question: "问".into(),
+            referenced_ids: vec![record.id.clone()], fingerprint: reading_fingerprint(&[record.clone()]),
+            progress: ReadProgress { read_chunk_ids: vec!["c1".into()], ..ReadProgress::default() } });
+        let store = ChatStore { active_id: session.id.clone(), sessions: vec![session], project_memory: vec![] };
+        // 正文未改动：按钮可显示。
+        assert!(state_view_with_records(&store, Some(&[record.clone()])).unwrap().read_continuation.unwrap().has_progress);
+        // 正文被改动（如重新捕获）：指纹失效，按钮应隐藏，与点击续读入口的拒绝一致。
+        let mut changed = record.clone();
+        changed.content_text = "重新捕获后的新正文".into();
+        assert!(!state_view_with_records(&store, Some(&[changed])).unwrap().read_continuation.unwrap().has_progress);
+        // 引用资料被删除：重算指纹不同，同样隐藏。
+        assert!(!state_view_with_records(&store, Some(&[])).unwrap().read_continuation.unwrap().has_progress);
+        // 无当前资料信息时仅做结构检查（其余返回 ChatState 的路径），不误判。
+        assert!(state_view(&store).unwrap().read_continuation.unwrap().has_progress);
+    }

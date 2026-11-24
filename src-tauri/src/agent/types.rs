@@ -213,22 +213,36 @@ fn new_session() -> Result<ChatSession, String> {
 fn session_title(question: &str) -> String { question.chars().take(28).collect() }
 
 pub(crate) fn state_view(store: &ChatStore) -> Result<ChatState, String> {
+    state_view_with_records(store, None)
+}
+
+/// records 提供当前资料时，额外按续读引用重算指纹并入 hasProgress，
+/// 使“资料正文被改动”与点击续读入口（ask.rs 指纹校验）一致地隐藏按钮。
+pub(crate) fn state_view_with_records(store: &ChatStore, records: Option<&[KnowledgeRecord]>) -> Result<ChatState, String> {
     let active = store.sessions.iter().find(|item| item.id == store.active_id).ok_or("当前会话不存在")?;
     let mut sessions = store.sessions.iter().map(|item| ChatSessionSummary {
         id: item.id.clone(), title: item.title.clone(), updated_at: item.updated_at.clone(), message_count: item.messages.len(),
     }).collect::<Vec<_>>();
     sessions.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
     // hasProgress 表示“存在可恢复且仍有内容的有效进度”，而非字段存在：
-    // 已有更新消息、参考失效或空进度都不应声称可续读。最终有效性仍由后端续读入口重新校验。
+    // 已有更新消息、参考失效、空进度或资料正文改动（指纹失效）都不应声称可续读。
     let read_continuation = active.read_continuation.as_ref().map(|value| {
         let is_last = active.messages.last().is_some_and(|message| message.id == value.message_id);
         let mut expected = value.referenced_ids.clone(); expected.sort();
         let mut current = active.referenced_ids.clone(); current.sort();
         let has_content = !value.progress.read_chunk_ids.is_empty() || value.progress.batch_count > 0 || !value.progress.findings.is_empty();
+        let fingerprint_valid = match records {
+            Some(records) => {
+                let referenced: Vec<KnowledgeRecord> = records.iter()
+                    .filter(|record| value.referenced_ids.contains(&record.id)).cloned().collect();
+                value.fingerprint == reading_fingerprint(&referenced)
+            }
+            None => true,
+        };
         ReadContinuationSummary {
             message_id: value.message_id.clone(),
             mode: if value.progress.deep { "deep" } else if value.progress.full { "full" } else { "adaptive" }.into(),
-            has_progress: is_last && expected == current && has_content,
+            has_progress: is_last && expected == current && has_content && fingerprint_valid,
         }
     });
     Ok(ChatState { active_id: store.active_id.clone(), sessions, messages: active.messages.clone(), referenced_ids: active.referenced_ids.clone(), working_context: active.working_context.clone(), project_memory: store.project_memory.iter().filter(|entry| entry.active).cloned().collect(), compacted_summary: active.compacted_summary.clone(), compacted_count: active.compacted_count, pending_choice: active.pending_choice.clone(), pending_library_search: active.pending_library_search.clone(), pending_chat_note_edit: active.pending_chat_note_edit.clone(), pending_command: active.pending_command.clone(), read_continuation })

@@ -298,9 +298,10 @@ pub fn list_chat_messages(state: State<'_, AgentState>) -> Result<Vec<ChatMessag
 }
 
 #[tauri::command]
-pub fn get_chat_state(state: State<'_, AgentState>) -> Result<ChatState, String> {
+pub fn get_chat_state(state: State<'_, AgentState>, storage: State<'_, AppState>) -> Result<ChatState, String> {
     let store = state.sessions.lock().map_err(|_| "会话暂不可用")?;
-    state_view(&store)
+    let records = storage.records.lock().map_err(|_| "资料库暂不可用")?;
+    state_view_with_records(&store, Some(&records))
 }
 
 #[tauri::command]
