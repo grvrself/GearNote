@@ -17,3 +17,9 @@ src-tauri/gen/schemas/
 agent-key.bin
 agent-config.json
 extension-pair-code.txt
+
+# 临时登录凭据：正常运行时位于应用缓存而非仓库，这里仅作防误提交保障。
+**/video-storyboard/
+**/credentials/
+auth-*.txt
+cookies.txt
