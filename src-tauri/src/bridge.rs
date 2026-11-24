@@ -105,7 +105,13 @@ impl BridgeCore {
                     queue.recv_timeout(Duration::from_millis(20))
                 };
                 match job {
-                    Ok(job) => handle_connection(job.stream, job.accepted_at, &expected_host, &dispatch, read_deadline),
+                    Ok(job) => {
+                        // 单个连接处理 panic 不应永久杀死工作者；恢复后继续服务后续请求。
+                        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            handle_connection(job.stream, job.accepted_at, &expected_host, &dispatch, read_deadline)
+                        }));
+                        if outcome.is_err() { eprintln!("GearNote bridge worker recovered from a connection panic"); }
+                    }
                     Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
                     Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
                 }
@@ -744,5 +750,75 @@ mod tests {
         let started = Instant::now();
         core.shutdown();
         assert!(started.elapsed() < Duration::from_secs(2), "shutdown 必须能 join 全部线程");
+    }
+
+    #[test]
+    fn connection_expiring_in_queue_gets_408_without_dispatch() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let gate = Arc::new((Mutex::new(false), Condvar::new()));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let dispatch_gate = gate.clone();
+        let dispatch_calls = calls.clone();
+        let dispatch: Dispatch = Arc::new(move |_m, _p, _h, _b| {
+            dispatch_calls.fetch_add(1, Ordering::SeqCst);
+            let (lock, cvar) = &*dispatch_gate;
+            let mut released = lock.lock().unwrap();
+            while !*released {
+                let (guard, timeout) = cvar.wait_timeout(released, Duration::from_secs(5)).unwrap();
+                released = guard;
+                if timeout.timed_out() { break; }
+            }
+            Ok((200, json!({ "connected": true })))
+        });
+        // 读取截止 300ms；队列中的连接等待超过截止后必须 408，且不进入业务 dispatch。
+        let (core, port) = test_core(dispatch, 1, 1, Duration::from_millis(300));
+        let mut first = connect(port);
+        first.write_all(get_request(port).as_bytes()).unwrap();
+        std::thread::sleep(Duration::from_millis(100)); // 工作者进入阻塞业务
+        let mut queued = connect(port);
+        queued.write_all(get_request(port).as_bytes()).unwrap();
+        std::thread::sleep(Duration::from_millis(400)); // 队列等待超过 300ms 截止
+        let (lock, cvar) = &*gate;
+        *lock.lock().unwrap() = true;
+        cvar.notify_all();
+        assert_eq!(read_response(&mut first).0, 200);
+        assert_eq!(read_head(&mut queued).0, 408, "队列中超时的连接应 408");
+        assert_eq!(calls.load(Ordering::SeqCst), 1, "超时连接不得进入业务 dispatch");
+        core.shutdown();
+    }
+
+    #[test]
+    fn worker_panic_does_not_kill_service() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let panicked = Arc::new(AtomicBool::new(false));
+        let flag = panicked.clone();
+        let dispatch: Dispatch = Arc::new(move |_m, _p, _h, _b| {
+            if !flag.swap(true, Ordering::SeqCst) { panic!("模拟单连接处理 panic"); }
+            Ok((200, json!({ "connected": true })))
+        });
+        let (core, port) = test_core(dispatch, 1, 4, Duration::from_secs(5));
+        let mut bad = connect(port);
+        bad.write_all(get_request(port).as_bytes()).unwrap();
+        let _ = read_head(&mut bad); // panic 连接可能无响应
+        let mut good = connect(port);
+        good.write_all(get_request(port).as_bytes()).unwrap();
+        assert_eq!(read_response(&mut good).0, 200, "工作者 panic 后服务仍须处理后续请求");
+        core.shutdown();
+    }
+
+    #[test]
+    fn write_timeout_releases_worker_for_next_request() {
+        let dispatch: Dispatch = Arc::new(|_m, _p, _h, _b| Ok((200, json!({ "data": "x".repeat(2_000_000) }))));
+        let (core, port) = test_core(dispatch, 1, 4, Duration::from_secs(5));
+        // 第一个客户端发送请求但不读取大响应，写超时（5 秒）后工作者必须被释放。
+        let mut stalled = connect(port);
+        stalled.write_all(get_request(port).as_bytes()).unwrap();
+        let started = Instant::now();
+        let mut next = connect(port);
+        next.write_all(get_request(port).as_bytes()).unwrap();
+        next.set_read_timeout(Some(Duration::from_secs(8))).unwrap();
+        assert_eq!(read_response(&mut next).0, 200, "写超时后工作者应能处理下一请求");
+        assert!(started.elapsed() < Duration::from_secs(8));
+        core.shutdown();
     }
 }
