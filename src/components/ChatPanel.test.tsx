@@ -73,9 +73,15 @@ describe('ChatPanel 关键交互', () => {
     const message: ChatMessage = { ...reply, toolSteps: ['可继续读取：旧文案'] }
     const view = render(<ChatPanel {...panelProps({ messages: [message], onContinueReading })} />)
     expect(screen.queryByRole('button', { name: '继续读取' })).not.toBeInTheDocument()
-    view.rerender(<ChatPanel {...panelProps({ messages: [message], onContinueReading, readContinuationMessageId: reply.id })} />)
+    view.rerender(<ChatPanel {...panelProps({ messages: [message], onContinueReading, readContinuation: { messageId: reply.id, mode: 'adaptive', hasProgress: true } })} />)
     fireEvent.click(screen.getByRole('button', { name: '继续读取' }))
     await waitFor(() => expect(onContinueReading).toHaveBeenCalledWith(reply.id))
+  })
+
+  it('hasProgress 为 false 时即使消息匹配也隐藏续读按钮', () => {
+    const message: ChatMessage = { ...reply }
+    render(<ChatPanel {...panelProps({ messages: [message], onContinueReading: vi.fn(), readContinuation: { messageId: reply.id, mode: 'adaptive', hasProgress: false } })} />)
+    expect(screen.queryByRole('button', { name: '继续读取' })).not.toBeInTheDocument()
   })
 
   it('结构化提醒按 code 渲染，修改展示文案不影响显示', () => {

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ChatFrame, ChatMessage, ChatStreaming } from '../chat-data'
 import type { KnowledgeRecord } from '../data'
-import type { ContextPreview, PendingChoice, PendingLibrarySearch, PendingChatNoteEdit, PendingCommand, ProjectMemory, WorkingContext } from '../agent'
+import type { ContextPreview, PendingChoice, PendingLibrarySearch, PendingChatNoteEdit, PendingCommand, ProjectMemory, WorkingContext, ReadContinuationSummary } from '../agent'
 import { getChatFrameImage, stopAgentReading } from '../agent'
 import { isCaptureCommand } from '../capture-command'
 import { CapturedFrame } from './CapturedFrame'
@@ -47,8 +47,8 @@ type Props = {
   onCreateNoteDraft?: (message: ChatMessage) => void
   messages?: ChatMessage[]
   compact?: boolean
-  /** 后端确认存在有效续读进度的消息 ID；按钮只依据该状态显示，点击后仍需后端校验。 */
-  readContinuationMessageId?: string | null
+  /** 后端续读摘要；按钮须同时满足 hasProgress 与消息匹配，最终有效性仍由后端校验。 */
+  readContinuation?: ReadContinuationSummary | null
 }
 
 const timeFormatter = new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })
@@ -96,7 +96,7 @@ function StreamingRun({ streaming }: { streaming: ChatStreaming }) {
   </div>
 }
 
-export function ChatPanel({ records, frameToAttach = null, onFrameAttached, pendingChoice = null, pendingLibrarySearch = null, onResolveLibrarySearch, pendingChatNoteEdit = null, onResolveChatNoteEdit, pendingCommand = null, onResolveCommand, sessionId, referencedIds, workingContext = { goal: '', completed: '', nextStep: '', updatedAt: '' }, projectMemory = [], compactedSummary = '', compactedCount = 0, historyOpen, agentAvailable, sending = false, streaming = null, suggestingMessageId = null, suggestionErrorId = null, error = '', onContinueReading, onSend, onPreviewContext, onOpenAgentSetup, onSummarize, onRemoveReference, onRevealRecord, onToggleHistory, onShowHistory, onCreateNoteDraft, messages = [], compact = false, readContinuationMessageId = null }: Props) {
+export function ChatPanel({ records, frameToAttach = null, onFrameAttached, pendingChoice = null, pendingLibrarySearch = null, onResolveLibrarySearch, pendingChatNoteEdit = null, onResolveChatNoteEdit, pendingCommand = null, onResolveCommand, sessionId, referencedIds, workingContext = { goal: '', completed: '', nextStep: '', updatedAt: '' }, projectMemory = [], compactedSummary = '', compactedCount = 0, historyOpen, agentAvailable, sending = false, streaming = null, suggestingMessageId = null, suggestionErrorId = null, error = '', onContinueReading, onSend, onPreviewContext, onOpenAgentSetup, onSummarize, onRemoveReference, onRevealRecord, onToggleHistory, onShowHistory, onCreateNoteDraft, messages = [], compact = false, readContinuation = null }: Props) {
   const [draft, setDraft] = useState('')
   const [stoppingReading, setStoppingReading] = useState(false)
   const [stopReadingError, setStopReadingError] = useState('')
@@ -235,7 +235,7 @@ export function ChatPanel({ records, frameToAttach = null, onFrameAttached, pend
             ? message.outcome.notices?.map((notice, index) => <p className="message-citation-warning" role="note" key={`${notice.code}-${index}`}>{notice.message}</p>)
             // 无结构化状态的历史消息保守沿用前缀筛选渲染提醒；仅影响展示，不参与行为判断。
             : message.toolSteps?.filter(step => step.startsWith('引用提醒：') || step.startsWith('回答提醒：')).map((step, index) => <p className="message-citation-warning" role="note" key={`${index}-${step}`}>{step}</p>))}
-          {message.id === latestAgentId && readContinuationMessageId === message.id && <div className="message-citation-warning"><span>本次自动阅读已结束；如需更多内容，可另开一轮阅读预算。</span><HudButton type="button" disabled={sending || Boolean(streaming) || !agentAvailable} onClick={() => { void onContinueReading?.(message.id) }}>继续读取</HudButton></div>}
+          {message.id === latestAgentId && readContinuation?.hasProgress && readContinuation.messageId === message.id && <div className="message-citation-warning"><span>本次自动阅读已结束；如需更多内容，可另开一轮阅读预算。</span><HudButton type="button" disabled={sending || Boolean(streaming) || !agentAvailable} onClick={() => { void onContinueReading?.(message.id) }}>继续读取</HudButton></div>}
           {message.citations && <div className="message-citations"><span>引用</span><div>{message.citations.map((citation, index) => {
             const record = records.find(item => item.id === citation.recordId)
             if (citation.kind === 'chat' || citation.recordId.startsWith('chat:')) {
