@@ -2,6 +2,7 @@ mod bridge;
 mod agent;
 mod command_proposal;
 mod context;
+mod credentials;
 mod deep_video;
 mod read_tools;
 mod semantic;
@@ -48,6 +49,9 @@ pub fn run() {
             app.manage(agent::AgentState::load(app.handle())?);
             app.manage(notes::NotesState::load(app.handle())?);
             bridge::start(app.handle().clone());
+            if let Ok(cache) = app.handle().path().app_cache_dir() {
+                storyboard::cleanup_credentials_on_startup(&cache.join("video-storyboard"));
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![open_extension_folder, plugins::get_toolchain_status, plugins::get_workspace_info, plugins::open_workspace_path,

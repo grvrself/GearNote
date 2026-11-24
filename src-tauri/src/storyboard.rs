@@ -6,10 +6,10 @@ use tauri::{AppHandle, Manager, State};
 #[derive(Deserialize)]
 struct Evidence { cells: Vec<StoryboardCell> }
 
-struct TemporaryCookies(PathBuf);
-
-impl Drop for TemporaryCookies {
-    fn drop(&mut self) { let _ = fs::remove_file(&self.0); }
+/// 启动时清理崩溃/强制退出遗留的临时凭据；只限专用目录与旧版文件模式，失败不阻塞启动。
+pub(crate) fn cleanup_credentials_on_startup(video_cache_dir: &Path) {
+    let _ = crate::credentials::cleanup_stale(&video_cache_dir.join("credentials"));
+    let _ = crate::credentials::cleanup_legacy(video_cache_dir);
 }
 
 fn validate_bilibili_cookies(content: &str) -> Result<(), String> {
@@ -32,12 +32,9 @@ fn validate_bilibili_cookies(content: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn prepare_bilibili_cookies(content: &str, cache_dir: &Path) -> Result<TemporaryCookies, String> {
+fn prepare_bilibili_cookies(content: &str, credentials_dir: &Path) -> Result<crate::credentials::TaskCookies, String> {
     validate_bilibili_cookies(content)?;
-    fs::create_dir_all(cache_dir).map_err(|error| format!("无法创建临时目录：{error}"))?;
-    let path = cache_dir.join(format!("auth-{}.txt", uuid::Uuid::new_v4()));
-    fs::write(&path, content).map_err(|error| format!("无法写入临时 cookies：{error}"))?;
-    Ok(TemporaryCookies(path))
+    crate::credentials::TaskCookies::prepare(content, credentials_dir)
 }
 
 // Windows canonical paths can start with \\?\; Node's main-script loader treats
@@ -178,7 +175,11 @@ pub async fn analyze_video_storyboard(app: AppHandle, state: State<'_, AppState>
         .join("storyboards").join(&record_id);
     let cache_dir = app.path().app_cache_dir().map_err(|error| error.to_string())?
         .join("video-storyboard");
-    let cookies = cookies_text.as_deref().map(|content| prepare_bilibili_cookies(content, &cache_dir)).transpose()?;
+    let credentials_dir = cache_dir.join("credentials");
+    // 新任务开始前先回收上次崩溃/强制退出遗留的凭据；只限专用目录与旧版文件模式。
+    let _ = crate::credentials::cleanup_stale(&credentials_dir);
+    let _ = crate::credentials::cleanup_legacy(&cache_dir);
+    let cookies = cookies_text.as_deref().map(|content| prepare_bilibili_cookies(content, &credentials_dir)).transpose()?;
     fs::create_dir_all(&dir).map_err(|error| format!("无法创建分镜目录：{error}"))?;
     for name in image_names(&dir).unwrap_or_default() {
         fs::remove_file(dir.join(name)).map_err(|error| format!("无法清理旧分镜图：{error}"))?;
@@ -191,36 +192,39 @@ pub async fn analyze_video_storyboard(app: AppHandle, state: State<'_, AppState>
     let ffprobe_binary = tool_path(&app, "ffprobe");
     let ytdlp_binary = tool_path(&app, "yt-dlp");
     let tools_dir = node_binary.parent().filter(|path| path.join("yt-dlp.exe").is_file()).map(Path::to_path_buf);
-    let cookies_path = cookies.as_ref().map(|jar| node_path(jar.0.clone()));
     let output = tauri::async_runtime::spawn_blocking(move || {
-        let run = |low_quality: bool| {
-            let mut command = Command::new(&node_binary);
-            if let Some(tools_dir) = tools_dir.as_ref().filter(|path| path.is_dir()) {
-                let mut paths = vec![node_path(tools_dir.clone())];
-                paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()));
-                if let Ok(path) = std::env::join_paths(paths) { command.env("PATH", path); }
-            }
-            command.env("DSH_FFMPEG_PATH", &ffmpeg_binary)
-                .env("DSH_FFPROBE_PATH", &ffprobe_binary)
-                .env("DSH_YTDLP_PATH", &ytdlp_binary)
-                .env("DSH_VIDEO_CACHE_DIR", node_path(cache_dir.join("scan")))
-                .env("DSH_VIDEO_MEDIA_DIR", node_path(cache_dir.join("media")))
-                .arg(node_path(engine_run.clone())).arg(&source_url)
-                .arg("--out").arg(node_path(out_run.clone()))
-                .arg("--strategy").arg("auto")
-                .arg("--max-frames").arg("64")
-                .arg("--max-sheets").arg("4")
-                .arg("--transcript").arg("off");
-            if low_quality { command.arg("--quality").arg("low"); }
-            if let Some(path) = &cookies_path { command.arg("--cookies").arg(path); }
-            command.output()
-        };
-        let first = run(false)?;
-        let denied = !first.status.success() && String::from_utf8_lossy(&first.stderr).contains("HTTP 567");
-        if denied && cookies_path.is_none() { run(true) } else { Ok(first) }
+        // 凭据 guard 移入阻塞闭包：生命周期跟随实际媒体进程。
+        // 即使外层异步任务不再等待，正在运行的进程也不会提前失去所需文件。
+        crate::credentials::run_with_cookies(cookies, |cookies_file| {
+            let cookies_path = cookies_file.map(|path| node_path(path.to_path_buf()));
+            let run = |low_quality: bool| {
+                let mut command = Command::new(&node_binary);
+                if let Some(tools_dir) = tools_dir.as_ref().filter(|path| path.is_dir()) {
+                    let mut paths = vec![node_path(tools_dir.clone())];
+                    paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()));
+                    if let Ok(path) = std::env::join_paths(paths) { command.env("PATH", path); }
+                }
+                command.env("DSH_FFMPEG_PATH", &ffmpeg_binary)
+                    .env("DSH_FFPROBE_PATH", &ffprobe_binary)
+                    .env("DSH_YTDLP_PATH", &ytdlp_binary)
+                    .env("DSH_VIDEO_CACHE_DIR", node_path(cache_dir.join("scan")))
+                    .env("DSH_VIDEO_MEDIA_DIR", node_path(cache_dir.join("media")))
+                    .arg(node_path(engine_run.clone())).arg(&source_url)
+                    .arg("--out").arg(node_path(out_run.clone()))
+                    .arg("--strategy").arg("auto")
+                    .arg("--max-frames").arg("64")
+                    .arg("--max-sheets").arg("4")
+                    .arg("--transcript").arg("off");
+                if low_quality { command.arg("--quality").arg("low"); }
+                if let Some(path) = &cookies_path { command.arg("--cookies").arg(path); }
+                command.output()
+            };
+            let first = run(false)?;
+            let denied = !first.status.success() && String::from_utf8_lossy(&first.stderr).contains("HTTP 567");
+            if denied && cookies_path.is_none() { run(true) } else { Ok(first) }
+        })
     }).await.map_err(|error| error.to_string())?
         .map_err(|error| format!("分镜引擎启动失败：{error}"))?;
-    drop(cookies);
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         if stderr.contains("HTTP 567") {
