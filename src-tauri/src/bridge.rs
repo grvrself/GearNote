@@ -299,9 +299,9 @@ fn set_remaining_timeout(stream: &TcpStream, deadline: Instant) -> Result<(), (u
 fn read_request(stream: &TcpStream, deadline: Instant) -> Result<(String, String, HashMap<String, String>, Vec<u8>), (u16, String)> {
     let cloned = stream.try_clone().map_err(|_| (500, "连接无法读取".to_owned()))?;
     let mut reader = BufReader::new(cloned);
-    let mut header_bytes = 0;
+    let mut header_bytes: usize = 0;
     let request_line = read_header_line(&mut reader, MAX_HEADER_BYTES, deadline)?;
-    header_bytes += request_line.len();
+    header_bytes = header_bytes.checked_add(request_line.len()).ok_or((431, "请求头过长".to_owned()))?;
     let mut parts = request_line.split_whitespace();
     let method = parts.next().unwrap_or_default().to_owned();
     let path = parts.next().unwrap_or_default().to_owned();
@@ -310,8 +310,10 @@ fn read_request(stream: &TcpStream, deadline: Instant) -> Result<(String, String
     }
     let mut headers = HashMap::new();
     loop {
-        let line = read_header_line(&mut reader, MAX_HEADER_BYTES - header_bytes, deadline)?;
-        header_bytes += line.len();
+        let remaining = MAX_HEADER_BYTES.checked_sub(header_bytes).ok_or((431, "请求头过长".to_owned()))?;
+        let line = read_header_line(&mut reader, remaining, deadline)?;
+        header_bytes = header_bytes.checked_add(line.len()).ok_or((431, "请求头过长".to_owned()))?;
+        if header_bytes > MAX_HEADER_BYTES { return Err((431, "请求头过长".into())); }
         if line == "\r\n" || line == "\n" {
             break;
         }
@@ -350,14 +352,13 @@ fn read_header_line(reader: &mut BufReader<TcpStream>, limit: usize, deadline: I
     let mut bytes = Vec::new();
     let mut byte = [0_u8; 1];
     loop {
-        if bytes.len() > limit {
-            return Err((431, "请求头过长".into()));
-        }
         set_remaining_timeout(reader.get_ref(), deadline)?;
         match reader.read(&mut byte) {
             Ok(0) => break,
             Ok(_) => {
                 bytes.push(byte[0]);
+                // 读取后立即检查，确保任何返回路径（含读到换行）都不超过上限。
+                if bytes.len() > limit { return Err((431, "请求头过长".into())); }
                 if byte[0] == b'\n' { break; }
             }
             Err(error) if is_timeout(&error) => return Err((408, "请求读取超时".into())),
@@ -630,6 +631,33 @@ mod tests {
         let head = format!("POST /v1/articles HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Length: {}\r\n\r\n", MAX_BODY_BYTES + 1);
         stream.write_all(head.as_bytes()).unwrap();
         assert_eq!(read_head(&mut stream).0, 413);
+        core.shutdown();
+    }
+
+    #[test]
+    fn header_limit_boundaries_do_not_panic_and_recover() {
+        let (core, port) = test_core(ok_dispatch(), 1, 4, Duration::from_secs(5));
+        let request_line = "GET /v1/status HTTP/1.1\r\n";
+        // 围绕总上限构造边界（CRLF）：超限必须稳定 431，任何边界都不得 panic。
+        for extra in [MAX_HEADER_BYTES - 1, MAX_HEADER_BYTES, MAX_HEADER_BYTES + 1, MAX_HEADER_BYTES + 100] {
+            let pad_len = extra.saturating_sub(request_line.len() + 5);
+            let request = format!("{request_line}X: {}\r\n\r\n", "a".repeat(pad_len));
+            let mut stream = connect(port);
+            stream.write_all(request.as_bytes()).unwrap();
+            let status = read_head(&mut stream).0;
+            assert!(status != 0, "边界 {extra} 不应 panic 或无响应");
+            if extra > MAX_HEADER_BYTES { assert_eq!(status, 431, "超限必须返回 431"); }
+        }
+        // LF 行尾同样受上限约束，不 panic。
+        let lf_line = "GET /v1/status HTTP/1.1\n";
+        let request = format!("{lf_line}X: {}\n\n", "a".repeat(MAX_HEADER_BYTES + 50));
+        let mut stream = connect(port);
+        stream.write_all(request.as_bytes()).unwrap();
+        assert_eq!(read_head(&mut stream).0, 431);
+        // 超限请求之后，正常请求仍须成功。
+        let mut good = connect(port);
+        good.write_all(get_request(port).as_bytes()).unwrap();
+        assert_eq!(read_response(&mut good).0, 200);
         core.shutdown();
     }
 
