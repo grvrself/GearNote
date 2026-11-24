@@ -165,12 +165,13 @@ async fn propose_library_query(client: &reqwest::Client, config: &AgentConfig, k
 
 fn save_library_exchange(session: &mut ChatSession, question: &str, records: Vec<crate::db::LibraryTitle>, now: &str, elapsed_ms: u64) -> ChatMessage {
     let user = ChatMessage { id: format!("msg-{}", Uuid::new_v4()), role: "user".into(), created_at: now.into(),
-        paragraphs: vec![question.into()], tool_steps: Vec::new(), citations: Vec::new(), frame: None, run: None, suggestions: Vec::new() };
+        paragraphs: vec![question.into()], tool_steps: Vec::new(), citations: Vec::new(), frame: None, run: None, suggestions: Vec::new(), outcome: None };
     let assistant = ChatMessage { id: format!("msg-{}", Uuid::new_v4()), role: "agent".into(), created_at: now.into(),
         paragraphs: vec![if records.is_empty() { "整个资料库里没有找到匹配的已完成资料。".into() }
             else { format!("找到 {} 条候选资料。要打开这几条吗？", records.len()) }],
         tool_steps: vec!["全库索引只返回资料标题；等待用户确认".into()], citations: Vec::new(), frame: None,
-        run: Some(ChatRun { elapsed_ms, changed_files: Vec::new(), read_sources: Vec::new(), read_coverage: None }), suggestions: Vec::new() };
+        run: Some(ChatRun { elapsed_ms, changed_files: Vec::new(), read_sources: Vec::new(), read_coverage: None }), suggestions: Vec::new(),
+        outcome: Some(MessageOutcome::answer(MessageKind::LibraryProposal, AnswerStatus::NotApplicable)) };
     session.pending_library_search = (!records.is_empty()).then(|| PendingLibrarySearch {
         id: format!("library-{}", Uuid::new_v4()), message_id: assistant.id.clone(), question: question.into(), records, status: "open".into(),
     });
@@ -182,13 +183,14 @@ fn save_library_exchange(session: &mut ChatSession, question: &str, records: Vec
 fn save_chat_note_exchange(session: &mut ChatSession, question: &str, note_title: &str, proposal: workflow::NoteEditProposal,
     sources: &[SourceChunk], now: &str, elapsed_ms: u64) -> ChatMessage {
     let user = ChatMessage { id: format!("msg-{}", Uuid::new_v4()), role: "user".into(), created_at: now.into(),
-        paragraphs: vec![question.into()], tool_steps: Vec::new(), citations: Vec::new(), frame: None, run: None, suggestions: Vec::new() };
+        paragraphs: vec![question.into()], tool_steps: Vec::new(), citations: Vec::new(), frame: None, run: None, suggestions: Vec::new(), outcome: None };
     let assistant = ChatMessage { id: format!("msg-{}", Uuid::new_v4()), role: "agent".into(), created_at: now.into(),
         paragraphs: vec![format!("已为笔记《{note_title}》准备 {} 处修改建议。确认后才会写入。", proposal.edits.len())],
         tool_steps: vec!["等待用户确认笔记修改".into()], citations: Vec::new(), frame: None,
         run: Some(ChatRun { elapsed_ms, changed_files: Vec::new(), read_sources: sources.iter().enumerate().map(|(index, source)| ReadSource {
             source_index: index + 1, record_id: source.record_id.clone(), title: source.title.clone(), at_seconds: source.at_seconds,
-        }).collect(), read_coverage: None }), suggestions: Vec::new() };
+        }).collect(), read_coverage: None }), suggestions: Vec::new(),
+        outcome: Some(MessageOutcome::answer(MessageKind::NoteProposal, AnswerStatus::NotApplicable)) };
     session.pending_chat_note_edit = Some(PendingChatNoteEdit { message_id: assistant.id.clone(), note_title: note_title.into(), proposal });
     session.messages.extend([user, assistant.clone()]);
     session.updated_at = now.into();
@@ -198,11 +200,12 @@ fn save_chat_note_exchange(session: &mut ChatSession, question: &str, note_title
 fn save_command_exchange(session: &mut ChatSession, question: &str, program: String, args: Vec<String>, now: &str, elapsed_ms: u64) -> Result<ChatMessage, String> {
     let effective_args = command_proposal::effective_args(&program, &args)?;
     let user = ChatMessage { id: format!("msg-{}", Uuid::new_v4()), role: "user".into(), created_at: now.into(),
-        paragraphs: vec![question.into()], tool_steps: Vec::new(), citations: Vec::new(), frame: None, run: None, suggestions: Vec::new() };
+        paragraphs: vec![question.into()], tool_steps: Vec::new(), citations: Vec::new(), frame: None, run: None, suggestions: Vec::new(), outcome: None };
     let assistant = ChatMessage { id: format!("msg-{}", Uuid::new_v4()), role: "agent".into(), created_at: now.into(),
         paragraphs: vec![format!("已准备 {program} 命令；确认后才会执行。")],
         tool_steps: vec!["等待用户确认命令".into()], citations: Vec::new(), frame: None,
-        run: Some(ChatRun { elapsed_ms, changed_files: Vec::new(), read_sources: Vec::new(), read_coverage: None }), suggestions: Vec::new() };
+        run: Some(ChatRun { elapsed_ms, changed_files: Vec::new(), read_sources: Vec::new(), read_coverage: None }), suggestions: Vec::new(),
+        outcome: Some(MessageOutcome::answer(MessageKind::CommandProposal, AnswerStatus::NotApplicable)) };
     session.pending_command = Some(PendingCommand { id: format!("command-{}", Uuid::new_v4()), message_id: assistant.id.clone(),
         program, args, effective_args, status: "open".into() });
     session.messages.extend([user, assistant.clone()]);
@@ -253,7 +256,8 @@ pub async fn resolve_command_proposal(app: AppHandle, state: State<'_, AgentStat
         session.messages.push(ChatMessage { id: format!("msg-{}", Uuid::new_v4()), role: "agent".into(), created_at: now.clone(),
             paragraphs: vec![result_text], tool_steps: vec![format!("{program} 命令{}", if accept { "已运行" } else { "已拒绝" })],
             citations: Vec::new(), frame: None, run: Some(ChatRun { elapsed_ms: started.elapsed().as_millis().min(u64::MAX as u128) as u64,
-                changed_files: Vec::new(), read_sources: Vec::new(), read_coverage: None }), suggestions: Vec::new() });
+                changed_files: Vec::new(), read_sources: Vec::new(), read_coverage: None }), suggestions: Vec::new(),
+            outcome: Some(MessageOutcome::answer(MessageKind::CommandResult, AnswerStatus::NotApplicable)) });
         session.updated_at = now;
         Ok(true)
     })

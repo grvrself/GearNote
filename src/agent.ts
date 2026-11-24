@@ -27,7 +27,8 @@ export type PendingChoice = { id: string; messageId: string; prompt: string; why
 export type PendingLibrarySearch = { id: string; messageId: string; question: string; records: { id: string; title: string }[]; status: 'open' | 'accepted' | 'dismissed' }
 export type PendingChatNoteEdit = { messageId: string; noteTitle: string; proposal: NoteEditProposal }
 export type PendingCommand = { id: string; messageId: string; program: 'ffmpeg' | 'ffprobe' | 'yt-dlp'; args: string[]; effectiveArgs: string[]; status: 'open' | 'running' | 'finished' | 'failed' | 'rejected' }
-export type ChatState = { activeId: string; sessions: ChatSessionSummary[]; messages: ChatMessage[]; referencedIds: string[]; workingContext: WorkingContext; projectMemory: ProjectMemory[]; compactedSummary: string; compactedCount: number; pendingChoice: PendingChoice | null; pendingLibrarySearch: PendingLibrarySearch | null; pendingChatNoteEdit: PendingChatNoteEdit | null; pendingCommand: PendingCommand | null }
+export type ReadContinuationSummary = { messageId: string; mode: 'deep' | 'full' | 'adaptive' | string; hasProgress: boolean }
+export type ChatState = { activeId: string; sessions: ChatSessionSummary[]; messages: ChatMessage[]; referencedIds: string[]; workingContext: WorkingContext; projectMemory: ProjectMemory[]; compactedSummary: string; compactedCount: number; pendingChoice: PendingChoice | null; pendingLibrarySearch: PendingLibrarySearch | null; pendingChatNoteEdit: PendingChatNoteEdit | null; pendingCommand: PendingCommand | null; readContinuation?: ReadContinuationSummary | null }
 export type PersonaInfo = { content: string; path: string; isDefault: boolean }
 export type ContextPreview = {
   systemText: string

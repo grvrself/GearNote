@@ -8,11 +8,13 @@ async fn read_full_references<F: Fn(&str)>(activity: F, client: &reqwest::Client
     let pending = index.entries().iter().filter(|(id, _)| !ids.contains(id)).collect::<Vec<_>>();
     let mut steps = Vec::new();
     let mut reason = "已读完选中的资料".to_string();
+    // 结构化阅读结束原因；与展示文案平行维护。
+    let mut end_code = ReadingEndReason::Complete;
     let input_budget = config.context_tier.char_limit().saturating_sub(prepared.system_text.chars().count() + prepared.user_text.chars().count() + 1_000);
     let mut cursor = 0;
     while cursor < pending.len() {
         let group = &pending[cursor..(cursor + 4).min(pending.len())];
-        if let Some(stop) = task.request_reason() { reason = stop.into(); break; }
+        if let Some(stop) = task.request_reason() { reason = stop.into(); end_code = task.end_code(); break; }
         let mut accepted = Vec::new();
         let mut input_chars = 0;
         for entry in group {
@@ -22,7 +24,7 @@ async fn read_full_references<F: Fn(&str)>(activity: F, client: &reqwest::Client
             input_chars += size;
             accepted.push(*entry);
         }
-        if accepted.is_empty() { reason = task.reason().unwrap_or("达到整项读取或上下文预算").into(); break; }
+        if accepted.is_empty() { reason = task.reason().unwrap_or("达到整项读取或上下文预算").into(); end_code = if task.reason().is_some() { task.end_code() } else { ReadingEndReason::BudgetExhausted }; break; }
         let offset = sources.len();
         let text = accepted.iter().enumerate().map(|(number, (_, source))| format!("[{}] {}\n{}", offset + number + 1, source.title, source.text)).collect::<Vec<_>>().join("\n\n");
         let prior = findings.iter().rev().take(24).map(|finding| format!("{}「{}」[{}]", finding.finding, finding.quote, finding.source_index)).collect::<Vec<_>>().join("\n")
@@ -33,11 +35,15 @@ async fn read_full_references<F: Fn(&str)>(activity: F, client: &reqwest::Client
             {"role":"user","content":format!("{}\n先前阅读要点：\n{prior}\n本批正文：\n{text}", prepared.user_text)}]});
         let body = match task.json(client, config, key, payload).await {
             Ok(body) => body,
-            Err(error) => { reason = error; steps.push(format!("阅读提醒：{reason}，保留已读部分")); break; }
+            Err(error) => { reason = error; steps.push(format!("阅读提醒：{reason}，保留已读部分"));
+                end_code = if task.stopped_by_user() { ReadingEndReason::UserStopped }
+                    else if task.request_reason().is_some() { ReadingEndReason::BudgetExhausted }
+                    else { ReadingEndReason::ReadFailed };
+                break; }
         };
         let batches = accepted.iter().map(|(_, source)| deep_video::VideoBatch { source: source.clone(), end_seconds: 0 }).collect::<Vec<_>>();
         let raw = body.pointer("/choices/0/message/content").and_then(serde_json::Value::as_str).unwrap_or_default();
-        if raw.trim().is_empty() { reason = "模型未返回本批阅读结果".into(); break; }
+        if raw.trim().is_empty() { reason = "模型未返回本批阅读结果".into(); end_code = ReadingEndReason::ReadFailed; break; }
         if let Ok((checkpoint, _)) = deep_video::keep_verified_notes(raw, &batches, offset + 1) { findings.extend(checkpoint.notes); }
         else { steps.push("本批摘要格式未通过核对，回答时保留原文摘录".into()); }
         cursor += accepted.len();
@@ -46,7 +52,7 @@ async fn read_full_references<F: Fn(&str)>(activity: F, client: &reqwest::Client
         if findings.len() > 256 { findings.drain(..findings.len() - 256); }
     }
     let complete = ids.len() == index.len();
-    if !complete && reason == "已读完选中的资料" { reason = "达到整项原文读取次数预算".into(); }
+    if !complete && end_code == ReadingEndReason::Complete { reason = "达到整项原文读取次数预算".into(); end_code = ReadingEndReason::BudgetExhausted; }
     steps.push(format!("完整阅读结束：{reason}；已读 {} / {} 段 · {}", sources.len(), index.len(), task.progress()));
     // 最终回答使用逐段摘要与原文摘录，原始片段仍用于引用定位。
     let available = config.context_tier.char_limit().saturating_sub(prepared.system_text.chars().count() + prepared.user_text.chars().count() + 1_500).min(config.reading_budget.tool_chars);
@@ -63,5 +69,5 @@ async fn read_full_references<F: Fn(&str)>(activity: F, client: &reqwest::Client
     let messages = vec![serde_json::json!({"role":"system","content":prepared.system_text}), serde_json::json!({"role":"user","content":format!(
         "{}\n完整阅读实际范围：已处理 {} / {} 段；{reason}。\n逐段阅读要点及原文摘录：\n{evidence}\n请综合回答原问题，讲清内容、逻辑和步骤；不要只罗列摘录。未读完须明确说明范围，不得声称已经读完。", prepared.user_text, sources.len(), index.len())})];
     let progress = (!complete).then_some(ReadProgress { full: true, read_chunk_ids: ids, findings, ..ReadProgress::default() });
-    Ok(Exploration { messages, sources, steps, choice: None, progress })
+    Ok(Exploration { messages, sources, steps, choice: None, progress, reading_reason: Some(end_code) })
 }

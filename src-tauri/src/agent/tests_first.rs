@@ -96,13 +96,18 @@
         assert!(reply.paragraphs[0].contains("摘要原句不在字幕中"));
         assert!(reply.citations.is_empty());
         assert!(reply.tool_steps[0].starts_with("深度阅读失败："));
+        let deep_outcome = reply.outcome.clone().unwrap();
+        assert_eq!(deep_outcome.kind, MessageKind::Answer);
+        assert_eq!(deep_outcome.answer, AnswerStatus::Failed);
+        assert_eq!(deep_outcome.answer_reason, Some(AnswerEndReason::ReadingFailed));
+        assert_eq!(deep_outcome.reading_reason, Some(ReadingEndReason::ReadFailed));
         assert_eq!(reply.run.unwrap().elapsed_ms, 1200);
     }
 
     #[test]
     fn final_request_without_any_model_text_keeps_question_and_error() {
         let mut session = new_session().unwrap();
-        let reply = save_final_failure_exchange(&mut session, "你觉得讲得怎么样", "模型返回了空回答", "100", 2400,
+        let reply = save_final_failure_exchange(&mut session, "你觉得讲得怎么样", "模型返回了空回答", AnswerEndReason::EmptyAnswer, "100", 2400,
             None, vec!["深度阅读结束：已读完".into()],
             vec![ReadSource { source_index: 1, record_id: "video".into(), title: "视频字幕".into(), at_seconds: Some(15) }],
             Some(ReadCoverage { read_until_seconds: 15, total_seconds: 15, batch_count: 1, complete: true, reason: "字幕已读完".into() }), None);
@@ -113,6 +118,10 @@
         assert!(reply.citations.is_empty());
         assert_eq!(reply.run.unwrap().read_coverage.unwrap().batch_count, 1);
         assert!(reply.tool_steps.last().unwrap().starts_with("回答未完成："));
+        let outcome = reply.outcome.unwrap();
+        assert_eq!(outcome.kind, MessageKind::Answer);
+        assert_eq!(outcome.answer, AnswerStatus::Failed);
+        assert_eq!(outcome.answer_reason, Some(AnswerEndReason::EmptyAnswer));
     }
 
 
@@ -406,11 +415,11 @@
         let mut session = new_session().unwrap();
         for index in 0..15 {
             session.messages.push(ChatMessage { id: format!("msg-{index}"), role: "user".into(), created_at: "1".into(),
-                paragraphs: vec!["短消息".into()], tool_steps: vec![], citations: vec![], frame: None, run: None, suggestions: Vec::new() });
+                paragraphs: vec!["短消息".into()], tool_steps: vec![], citations: vec![], frame: None, run: None, suggestions: Vec::new(), outcome: None });
         }
         assert!(!should_auto_compact(&session));
         session.messages.push(ChatMessage { id: "msg-15".into(), role: "user".into(), created_at: "1".into(),
-            paragraphs: vec!["短消息".into()], tool_steps: vec![], citations: vec![], frame: None, run: None, suggestions: Vec::new() });
+            paragraphs: vec!["短消息".into()], tool_steps: vec![], citations: vec![], frame: None, run: None, suggestions: Vec::new(), outcome: None });
         assert!(should_auto_compact(&session));
         session.compacted_count = 8;
         assert!(!should_auto_compact(&session));
@@ -423,7 +432,7 @@
     #[test]
     fn selected_messages_are_scoped_to_current_session() {
         let mut session = new_session().unwrap();
-        session.messages.push(ChatMessage { id: "msg-1".into(), role: "user".into(), created_at: "1".into(), paragraphs: vec!["原话".into()], tool_steps: vec![], citations: vec![], frame: None, run: None, suggestions: Vec::new() });
+        session.messages.push(ChatMessage { id: "msg-1".into(), role: "user".into(), created_at: "1".into(), paragraphs: vec!["原话".into()], tool_steps: vec![], citations: vec![], frame: None, run: None, suggestions: Vec::new(), outcome: None });
         assert_eq!(selected_messages(&session, &["msg-1".into()]).unwrap().len(), 1);
         assert!(selected_messages(&session, &["msg-other-session".into()]).is_err());
         assert!(selected_messages(&session, &["msg-1".into(), "msg-1".into()]).is_err());
@@ -457,7 +466,7 @@
         fs::create_dir_all(&dir).unwrap();
         let legacy = dir.join("chat.json");
         let sessions = dir.join("chat-sessions.json");
-        let old = ChatMessage { id: "msg-old".into(), role: "user".into(), created_at: "1".into(), paragraphs: vec!["旧对话问题".into()], tool_steps: vec![], citations: vec![], frame: None, run: None, suggestions: Vec::new() };
+        let old = ChatMessage { id: "msg-old".into(), role: "user".into(), created_at: "1".into(), paragraphs: vec!["旧对话问题".into()], tool_steps: vec![], citations: vec![], frame: None, run: None, suggestions: Vec::new(), outcome: None };
         fs::write(&legacy, serde_json::to_vec(&vec![old]).unwrap()).unwrap();
         let store = load_chat_store(&sessions, &legacy).unwrap();
         assert_eq!(store.sessions.len(), 1);
@@ -482,7 +491,7 @@
         let legacy = dir.join("chat.json");
         let database = dir.join(crate::db::FILE_NAME);
         let mut old = new_session().unwrap();
-        old.messages.push(ChatMessage { id: "kept".into(), role: "user".into(), created_at: "1".into(), paragraphs: vec!["旧问题".into()], tool_steps: vec![], citations: vec![], frame: None, run: None, suggestions: Vec::new() });
+        old.messages.push(ChatMessage { id: "kept".into(), role: "user".into(), created_at: "1".into(), paragraphs: vec!["旧问题".into()], tool_steps: vec![], citations: vec![], frame: None, run: None, suggestions: Vec::new(), outcome: None });
         let store = ChatStore { active_id: old.id.clone(), sessions: vec![old], project_memory: Vec::new() };
         fs::write(&sessions, serde_json::to_vec(&store).unwrap()).unwrap();
         let loaded = load_chat_store(&database, &legacy).unwrap();
@@ -498,9 +507,9 @@
     #[test]
     fn recent_context_uses_only_active_session() {
         let mut first = new_session().unwrap();
-        first.messages.push(ChatMessage { id: "first".into(), role: "user".into(), created_at: "1".into(), paragraphs: vec!["只属于会话甲".into()], tool_steps: vec![], citations: vec![], frame: None, run: None, suggestions: Vec::new() });
+        first.messages.push(ChatMessage { id: "first".into(), role: "user".into(), created_at: "1".into(), paragraphs: vec!["只属于会话甲".into()], tool_steps: vec![], citations: vec![], frame: None, run: None, suggestions: Vec::new(), outcome: None });
         let mut second = new_session().unwrap();
-        second.messages.push(ChatMessage { id: "second".into(), role: "user".into(), created_at: "2".into(), paragraphs: vec!["只属于会话乙".into()], tool_steps: vec![], citations: vec![], frame: None, run: None, suggestions: Vec::new() });
+        second.messages.push(ChatMessage { id: "second".into(), role: "user".into(), created_at: "2".into(), paragraphs: vec!["只属于会话乙".into()], tool_steps: vec![], citations: vec![], frame: None, run: None, suggestions: Vec::new(), outcome: None });
         let store = ChatStore { active_id: second.id.clone(), sessions: vec![first, second], project_memory: Vec::new() };
         let active = store.sessions.iter().find(|item| item.id == store.active_id).unwrap();
         let context = context::build("人格", "问题", &active.messages, &[], &[], None, &[], &WorkingContext::default(), "").user_text;
@@ -528,4 +537,79 @@
         drop(first);
         assert_eq!(requests.len(), 1);
         assert!(requests.begin("chat-a", "message-a").unwrap().is_some());
+    }
+
+    #[test]
+    fn outcome_gate_blocks_failed_and_non_answer_messages_from_suggestions() {
+        let base = ChatMessage { id: "m".into(), role: "agent".into(), created_at: "1".into(),
+            paragraphs: vec!["正文".into()], tool_steps: vec![], citations: vec![], frame: None, run: None,
+            suggestions: Vec::new(), outcome: None };
+        // 旧消息保持原行为。
+        assert!(outcome_allows_suggestions(&base));
+        let with = |kind: MessageKind, answer: AnswerStatus| ChatMessage {
+            outcome: Some(MessageOutcome { kind, answer, answer_reason: None, reading_reason: None, notices: Vec::new() }), ..base.clone() };
+        assert!(outcome_allows_suggestions(&with(MessageKind::Answer, AnswerStatus::Completed)));
+        assert!(outcome_allows_suggestions(&with(MessageKind::Answer, AnswerStatus::Partial)));
+        assert!(!outcome_allows_suggestions(&with(MessageKind::Answer, AnswerStatus::Failed)));
+        assert!(!outcome_allows_suggestions(&with(MessageKind::Choice, AnswerStatus::NotApplicable)));
+        assert!(!outcome_allows_suggestions(&with(MessageKind::LibraryProposal, AnswerStatus::NotApplicable)));
+        assert!(!outcome_allows_suggestions(&with(MessageKind::NoteProposal, AnswerStatus::NotApplicable)));
+        assert!(!outcome_allows_suggestions(&with(MessageKind::CommandProposal, AnswerStatus::NotApplicable)));
+        assert!(!outcome_allows_suggestions(&with(MessageKind::Frame, AnswerStatus::NotApplicable)));
+    }
+
+    #[test]
+    fn message_outcome_roundtrips_and_legacy_messages_still_load() {
+        let outcome = MessageOutcome { kind: MessageKind::Answer, answer: AnswerStatus::Partial,
+            answer_reason: Some(AnswerEndReason::StreamInterrupted), reading_reason: Some(ReadingEndReason::UserStopped),
+            notices: vec![MessageNotice { code: "answer_warning".into(), message: "任意展示文案，可修改".into() }] };
+        let message = ChatMessage { id: "msg-outcome".into(), role: "agent".into(), created_at: "1".into(),
+            paragraphs: vec!["部分回答已保留".into()], tool_steps: vec!["回答提醒：旧文案".into()], citations: vec![],
+            frame: None, run: None, suggestions: Vec::new(), outcome: Some(outcome) };
+        let mut encoded = serde_json::to_value(&message).unwrap();
+        let restored: ChatMessage = serde_json::from_value(encoded.clone()).unwrap();
+        let restored_outcome = restored.outcome.unwrap();
+        assert_eq!(restored_outcome.answer, AnswerStatus::Partial);
+        assert_eq!(restored_outcome.answer_reason, Some(AnswerEndReason::StreamInterrupted));
+        assert_eq!(restored_outcome.reading_reason, Some(ReadingEndReason::UserStopped));
+        assert_eq!(restored_outcome.notices[0].code, "answer_warning");
+        // 修改中文展示文案不改变结构化状态。
+        encoded["toolSteps"] = serde_json::json!(["完全不同的新文案"]);
+        encoded["outcome"]["notices"][0]["message"] = serde_json::json!("translated notice");
+        let edited: ChatMessage = serde_json::from_value(encoded.clone()).unwrap();
+        assert_eq!(edited.outcome.unwrap().answer, AnswerStatus::Partial);
+        // 旧消息没有 outcome 字段仍可加载，且不得被推断为成功或失败。
+        encoded.as_object_mut().unwrap().remove("outcome");
+        let legacy: ChatMessage = serde_json::from_value(encoded).unwrap();
+        assert!(legacy.outcome.is_none());
+        assert_eq!(legacy.paragraphs, vec!["部分回答已保留"]);
+    }
+
+    #[test]
+    fn outcome_persists_through_chat_store_and_state_view_exposes_continuation() {
+        let mut session = new_session().unwrap();
+        let outcome = MessageOutcome { kind: MessageKind::Answer, answer: AnswerStatus::Completed,
+            answer_reason: Some(AnswerEndReason::Normal), reading_reason: Some(ReadingEndReason::UserStopped), notices: Vec::new() };
+        let message = ChatMessage { id: "msg-persisted".into(), role: "agent".into(), created_at: "1".into(),
+            paragraphs: vec!["停止阅读后仍完成的回答".into()], tool_steps: vec![], citations: vec![],
+            frame: None, run: None, suggestions: Vec::new(), outcome: Some(outcome) };
+        session.messages.push(message.clone());
+        session.read_continuation = Some(ReadContinuation { message_id: message.id.clone(), question: "问题".into(),
+            referenced_ids: vec!["record-a".into()], fingerprint: "fp".into(), progress: ReadProgress::default() });
+        let dir = std::env::temp_dir().join(format!("gearnote-outcome-{}", Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("knowflow.db");
+        let store = ChatStore { active_id: session.id.clone(), sessions: vec![session], project_memory: vec![] };
+        persist_chat_store(&path, &store).unwrap();
+        let loaded = load_chat_store(&path, &dir.join("legacy.json")).unwrap();
+        let saved_outcome = loaded.sessions[0].messages[0].outcome.clone().unwrap();
+        // 用户停止读取后回答仍正常完成：不得分类为失败。
+        assert_eq!(saved_outcome.answer, AnswerStatus::Completed);
+        assert_eq!(saved_outcome.reading_reason, Some(ReadingEndReason::UserStopped));
+        let view = state_view(&loaded).unwrap();
+        let summary = view.read_continuation.unwrap();
+        assert_eq!(summary.message_id, "msg-persisted");
+        assert_eq!(summary.mode, "adaptive");
+        assert!(summary.has_progress);
+        fs::remove_dir_all(dir).unwrap();
     }

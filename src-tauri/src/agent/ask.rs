@@ -68,43 +68,48 @@ pub fn preview_agent_context(app: AppHandle, agent: State<'_, AgentState>, stora
     Ok(prepared.preview)
 }
 
-struct GeneratedAnswer { text: String, warning: Option<String> }
+struct GeneratedAnswer { text: String, warning: Option<String>, end_reason: AnswerEndReason }
+
+struct AnswerFailure { reason: AnswerEndReason, message: String }
 
 async fn generate_final_answer(app: &AppHandle, client: &reqwest::Client, config: &AgentConfig, key: &str,
-    request_id: &str, messages: &[serde_json::Value], explored: bool, has_attachment: bool) -> Result<GeneratedAnswer, String> {
+    request_id: &str, messages: &[serde_json::Value], explored: bool, has_attachment: bool) -> Result<GeneratedAnswer, AnswerFailure> {
     let mut response = client.post(format!("{}/chat/completions", config.base_url)).bearer_auth(key)
         .json(&answer_payload(config, messages, explored))
-        .send().await.map_err(|error| format!("模型请求失败：{error}"))?;
+        .send().await.map_err(|error| AnswerFailure { reason: AnswerEndReason::RequestFailed, message: format!("模型请求失败：{error}") })?;
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
         let detail = provider_error(status, &body, &config.base_url, &config.model);
         if has_attachment && status == reqwest::StatusCode::BAD_REQUEST {
-            return Err(format!("图片提问被服务拒绝；请确认当前模型支持视觉输入。{detail}"));
+            return Err(AnswerFailure { reason: AnswerEndReason::ProviderError, message: format!("图片提问被服务拒绝；请确认当前模型支持视觉输入。{detail}") });
         }
-        return Err(detail);
+        return Err(AnswerFailure { reason: AnswerEndReason::ProviderError, message: detail });
     }
     let mut parser = SseParser::default();
     let mut answer = String::new();
     let mut warning = None;
+    let mut end_reason = AnswerEndReason::Normal;
     loop {
         let chunk = match response.chunk().await {
             Ok(Some(chunk)) => chunk,
             Ok(None) => break,
             Err(error) if !answer.trim().is_empty() => {
                 warning = Some(format!("流式连接中断：{error}；已保留收到的正文"));
+                end_reason = AnswerEndReason::StreamInterrupted;
                 break;
             }
-            Err(error) => return Err(format!("模型流式连接中断：{error}")),
+            Err(error) => return Err(AnswerFailure { reason: AnswerEndReason::StreamInterrupted, message: format!("模型流式连接中断：{error}") }),
         };
         let deltas = match parser.push(&chunk) {
             Ok(deltas) => deltas,
-            Err(error) if !answer.trim().is_empty() => { warning = Some(format!("流式格式错误：{error}；已保留收到的正文")); break; }
-            Err(error) => return Err(error),
+            Err(error) if !answer.trim().is_empty() => { warning = Some(format!("流式格式错误：{error}；已保留收到的正文")); end_reason = AnswerEndReason::StreamInterrupted; break; }
+            Err(error) => return Err(AnswerFailure { reason: AnswerEndReason::StreamInterrupted, message: error }),
         };
         if let Err(error) = publish_deltas(app, request_id, &mut answer, deltas, true, config.reading_budget.answer_chars) {
-            if answer.trim().is_empty() { return Err(error); }
+            if answer.trim().is_empty() { return Err(AnswerFailure { reason: AnswerEndReason::OutputLimit, message: error }); }
             warning = Some(format!("回答超过显示上限：{error}；已保留收到的正文"));
+            end_reason = AnswerEndReason::OutputLimit;
             break;
         }
         if parser.done { break; }
@@ -113,38 +118,42 @@ async fn generate_final_answer(app: &AppHandle, client: &reqwest::Client, config
         match parser.push(b"\n\n") {
             Ok(tail) => {
                 if let Err(error) = publish_deltas(app, request_id, &mut answer, tail, true, config.reading_budget.answer_chars) {
-                    if answer.trim().is_empty() { return Err(error); }
+                    if answer.trim().is_empty() { return Err(AnswerFailure { reason: AnswerEndReason::OutputLimit, message: error }); }
                     warning = Some(format!("回答超过显示上限：{error}；已保留收到的正文"));
+                    end_reason = AnswerEndReason::OutputLimit;
                 }
             }
-            Err(error) if !answer.trim().is_empty() => warning = Some(format!("流式格式错误：{error}；已保留收到的正文")),
-            Err(error) => return Err(error),
+            Err(error) if !answer.trim().is_empty() => { warning = Some(format!("流式格式错误：{error}；已保留收到的正文")); end_reason = AnswerEndReason::StreamInterrupted; }
+            Err(error) => return Err(AnswerFailure { reason: AnswerEndReason::StreamInterrupted, message: error }),
         }
     }
     if !parser.done && parser.finish_reason.is_none() && warning.is_none() {
         warning = Some("模型流式连接提前结束；已保留收到的正文".into());
+        end_reason = AnswerEndReason::StreamInterrupted;
     }
     if let Some(reason) = parser.finish_reason.as_deref() {
-        if reason != "stop" { warning = Some(format!("模型结束原因是 {reason}；已保留收到的正文")); }
+        if reason != "stop" { warning = Some(format!("模型结束原因是 {reason}；已保留收到的正文")); end_reason = AnswerEndReason::FinishReason; }
     }
     let answer = answer.trim();
-    if answer.is_empty() { return Err("模型返回了空回答".into()); }
+    if answer.is_empty() { return Err(AnswerFailure { reason: AnswerEndReason::EmptyAnswer, message: "模型返回了空回答".into() }); }
     let text = answer.chars().take(config.reading_budget.answer_chars).collect();
-    Ok(GeneratedAnswer { text, warning })
+    Ok(GeneratedAnswer { text, warning, end_reason })
 }
 
 
-fn save_final_failure_exchange(session: &mut ChatSession, question: &str, error: &str, now: &str, elapsed_ms: u64,
+fn save_final_failure_exchange(session: &mut ChatSession, question: &str, error: &str, reason: AnswerEndReason, now: &str, elapsed_ms: u64,
     frame: Option<ChatFrame>, mut steps: Vec<String>, read_sources: Vec<ReadSource>, read_coverage: Option<ReadCoverage>,
     choice_id: Option<&str>) -> ChatMessage {
     let detail = error.chars().filter(|ch| !ch.is_control()).take(350).collect::<String>();
     let user = ChatMessage { id: format!("msg-{}", Uuid::new_v4()), role: "user".into(), created_at: now.into(),
-        paragraphs: vec![question.into()], tool_steps: Vec::new(), citations: Vec::new(), frame, run: None, suggestions: Vec::new() };
+        paragraphs: vec![question.into()], tool_steps: Vec::new(), citations: Vec::new(), frame, run: None, suggestions: Vec::new(), outcome: None };
     steps.push(format!("回答未完成：{detail}"));
     let assistant = ChatMessage { id: format!("msg-{}", Uuid::new_v4()), role: "agent".into(), created_at: now.into(),
         paragraphs: vec![format!("本轮未收到可显示的模型正文。原因：{detail}")], tool_steps: steps,
         citations: Vec::new(), frame: None,
-        run: Some(ChatRun { elapsed_ms, changed_files: Vec::new(), read_sources, read_coverage }), suggestions: Vec::new() };
+        run: Some(ChatRun { elapsed_ms, changed_files: Vec::new(), read_sources, read_coverage }), suggestions: Vec::new(),
+        outcome: Some(MessageOutcome { kind: MessageKind::Answer, answer: AnswerStatus::Failed,
+            answer_reason: Some(reason), reading_reason: None, notices: Vec::new() }) };
     answer_pending_choice(session, question, now, choice_id);
     session.messages.push(user);
     session.messages.push(assistant.clone());
@@ -203,13 +212,14 @@ pub async fn ask_agent(app: AppHandle, agent: State<'_, AgentState>, storage: St
             format!("{:02}:{:02}:{:02}", seconds / 3600, seconds / 60 % 60, seconds % 60)
         } else { format!("{:02}:{:02}", seconds / 60, seconds % 60) };
         let user = ChatMessage { id: format!("msg-{}", Uuid::new_v4()), role: "user".into(), created_at: now.clone(),
-            paragraphs: vec![question.into()], tool_steps: Vec::new(), citations: Vec::new(), frame: None, run: None, suggestions: Vec::new() };
+            paragraphs: vec![question.into()], tool_steps: Vec::new(), citations: Vec::new(), frame: None, run: None, suggestions: Vec::new(), outcome: None };
         let assistant = ChatMessage { id: format!("msg-{}", Uuid::new_v4()), role: "agent".into(), created_at: now.clone(),
             paragraphs: vec![format!("已截取《{}》在 {label} 的画面。", video.title)],
             tool_steps: Vec::new(),
             citations: vec![ChatCitation { record_id: video.id.clone(), at_seconds: Some(seconds), source_index: None, label: Some("[画面]".into()), kind: Some("image".into()) }],
             frame: Some(ChatFrame { image_id, record_id: video.id.clone(), at_seconds: seconds }),
-            run: Some(ChatRun { elapsed_ms: started_at.elapsed().as_millis().min(u64::MAX as u128) as u64, changed_files: Vec::new(), read_sources: Vec::new(), read_coverage: None }), suggestions: Vec::new() };
+            run: Some(ChatRun { elapsed_ms: started_at.elapsed().as_millis().min(u64::MAX as u128) as u64, changed_files: Vec::new(), read_sources: Vec::new(), read_coverage: None }), suggestions: Vec::new(),
+            outcome: Some(MessageOutcome::answer(MessageKind::Frame, AnswerStatus::NotApplicable)) };
         let saved = (|| {
             let mut store = agent.sessions.lock().map_err(|_| "会话暂不可用")?;
             let mut next = store.clone();
@@ -516,6 +526,7 @@ pub async fn ask_agent(app: AppHandle, agent: State<'_, AgentState>, storage: St
         }
     }
     let explored = exploration.is_some();
+    let reading_reason = exploration.as_ref().and_then(|value| value.reading_reason);
     let (request_messages, sources, mut tool_steps) = if let Some(exploration) = exploration {
         (exploration.messages, exploration.sources, exploration.steps)
     } else {
@@ -545,7 +556,7 @@ pub async fn ask_agent(app: AppHandle, agent: State<'_, AgentState>, storage: St
         &request_messages, explored, attachment.is_some()).await;
     let generated = match final_result {
         Ok(value) => value,
-        Err(error) => {
+        Err(failure) => {
             let now = now_millis()?;
             let mut store = agent.sessions.lock().map_err(|_| "会话暂不可用")?;
             let mut next = store.clone();
@@ -553,7 +564,7 @@ pub async fn ask_agent(app: AppHandle, agent: State<'_, AgentState>, storage: St
             let active = next.sessions.iter_mut().find(|item| item.id == request_session_id).ok_or("当前会话不存在")?;
             if active.messages.is_empty() && active.title == "新会话" { active.title = session_title(question); }
             if read_progress.is_some() { tool_steps.push("可继续读取：本轮最终回答未返回，已保留阅读进度".into()); }
-            let assistant = save_final_failure_exchange(active, question, &error, &now,
+            let assistant = save_final_failure_exchange(active, question, &failure.message, failure.reason, &now,
                 started_at.elapsed().as_millis().min(u64::MAX as u128) as u64,
                 attachment.as_ref().map(|(frame, _)| frame.clone()), tool_steps, read_sources, read_coverage, choice_id.as_deref());
             active.read_continuation = read_progress.map(|progress| ReadContinuation { message_id: assistant.id.clone(),
@@ -566,14 +577,25 @@ pub async fn ask_agent(app: AppHandle, agent: State<'_, AgentState>, storage: St
         }
     };
     let (citations, evidence_notice) = assess_answer_evidence(&generated.text, &sources);
-    if let Some(notice) = evidence_notice { tool_steps.push(notice); }
-    if let Some(warning) = generated.warning { tool_steps.push(format!("回答提醒：{warning}")); }
+    let mut notices = Vec::new();
+    if let Some(notice) = evidence_notice {
+        notices.push(MessageNotice { code: "citation_unverified".into(), message: notice.clone() });
+        tool_steps.push(notice);
+    }
+    if let Some(warning) = generated.warning {
+        let display = format!("回答提醒：{warning}");
+        notices.push(MessageNotice { code: "answer_warning".into(), message: display.clone() });
+        tool_steps.push(display);
+    }
     let answer = generated.text;
     if read_progress.is_some() { tool_steps.push("可继续读取：点击按钮将使用新的阅读预算，可能增加 API 用量".into()); }
+    let outcome = MessageOutcome { kind: MessageKind::Answer,
+        answer: if generated.end_reason == AnswerEndReason::Normal { AnswerStatus::Completed } else { AnswerStatus::Partial },
+        answer_reason: Some(generated.end_reason), reading_reason, notices };
     let now = now_millis()?;
-    let user = ChatMessage { id: format!("msg-{}", Uuid::new_v4()), role: "user".into(), created_at: now.to_string(), paragraphs: vec![if continuation.is_some() { format!("继续读取：{question}") } else { question.into() }], tool_steps: Vec::new(), citations: Vec::new(), frame: attachment.as_ref().map(|(frame, _)| frame.clone()), run: None, suggestions: Vec::new() };
+    let user = ChatMessage { id: format!("msg-{}", Uuid::new_v4()), role: "user".into(), created_at: now.to_string(), paragraphs: vec![if continuation.is_some() { format!("继续读取：{question}") } else { question.into() }], tool_steps: Vec::new(), citations: Vec::new(), frame: attachment.as_ref().map(|(frame, _)| frame.clone()), run: None, suggestions: Vec::new(), outcome: None };
     let assistant = ChatMessage { id: format!("msg-{}", Uuid::new_v4()), role: "agent".into(), created_at: now.to_string(), paragraphs: vec![answer], tool_steps, citations, frame: None,
-        run: Some(ChatRun { elapsed_ms: started_at.elapsed().as_millis().min(u64::MAX as u128) as u64, changed_files: Vec::new(), read_sources, read_coverage }), suggestions: Vec::new() };
+        run: Some(ChatRun { elapsed_ms: started_at.elapsed().as_millis().min(u64::MAX as u128) as u64, changed_files: Vec::new(), read_sources, read_coverage }), suggestions: Vec::new(), outcome: Some(outcome) };
     {
         let mut store = agent.sessions.lock().map_err(|_| "会话暂不可用")?;
         let mut next = store.clone();

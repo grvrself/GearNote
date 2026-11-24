@@ -81,6 +81,54 @@ pub struct ChatMessage {
     pub run: Option<ChatRun>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub suggestions: Vec<ChatSuggestion>,
+    /// 结构化结果状态。旧消息缺失时为 None；前端行为判断只依赖此字段，
+    /// tool_steps 中的中文文案仅用于展示。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<MessageOutcome>,
+}
+
+/// 助手消息的种类，用于前端区分普通回答与其他交互消息。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MessageKind { Answer, Frame, Choice, LibraryProposal, NoteProposal, CommandProposal, CommandResult }
+
+/// 回答完成状态。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AnswerStatus { Completed, Partial, Failed, NotApplicable }
+
+/// 回答结束原因（稳定 code，与展示文案解耦）。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AnswerEndReason { Normal, StreamInterrupted, OutputLimit, FinishReason, ProviderError, RequestFailed, EmptyAnswer, ReadingFailed }
+
+/// 阅读阶段结束原因。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReadingEndReason { Complete, Enough, UserStopped, BudgetExhausted, ReadFailed }
+
+/// 稳定 code + 展示文字的提醒；message 仅用于显示，可以修改或翻译。
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MessageNotice { pub code: String, pub message: String }
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MessageOutcome {
+    pub kind: MessageKind,
+    pub answer: AnswerStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub answer_reason: Option<AnswerEndReason>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reading_reason: Option<ReadingEndReason>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub notices: Vec<MessageNotice>,
+}
+
+impl MessageOutcome {
+    pub fn answer(kind: MessageKind, answer: AnswerStatus) -> Self {
+        Self { kind, answer, answer_reason: None, reading_reason: None, notices: Vec::new() }
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -144,7 +192,13 @@ pub struct ChatSessionSummary { id: String, title: String, updated_at: String, m
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ChatState { active_id: String, sessions: Vec<ChatSessionSummary>, messages: Vec<ChatMessage>, referenced_ids: Vec<String>, working_context: WorkingContext, project_memory: Vec<ProjectMemory>, compacted_summary: String, compacted_count: usize, pending_choice: Option<PendingChoice>, pending_library_search: Option<PendingLibrarySearch>, pending_chat_note_edit: Option<PendingChatNoteEdit>, pending_command: Option<PendingCommand> }
+pub struct ChatState { active_id: String, sessions: Vec<ChatSessionSummary>, messages: Vec<ChatMessage>, referenced_ids: Vec<String>, working_context: WorkingContext, project_memory: Vec<ProjectMemory>, compacted_summary: String, compacted_count: usize, pending_choice: Option<PendingChoice>, pending_library_search: Option<PendingLibrarySearch>, pending_chat_note_edit: Option<PendingChatNoteEdit>, pending_command: Option<PendingCommand>, read_continuation: Option<ReadContinuationSummary> }
+
+/// 暴露给前端的续读摘要：只包含按钮展示所需的最小信息，
+/// 完整阅读进度仍只在后端参与校验（continuation_for）。
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReadContinuationSummary { pub message_id: String, pub mode: String, pub has_progress: bool }
 
 fn now_millis() -> Result<String, String> {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
@@ -164,7 +218,11 @@ pub(crate) fn state_view(store: &ChatStore) -> Result<ChatState, String> {
         id: item.id.clone(), title: item.title.clone(), updated_at: item.updated_at.clone(), message_count: item.messages.len(),
     }).collect::<Vec<_>>();
     sessions.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
-    Ok(ChatState { active_id: store.active_id.clone(), sessions, messages: active.messages.clone(), referenced_ids: active.referenced_ids.clone(), working_context: active.working_context.clone(), project_memory: store.project_memory.iter().filter(|entry| entry.active).cloned().collect(), compacted_summary: active.compacted_summary.clone(), compacted_count: active.compacted_count, pending_choice: active.pending_choice.clone(), pending_library_search: active.pending_library_search.clone(), pending_chat_note_edit: active.pending_chat_note_edit.clone(), pending_command: active.pending_command.clone() })
+    Ok(ChatState { active_id: store.active_id.clone(), sessions, messages: active.messages.clone(), referenced_ids: active.referenced_ids.clone(), working_context: active.working_context.clone(), project_memory: store.project_memory.iter().filter(|entry| entry.active).cloned().collect(), compacted_summary: active.compacted_summary.clone(), compacted_count: active.compacted_count, pending_choice: active.pending_choice.clone(), pending_library_search: active.pending_library_search.clone(), pending_chat_note_edit: active.pending_chat_note_edit.clone(), pending_command: active.pending_command.clone(), read_continuation: active.read_continuation.as_ref().map(|value| ReadContinuationSummary {
+        message_id: value.message_id.clone(),
+        mode: if value.progress.deep { "deep" } else if value.progress.full { "full" } else { "adaptive" }.into(),
+        has_progress: true,
+    }) })
 }
 
 fn load_chat_store(path: &PathBuf, legacy_path: &PathBuf) -> Result<ChatStore, Box<dyn std::error::Error>> {

@@ -91,19 +91,21 @@ async fn explore_references_task<F: Fn(&str)>(
     let mut choice_asked = false;
     let mut output_exhausted = false;
     let mut tool_limit_reached = false;
+    // 结构化阅读结束原因；与 steps 中的展示文案平行维护，文案可改而 code 不变。
+    let mut end_reason: Option<ReadingEndReason> = None;
     let mut read_chunk_ids = Vec::new();
     let output_limit = config.reading_budget.tool_chars.min(config.context_tier.char_limit()
         .saturating_sub(prepared.system_text.chars().count() + prepared.user_text.chars().count() + 2_000));
     'rounds: for round in 0..config.reading_budget.exploration_rounds {
         if let Some(task) = task {
-            if let Some(reason) = task.request_reason() { steps.push(format!("阅读结束：{reason}")); break; }
+            if let Some(reason) = task.request_reason() { steps.push(format!("阅读结束：{reason}")); end_reason = Some(task.end_code()); break; }
             activity(&format!("自动按需阅读：{} · 已读 {} 段", task.progress(), sources.len()));
         }
         let mut choice = if round == 0 { "required" } else { "auto" };
         let response = loop {
             let payload = exploration_payload(config, &messages, choice, allow_choice);
             if let Some(task) = task {
-                if let Err(reason) = task.begin_request() { steps.push(format!("阅读结束：{reason}")); break 'rounds; }
+                if let Err(reason) = task.begin_request() { steps.push(format!("阅读结束：{reason}")); end_reason = Some(task.end_code()); break 'rounds; }
                 activity(&format!("自动按需阅读：{} · 已读 {} 段", task.progress(), sources.len()));
             }
             let request = client.post(format!("{}/chat/completions", config.base_url)).bearer_auth(key).json(&payload);
@@ -112,13 +114,13 @@ async fn explore_references_task<F: Fn(&str)>(
             let result = if let Some(task) = task { task.wait(future).await } else { future.await };
             let response = match result {
                 Ok(response) => response,
-                Err(error) => { steps.push(format!("阅读提醒：{error}，保留已读内容")); break 'rounds; }
+                Err(error) => { steps.push(format!("阅读提醒：{error}，保留已读内容")); end_reason = Some(if task.is_some_and(|task| task.stopped_by_user()) { ReadingEndReason::UserStopped } else { ReadingEndReason::ReadFailed }); break 'rounds; }
             };
             if response.status().is_success() { break response; }
             let status = response.status();
             let future = async { Ok::<_, String>(response.text().await.unwrap_or_default()) };
             let body = if let Some(task) = task {
-                match task.wait(future).await { Ok(body) => body, Err(error) => { steps.push(format!("阅读结束：{error}")); break 'rounds; } }
+                match task.wait(future).await { Ok(body) => body, Err(error) => { steps.push(format!("阅读结束：{error}")); end_reason = Some(task.end_code()); break 'rounds; } }
             } else { future.await? };
             let lower = body.to_lowercase();
             let tool_error = status == reqwest::StatusCode::BAD_REQUEST || status.as_u16() == 422;
@@ -132,14 +134,19 @@ async fn explore_references_task<F: Fn(&str)>(
                 return Ok(None);
             }
             let error = provider_error(status, &body, &config.base_url, &config.model);
-            if task.is_some() { steps.push(format!("阅读提醒：{error}，保留已读内容")); break 'rounds; }
+            if task.is_some() { steps.push(format!("阅读提醒：{error}，保留已读内容")); end_reason = Some(if task.is_some_and(|task| task.stopped_by_user()) { ReadingEndReason::UserStopped } else { ReadingEndReason::ReadFailed }); break 'rounds; }
             return Err(error);
         };
         let future = async { response.json::<serde_json::Value>().await.map_err(|_| "资料探索响应格式无效".to_string()) };
         let result = if let Some(task) = task { task.wait(future).await } else { future.await };
-        let body = match result { Ok(body) => body, Err(error) => { steps.push(format!("阅读提醒：{error}")); break; } };
+        let body = match result { Ok(body) => body, Err(error) => { steps.push(format!("阅读提醒：{error}")); end_reason = Some(match task {
+            Some(task) if task.stopped_by_user() => ReadingEndReason::UserStopped,
+            Some(task) if task.request_reason().is_some() => ReadingEndReason::BudgetExhausted,
+            _ => ReadingEndReason::ReadFailed,
+        }); break; } };
         let reply = body.pointer("/choices/0/message").ok_or("资料探索未返回消息")?;
         let Some(tool_calls) = reply.get("tool_calls").and_then(serde_json::Value::as_array).filter(|calls| !calls.is_empty()) else {
+            end_reason = Some(ReadingEndReason::Enough);
             break;
         };
         let remaining_calls = config.reading_budget.tool_calls.saturating_sub(calls_used);
@@ -151,14 +158,14 @@ async fn explore_references_task<F: Fn(&str)>(
             true
         }).cloned().collect::<Vec<_>>();
         tool_limit_reached = tool_calls.len() > accepted_calls.len();
-        if accepted_calls.is_empty() { break; }
+        if accepted_calls.is_empty() { end_reason = Some(ReadingEndReason::BudgetExhausted); break; }
         let mut accepted_reply = reply.clone();
         accepted_reply["tool_calls"] = serde_json::Value::Array(accepted_calls.clone());
         messages.push(accepted_reply);
         let choices_in_batch = accepted_calls.iter().filter(|call| call.pointer("/function/name").and_then(serde_json::Value::as_str) == Some("request_choice")).count();
         for call in &accepted_calls {
             if let Some(task) = task {
-                if !task.record_tool() { steps.push(format!("阅读结束：{}", task.reason().unwrap_or("达到整项工具预算"))); break 'rounds; }
+                if !task.record_tool() { steps.push(format!("阅读结束：{}", task.reason().unwrap_or("达到整项工具预算"))); end_reason = Some(task.end_code()); break 'rounds; }
             }
             calls_used += 1;
             let source_count_before = sources.len();
@@ -177,7 +184,7 @@ async fn explore_references_task<F: Fn(&str)>(
                 if let Ok(draft) = result {
                     activity("等待用户选择…");
                     steps.push("等待用户选择".into());
-                    return Ok(Some(Exploration { messages, sources, steps, choice: Some(draft), progress: None }));
+                    return Ok(Some(Exploration { messages, sources, steps, choice: Some(draft), progress: None, reading_reason: None }));
                 }
                 let content = serde_json::json!({"error":result.err().unwrap()}).to_string();
                 messages.push(serde_json::json!({"role":"tool","tool_call_id":id,"content":content}));
@@ -212,7 +219,7 @@ async fn explore_references_task<F: Fn(&str)>(
             activity("资料探索已达本次调用预算，准备根据已读内容回答…");
             steps.push(format!("资料探索已达本次工具预算（最多 {} 次工具调用上限），准备回答", config.reading_budget.tool_calls));
         }
-        if output_exhausted || tool_limit_reached { break; }
+        if output_exhausted || tool_limit_reached { end_reason = Some(ReadingEndReason::BudgetExhausted); break; }
     }
     // 停止可能发生在一批工具调用的中间，补齐未执行项，保持最终问答的工具协议完整。
     if let Some(position) = messages.iter().rposition(|message| message.get("tool_calls").is_some()) {
@@ -231,7 +238,7 @@ async fn explore_references_task<F: Fn(&str)>(
     messages.push(serde_json::json!({"role":"user","content":final_instruction}));
     activity("资料读取完成，正在生成回答…");
     let progress = Some(ReadProgress { read_chunk_ids, ..ReadProgress::default() });
-    Ok(Some(Exploration { messages, sources, steps, choice: None, progress }))
+    Ok(Some(Exploration { messages, sources, steps, choice: None, progress, reading_reason: Some(end_reason.unwrap_or(ReadingEndReason::BudgetExhausted)) }))
 }
 
 #[derive(Serialize)]

@@ -18,6 +18,7 @@ export function useChat(openChat: () => void, applyNoteEditAndRefresh: (proposal
   const [pendingLibrarySearch, setPendingLibrarySearch] = useState<ChatState['pendingLibrarySearch']>(null)
   const [pendingChatNoteEdit, setPendingChatNoteEdit] = useState<ChatState['pendingChatNoteEdit']>(null)
   const [pendingCommand, setPendingCommand] = useState<ChatState['pendingCommand']>(null)
+  const [readContinuation, setReadContinuation] = useState<ChatState['readContinuation']>(null)
   const [sessions, setSessions] = useState<ChatSessionSummary[]>([])
   const [activeSessionId, setActiveSessionId] = useState('')
   const [sessionError, setSessionError] = useState('')
@@ -64,6 +65,7 @@ export function useChat(openChat: () => void, applyNoteEditAndRefresh: (proposal
     setPendingLibrarySearch(state.pendingLibrarySearch)
     setPendingChatNoteEdit(state.pendingChatNoteEdit)
     setPendingCommand(state.pendingCommand)
+    setReadContinuation(state.readContinuation ?? null)
     if (sessionChanged || referenceRevision === referenceRevisionRef.current) {
       referencedIdsRef.current = state.referencedIds
       setReferencedIdsState(state.referencedIds)
@@ -142,7 +144,11 @@ export function useChat(openChat: () => void, applyNoteEditAndRefresh: (proposal
       const saved = operation === operationRef.current ? await refreshChatState(operation) : null
       if (operation !== operationRef.current || !mountedRef.current) return true
       setStreaming(null)
-      if (saved && saved.activeId === sessionId && !reply.frame && !reply.toolSteps?.some(step => (step.startsWith('深度阅读失败：') || step.startsWith('回答未完成：')))
+      // 只用后端结构化结果决定是否生成后续建议：普通回答且完整/部分保留才触发；
+      // 失败、选择题、截图和提案消息由 kind/answer 排除，展示文案修改不影响此判断。
+      // 缺少 outcome 的历史回复保守跳过，不自动补发模型请求。
+      const suggestable = reply.outcome?.kind === 'answer' && (reply.outcome.answer === 'completed' || reply.outcome.answer === 'partial')
+      if (saved && saved.activeId === sessionId && suggestable
         && !(saved.pendingChoice?.status === 'open' && saved.pendingChoice.messageId === reply.id)
         && !(saved.pendingLibrarySearch?.status === 'open' && saved.pendingLibrarySearch.messageId === reply.id)
         && !(saved.pendingChatNoteEdit?.proposal.status === 'pending' && saved.pendingChatNoteEdit.messageId === reply.id)
@@ -298,7 +304,7 @@ export function useChat(openChat: () => void, applyNoteEditAndRefresh: (proposal
   }, [applyChatState, refreshChatState])
 
   return { referencedIds, setReferencedIds, agentStatus, setAgentStatus, messages, pendingChoice, pendingLibrarySearch,
-    pendingChatNoteEdit, pendingCommand, sessions, activeSessionId, sessionError, workingContext, projectMemory,
+    pendingChatNoteEdit, pendingCommand, readContinuation, sessions, activeSessionId, sessionError, workingContext, projectMemory,
     compactedSummary, compactedCount, sending, streaming, suggestingMessageId, suggestionErrorId, agentError, clearAgentError,
     sendQuestion, captureStoryboardFrame, decideLibrarySearch, decideChatNoteEdit, decideCommand, manageSession }
 }

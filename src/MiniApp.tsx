@@ -21,7 +21,7 @@ export default function MiniApp() {
   const desktop = isTauri()
   const records = desktop ? savedRecords : recordFixtures.map(record => ({ ...record, demo: true }))
   const { referencedIds, setReferencedIds, agentStatus, messages, activeSessionId, sending, streaming,
-    suggestingMessageId, suggestionErrorId, pendingChoice, pendingLibrarySearch, pendingChatNoteEdit, pendingCommand,
+    suggestingMessageId, suggestionErrorId, pendingChoice, pendingLibrarySearch, pendingChatNoteEdit, pendingCommand, readContinuation,
     agentError, clearAgentError, sendQuestion, decideLibrarySearch, decideChatNoteEdit, decideCommand } = useChat(() => {}, applyNoteEdit)
 
   useEffect(() => {
@@ -99,6 +99,6 @@ export default function MiniApp() {
       </div>
     </header>
     {(error || agentError) && <div className="mini-error" role="alert"><span>{error || agentError}</span><button type="button" aria-label="关闭错误提示" onClick={() => { setError(''); clearAgentError() }}>×</button></div>}
-    <ChatPanel compact records={records} pendingChoice={pendingChoice} pendingLibrarySearch={pendingLibrarySearch} onResolveLibrarySearch={decideLibrarySearch} pendingChatNoteEdit={pendingChatNoteEdit} onResolveChatNoteEdit={decideChatNoteEdit} pendingCommand={pendingCommand} onResolveCommand={decideCommand} sessionId={activeSessionId} referencedIds={referencedIds} historyOpen={false} agentAvailable={Boolean(agentStatus?.hasKey && agentStatus.model)} sending={sending} streaming={streaming} suggestingMessageId={suggestingMessageId} suggestionErrorId={suggestionErrorId} onSend={sendQuestion} onContinueReading={id => sendQuestion('继续读取', undefined, [], undefined, false, undefined, id)} onOpenAgentSetup={() => { void showMain() }} onRemoveReference={removeReference} onRevealRecord={revealRecord} onToggleHistory={() => { void showMain() }} onShowHistory={() => { void showMain() }} messages={messages} />
+    <ChatPanel compact records={records} pendingChoice={pendingChoice} pendingLibrarySearch={pendingLibrarySearch} onResolveLibrarySearch={decideLibrarySearch} pendingChatNoteEdit={pendingChatNoteEdit} onResolveChatNoteEdit={decideChatNoteEdit} pendingCommand={pendingCommand} onResolveCommand={decideCommand} sessionId={activeSessionId} referencedIds={referencedIds} historyOpen={false} agentAvailable={Boolean(agentStatus?.hasKey && agentStatus.model)} sending={sending} streaming={streaming} suggestingMessageId={suggestingMessageId} suggestionErrorId={suggestionErrorId} onSend={sendQuestion} onContinueReading={id => sendQuestion('继续读取', undefined, [], undefined, false, undefined, id)} onOpenAgentSetup={() => { void showMain() }} onRemoveReference={removeReference} onRevealRecord={revealRecord} onToggleHistory={() => { void showMain() }} onShowHistory={() => { void showMain() }} messages={messages} readContinuationMessageId={readContinuation?.messageId ?? null} />
   </div>
 }

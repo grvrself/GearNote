@@ -43,6 +43,13 @@ async fn auxiliary_completion_with_timeout(state: &AgentState, system: &str, use
     Ok(answer)
 }
 
+/// 结构化状态门槛：只有普通回答（完整或部分保留）才允许生成后续建议；
+/// 失败回答、选择题、截图和各类提案消息一律跳过。旧消息没有 outcome 时保持旧行为。
+fn outcome_allows_suggestions(message: &ChatMessage) -> bool {
+    message.outcome.as_ref().is_none_or(|outcome| outcome.kind == MessageKind::Answer
+        && (outcome.answer == AnswerStatus::Completed || outcome.answer == AnswerStatus::Partial))
+}
+
 fn parse_chat_suggestions(answer: &str) -> Result<Vec<ChatSuggestion>, String> {
     let start = answer.find('{').ok_or("模型未返回建议 JSON")?;
     let end = answer.rfind('}').ok_or("模型未返回完整建议 JSON")?;
@@ -76,6 +83,7 @@ pub async fn suggest_chat_followups(app: AppHandle, state: State<'_, AgentState>
         let assistant = &session.messages[session.messages.len() - 1];
         let user = &session.messages[session.messages.len() - 2];
         if assistant.id != message_id || assistant.role != "agent" || user.role != "user" || assistant.frame.is_some() { return Ok(Vec::new()); }
+        if !outcome_allows_suggestions(assistant) { return Ok(Vec::new()); }
         if !assistant.suggestions.is_empty() { return Ok(assistant.suggestions.clone()); }
         (user.paragraphs.join(" ").chars().take(1800).collect::<String>(),
             assistant.paragraphs.join(" ").chars().take(3000).collect::<String>())

@@ -67,4 +67,27 @@ describe('ChatPanel 关键交互', () => {
     await waitFor(() => expect(onResolveLibrarySearch).toHaveBeenCalledWith('search-1', true, '原问题'))
     expect(onSend).not.toHaveBeenCalled()
   })
+
+  it('续读按钮只依据后端续读状态显示，不再依赖中文前缀', async () => {
+    const onContinueReading = vi.fn().mockResolvedValue(true)
+    const message: ChatMessage = { ...reply, toolSteps: ['可继续读取：旧文案'] }
+    const view = render(<ChatPanel {...panelProps({ messages: [message], onContinueReading })} />)
+    expect(screen.queryByRole('button', { name: '继续读取' })).not.toBeInTheDocument()
+    view.rerender(<ChatPanel {...panelProps({ messages: [message], onContinueReading, readContinuationMessageId: reply.id })} />)
+    fireEvent.click(screen.getByRole('button', { name: '继续读取' }))
+    await waitFor(() => expect(onContinueReading).toHaveBeenCalledWith(reply.id))
+  })
+
+  it('结构化提醒按 code 渲染，修改展示文案不影响显示', () => {
+    const message: ChatMessage = { ...reply, toolSteps: ['随便改写的步骤文案'], outcome: {
+      kind: 'answer', answer: 'partial',
+      notices: [{ code: 'citation_unverified', message: '引用提醒：新文案' }, { code: 'answer_warning', message: '部分回答已保留（新文案）' }],
+    } }
+    render(<ChatPanel {...panelProps({ messages: [message] })} />)
+    expect(screen.getByText('引用提醒：新文案')).toBeInTheDocument()
+    expect(screen.getByText('部分回答已保留（新文案）')).toBeInTheDocument()
+    // toolSteps 仍作为执行记录展示，但不再被当作提醒（role=note）渲染。
+    expect(screen.queryByRole('note', { name: '随便改写的步骤文案' })).not.toBeInTheDocument()
+    expect(screen.getAllByRole('note')).toHaveLength(2)
+  })
 })

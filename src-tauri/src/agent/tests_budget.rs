@@ -53,7 +53,7 @@ fn old_config_and_session_load_and_continuation_survives_persistence() {
     let mut legacy = serde_json::to_value(&session).unwrap();
     legacy.as_object_mut().unwrap().remove("readContinuation");
     assert!(serde_json::from_value::<ChatSession>(legacy).unwrap().read_continuation.is_none());
-    let message = save_final_failure_exchange(&mut session, "总结", "空回答", "1", 0, None, vec![], vec![], None, None);
+    let message = save_final_failure_exchange(&mut session, "总结", "空回答", AnswerEndReason::EmptyAnswer, "1", 0, None, vec![], vec![], None, None);
     session.read_continuation = Some(ReadContinuation { message_id: message.id.clone(), question: "总结".into(),
         referenced_ids: vec!["video-budget".into()], fingerprint: reading_fingerprint(&[budget_record()]),
         progress: ReadProgress { deep: true, batch_count: 4, ..ReadProgress::default() } });

@@ -21,6 +21,11 @@ impl ReadingTask {
         else if self.started.elapsed().as_secs() >= self.budget.deep_seconds { Some("达到整项阅读时间预算") }
         else { None }
     }
+    fn stopped_by_user(&self) -> bool { self.control.stopped.load(Ordering::SeqCst) }
+    /// 结构化阅读结束原因：用户停止与预算耗尽必须可区分。
+    fn end_code(&self) -> ReadingEndReason {
+        if self.stopped_by_user() { ReadingEndReason::UserStopped } else { ReadingEndReason::BudgetExhausted }
+    }
     fn request_reason(&self) -> Option<&'static str> {
         self.reason().or_else(|| (self.requests.load(Ordering::SeqCst) >= self.budget.exploration_rounds).then_some("达到整项模型请求预算"))
     }

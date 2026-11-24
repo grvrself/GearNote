@@ -43,6 +43,8 @@ function chatMessage(id: string, role: ChatMessage['role'] = 'agent', overrides:
   return { id, role, createdAt: '1', paragraphs: [role === 'agent' ? '已保存的回答' : '问题'], ...overrides }
 }
 
+const completedOutcome = { kind: 'answer', answer: 'completed' } as const
+
 function chatState(overrides: Partial<ChatState> = {}): ChatState {
   return {
     activeId: 'session-a',
@@ -169,7 +171,7 @@ describe('useChat 聊天控制', () => {
 
   it('旧建议完成后不能覆盖已切换的新会话', async () => {
     const view = await renderChat()
-    const reply = chatMessage('reply-a')
+    const reply = chatMessage('reply-a', 'agent', { outcome: completedOutcome })
     const suggestion = deferred<never[]>()
     vi.mocked(askAgent).mockResolvedValue(reply)
     vi.mocked(suggestChatFollowups).mockReturnValue(suggestion.promise)
@@ -250,7 +252,7 @@ describe('useChat 聊天控制', () => {
 
   it('旧建议完成不会挤掉新请求的状态回读', async () => {
     const view = await renderChat()
-    const replyA = chatMessage('reply-a')
+    const replyA = chatMessage('reply-a', 'agent', { outcome: completedOutcome })
     const suggestionA = deferred<never[]>()
     vi.mocked(askAgent).mockResolvedValue(replyA)
     vi.mocked(suggestChatFollowups).mockReturnValue(suggestionA.promise)
@@ -260,7 +262,7 @@ describe('useChat 聊天控制', () => {
 
     // 第二次发送：askAgent 与状态回读都受控；新建议立即完成，避免干扰断言。
     vi.mocked(suggestChatFollowups).mockResolvedValue([])
-    const replyB = chatMessage('reply-b')
+    const replyB = chatMessage('reply-b', 'agent', { outcome: completedOutcome })
     const askB = deferred<ChatMessage>()
     vi.mocked(askAgent).mockReturnValue(askB.promise)
     const readB = deferred<ChatState>()
@@ -303,5 +305,47 @@ describe('useChat 聊天控制', () => {
     act(() => chatListener?.())
     await act(async () => { pending.resolve(reply); await sending })
     await waitFor(() => expect(view.result.current.messages.map(message => message.id)).toEqual(['other-window']))
+  })
+
+  it('失败回答不生成建议，且修改中文文案不影响判断', async () => {
+    const view = await renderChat()
+    const failed = chatMessage('reply-failed', 'agent', {
+      toolSteps: ['文案已完全改写，不再是旧前缀'],
+      outcome: { kind: 'answer', answer: 'failed', answerReason: 'reading_failed', readingReason: 'read_failed' },
+    })
+    vi.mocked(askAgent).mockResolvedValue(failed)
+    vi.mocked(getChatState).mockResolvedValue(chatState({ messages: [failed] }))
+    await act(async () => { await view.result.current.sendQuestion('深读失败的问题') })
+    expect(suggestChatFollowups).not.toHaveBeenCalled()
+    expect(view.result.current.suggestingMessageId).toBeNull()
+  })
+
+  it('缺少结构化状态的历史回复保守跳过建议，不自动补发模型请求', async () => {
+    const view = await renderChat()
+    const legacy = chatMessage('reply-legacy', 'agent', { toolSteps: ['深度阅读失败：旧文案'] })
+    vi.mocked(askAgent).mockResolvedValue(legacy)
+    vi.mocked(getChatState).mockResolvedValue(chatState({ messages: [legacy] }))
+    await act(async () => { await view.result.current.sendQuestion('问题') })
+    expect(suggestChatFollowups).not.toHaveBeenCalled()
+  })
+
+  it('用户停止阅读后完成的部分回答仍生成建议', async () => {
+    const view = await renderChat()
+    const partial = chatMessage('reply-partial', 'agent', {
+      outcome: { kind: 'answer', answer: 'partial', answerReason: 'stream_interrupted', readingReason: 'user_stopped' },
+    })
+    vi.mocked(askAgent).mockResolvedValue(partial)
+    vi.mocked(getChatState).mockResolvedValue(chatState({ messages: [partial] }))
+    await act(async () => { await view.result.current.sendQuestion('停止阅读后回答') })
+    await waitFor(() => expect(suggestChatFollowups).toHaveBeenCalledWith('session-a', 'reply-partial'))
+  })
+
+  it('选择题消息不误触发后续建议', async () => {
+    const view = await renderChat()
+    const choice = chatMessage('reply-choice', 'agent', { outcome: { kind: 'choice', answer: 'not_applicable' } })
+    vi.mocked(askAgent).mockResolvedValue(choice)
+    vi.mocked(getChatState).mockResolvedValue(chatState({ messages: [choice] }))
+    await act(async () => { await view.result.current.sendQuestion('需要选择的问题') })
+    expect(suggestChatFollowups).not.toHaveBeenCalled()
   })
 })

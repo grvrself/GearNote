@@ -1,5 +1,5 @@
 // 深度视频阅读与选择题。
-struct Exploration { messages: Vec<serde_json::Value>, sources: Vec<SourceChunk>, steps: Vec<String>, choice: Option<ChoiceDraft>, progress: Option<ReadProgress> }
+struct Exploration { messages: Vec<serde_json::Value>, sources: Vec<SourceChunk>, steps: Vec<String>, choice: Option<ChoiceDraft>, progress: Option<ReadProgress>, reading_reason: Option<ReadingEndReason> }
 #[cfg(test)]
 const MAX_TOOL_OUTPUT_CHARS: usize = 4_000;
 const MAX_TOOL_CALL_CHARS: usize = 6_000;
@@ -8,11 +8,13 @@ fn save_deep_failure_exchange(session: &mut ChatSession, question: &str, error: 
     choice_id: Option<&str>) -> ChatMessage {
     let detail = error.chars().take(300).collect::<String>();
     let user = ChatMessage { id: format!("msg-{}", Uuid::new_v4()), role: "user".into(), created_at: now.into(),
-        paragraphs: vec![question.into()], tool_steps: Vec::new(), citations: Vec::new(), frame: None, run: None, suggestions: Vec::new() };
+        paragraphs: vec![question.into()], tool_steps: Vec::new(), citations: Vec::new(), frame: None, run: None, suggestions: Vec::new(), outcome: None };
     let assistant = ChatMessage { id: format!("msg-{}", Uuid::new_v4()), role: "agent".into(), created_at: now.into(),
         paragraphs: vec![format!("深度阅读未完成：{detail}。本次没有生成可引用的回答；可以重试，或关闭深度模式后再提问。")],
         tool_steps: vec![format!("深度阅读失败：{detail}")], citations: Vec::new(), frame: None,
-        run: Some(ChatRun { elapsed_ms, changed_files: Vec::new(), read_sources: Vec::new(), read_coverage: None }), suggestions: Vec::new() };
+        run: Some(ChatRun { elapsed_ms, changed_files: Vec::new(), read_sources: Vec::new(), read_coverage: None }), suggestions: Vec::new(),
+        outcome: Some(MessageOutcome { kind: MessageKind::Answer, answer: AnswerStatus::Failed,
+            answer_reason: Some(AnswerEndReason::ReadingFailed), reading_reason: Some(ReadingEndReason::ReadFailed), notices: Vec::new() }) };
     answer_pending_choice(session, question, now, choice_id);
     session.messages.push(user);
     session.messages.push(assistant.clone());
@@ -45,6 +47,7 @@ async fn explore_video_deep_task<F: Fn(&str)>(activity: F, config: &AgentConfig,
     let mut findings = resume.map(|value| value.findings.clone()).unwrap_or_default();
     let mut steps = Vec::new();
     let mut enough = false;
+    let mut interrupted = false;
     let full_coverage = config.reading_budget.strategy == ReadingStrategy::Full || deep_video::needs_full_coverage(question);
     'reading: while read < batches.len() && read - start_batch < config.reading_budget.deep_batches && start.elapsed().as_secs() < config.reading_budget.deep_seconds {
         if let Some(task) = task {
@@ -79,11 +82,11 @@ async fn explore_video_deep_task<F: Fn(&str)>(activity: F, config: &AgentConfig,
             };
             let body = match result {
                 Ok(body) => body,
-                Err(error) if read > 0 || task.is_some() => { steps.push(format!("阅读提醒：{error}，保留已读进度")); break 'reading; }
+                Err(error) if read > 0 || task.is_some() => { steps.push(format!("阅读提醒：{error}，保留已读进度")); interrupted = true; break 'reading; }
                 Err(error) => return Err(error),
             };
             let Some(answer) = body.pointer("/choices/0/message/content").and_then(serde_json::Value::as_str) else {
-                if read > 0 { steps.push("阅读提醒：没有返回检查点，保留已读进度".into()); break 'reading; }
+                if read > 0 { steps.push("阅读提醒：没有返回检查点，保留已读进度".into()); interrupted = true; break 'reading; }
                 return Err("深度模式未返回检查点".into());
             };
             match deep_video::parse_checkpoint(answer, round, read + 1) {
@@ -120,9 +123,15 @@ async fn explore_video_deep_task<F: Fn(&str)>(activity: F, config: &AgentConfig,
     }
     let complete = read == batches.len();
     let reason = if complete { "字幕已读完" } else if let Some(reason) = task.and_then(ReadingTask::request_reason) { reason }
-        else if steps.last().is_some_and(|step| step.starts_with("阅读提醒：")) { "模型请求中断，已保留进度" }
+        else if interrupted { "模型请求中断，已保留进度" }
         else if enough { "模型认为已有足够原文" }
         else if read - start_batch >= config.reading_budget.deep_batches { "达到本次字幕批次预算" } else { "达到本次阅读时间预算" }.to_string();
+    // 与展示文案平行的结构化结束原因；两者来自同一组分支，修改文案不影响 code。
+    let reason_code = if complete { ReadingEndReason::Complete }
+        else if task.and_then(ReadingTask::request_reason).is_some() { task.map(ReadingTask::end_code).unwrap_or(ReadingEndReason::BudgetExhausted) }
+        else if interrupted { ReadingEndReason::ReadFailed }
+        else if enough { ReadingEndReason::Enough }
+        else { ReadingEndReason::BudgetExhausted };
     let read_until_seconds = read.checked_sub(1).and_then(|number| batches.get(number)).map(|batch| batch.end_seconds).unwrap_or(0);
     let coverage = ReadCoverage { read_until_seconds, total_seconds, batch_count: read, complete, reason: reason.clone() };
     steps.push(format!("深度阅读结束：{reason}；实际读到 {:02}:{:02} / {:02}:{:02}", read_until_seconds / 60, read_until_seconds % 60,
@@ -157,7 +166,7 @@ async fn explore_video_deep_task<F: Fn(&str)>(activity: F, config: &AgentConfig,
     let messages = vec![serde_json::json!({"role":"system","content":prepared.system_text}), serde_json::json!({"role":"user","content":final_text})];
     let sources = batches.into_iter().take(read).map(|batch| batch.source).collect();
     let progress = (!complete).then_some(ReadProgress { deep: true, full: false, batch_count: read, findings, read_chunk_ids: Vec::new() });
-    Ok((Exploration { messages, sources, steps, choice: None, progress }, coverage))
+    Ok((Exploration { messages, sources, steps, choice: None, progress, reading_reason: Some(reason_code) }, coverage))
 }
 
 fn validate_choice(args: &serde_json::Value, already_asked: bool, pending_open: bool) -> Result<ChoiceDraft, String> {
@@ -222,11 +231,12 @@ fn validate_choice_submission(session: &ChatSession, question: &str, choice_id: 
 
 fn save_choice_exchange(session: &mut ChatSession, question: &str, draft: ChoiceDraft, steps: Vec<String>, now: &str, elapsed_ms: u64) -> ChatMessage {
     let user = ChatMessage { id: format!("msg-{}", Uuid::new_v4()), role: "user".into(), created_at: now.into(),
-        paragraphs: vec![question.into()], tool_steps: Vec::new(), citations: Vec::new(), frame: None, run: None, suggestions: Vec::new() };
+        paragraphs: vec![question.into()], tool_steps: Vec::new(), citations: Vec::new(), frame: None, run: None, suggestions: Vec::new(), outcome: None };
     let assistant = ChatMessage { id: format!("msg-{}", Uuid::new_v4()), role: "agent".into(), created_at: now.into(),
         paragraphs: vec![draft.prompt.clone(), draft.why.clone()].into_iter().filter(|text| !text.is_empty()).collect(),
         tool_steps: steps, citations: Vec::new(), frame: None,
-        run: Some(ChatRun { elapsed_ms, changed_files: Vec::new(), read_sources: Vec::new(), read_coverage: None }), suggestions: Vec::new() };
+        run: Some(ChatRun { elapsed_ms, changed_files: Vec::new(), read_sources: Vec::new(), read_coverage: None }), suggestions: Vec::new(),
+        outcome: Some(MessageOutcome::answer(MessageKind::Choice, AnswerStatus::NotApplicable)) };
     session.pending_choice = Some(PendingChoice { id: format!("choice-{}", Uuid::new_v4()), message_id: assistant.id.clone(),
         prompt: draft.prompt, why: draft.why, options: draft.options, recommended: draft.recommended,
         status: "open".into(), selected_id: None, custom_text: None, answered_at: None });

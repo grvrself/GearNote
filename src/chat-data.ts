@@ -8,6 +8,13 @@ export type ChatCitation = {
 
 export type ChatFrame = { imageId: string; recordId: string; atSeconds: number }
 
+export type MessageKind = 'answer' | 'frame' | 'choice' | 'library_proposal' | 'note_proposal' | 'command_proposal' | 'command_result'
+export type AnswerStatus = 'completed' | 'partial' | 'failed' | 'not_applicable'
+export type AnswerEndReason = 'normal' | 'stream_interrupted' | 'output_limit' | 'finish_reason' | 'provider_error' | 'request_failed' | 'empty_answer' | 'reading_failed'
+export type ReadingEndReason = 'complete' | 'enough' | 'user_stopped' | 'budget_exhausted' | 'read_failed'
+export type MessageNotice = { code: string; message: string }
+export type MessageOutcome = { kind: MessageKind; answer: AnswerStatus; answerReason?: AnswerEndReason; readingReason?: ReadingEndReason; notices?: MessageNotice[] }
+
 export type ChatRun = { elapsedMs: number; changedFiles: string[]; readSources?: { sourceIndex: number; recordId: string; title: string; atSeconds?: number | null }[]; readCoverage?: { readUntilSeconds: number; totalSeconds: number; batchCount: number; complete: boolean; reason: string } }
 export type ChatStreaming = { question: string; answer: string; startedAt: number; activity?: string; activities: string[]; requestId?: string; reading?: boolean }
 export type ChatSuggestion = { label: string; prompt: string }
@@ -23,6 +30,7 @@ export type ChatMessage = {
   points?: string[]
   citations?: ChatCitation[]
   frame?: ChatFrame
+  outcome?: MessageOutcome
 }
 
 // Example conversation. The cited times correspond to recordFixtures in data.ts.
