@@ -107,7 +107,7 @@
     #[test]
     fn final_request_without_any_model_text_keeps_question_and_error() {
         let mut session = new_session().unwrap();
-        let reply = save_final_failure_exchange(&mut session, "你觉得讲得怎么样", "模型返回了空回答", AnswerEndReason::EmptyAnswer, "100", 2400,
+        let reply = save_final_failure_exchange(&mut session, "你觉得讲得怎么样", "模型返回了空回答", AnswerEndReason::EmptyAnswer, Some(ReadingEndReason::UserStopped), "100", 2400,
             None, vec!["深度阅读结束：已读完".into()],
             vec![ReadSource { source_index: 1, record_id: "video".into(), title: "视频字幕".into(), at_seconds: Some(15) }],
             Some(ReadCoverage { read_until_seconds: 15, total_seconds: 15, batch_count: 1, complete: true, reason: "字幕已读完".into() }), None);
@@ -122,6 +122,8 @@
         assert_eq!(outcome.kind, MessageKind::Answer);
         assert_eq!(outcome.answer, AnswerStatus::Failed);
         assert_eq!(outcome.answer_reason, Some(AnswerEndReason::EmptyAnswer));
+        // 回答失败仍须保留阅读结束原因，二者不混用一个状态。
+        assert_eq!(outcome.reading_reason, Some(ReadingEndReason::UserStopped));
     }
 
 
@@ -594,8 +596,10 @@
             paragraphs: vec!["停止阅读后仍完成的回答".into()], tool_steps: vec![], citations: vec![],
             frame: None, run: None, suggestions: Vec::new(), outcome: Some(outcome) };
         session.messages.push(message.clone());
+        session.referenced_ids = vec!["record-a".into()];
         session.read_continuation = Some(ReadContinuation { message_id: message.id.clone(), question: "问题".into(),
-            referenced_ids: vec!["record-a".into()], fingerprint: "fp".into(), progress: ReadProgress::default() });
+            referenced_ids: vec!["record-a".into()], fingerprint: "fp".into(),
+            progress: ReadProgress { read_chunk_ids: vec!["chunk-1".into()], ..ReadProgress::default() } });
         let dir = std::env::temp_dir().join(format!("gearnote-outcome-{}", Uuid::new_v4()));
         fs::create_dir_all(&dir).unwrap();
         let path = dir.join("knowflow.db");
@@ -611,5 +615,18 @@
         assert_eq!(summary.message_id, "msg-persisted");
         assert_eq!(summary.mode, "adaptive");
         assert!(summary.has_progress);
+        // 空进度不应声称可续读。
+        let mut empty = loaded.clone();
+        empty.sessions[0].read_continuation.as_mut().unwrap().progress = ReadProgress::default();
+        assert!(!state_view(&empty).unwrap().read_continuation.unwrap().has_progress);
+        // 已有更新消息时不应声称可续读。
+        let mut newer = loaded.clone();
+        newer.sessions[0].messages.push(ChatMessage { id: "msg-newer".into(), role: "user".into(), created_at: "2".into(),
+            paragraphs: vec!["新问题".into()], tool_steps: vec![], citations: vec![], frame: None, run: None, suggestions: vec![], outcome: None });
+        assert!(!state_view(&newer).unwrap().read_continuation.unwrap().has_progress);
+        // 参考失效时不应声称可续读。
+        let mut switched = loaded.clone();
+        switched.sessions[0].referenced_ids = vec!["record-b".into()];
+        assert!(!state_view(&switched).unwrap().read_continuation.unwrap().has_progress);
         fs::remove_dir_all(dir).unwrap();
     }

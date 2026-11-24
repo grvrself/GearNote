@@ -218,11 +218,20 @@ pub(crate) fn state_view(store: &ChatStore) -> Result<ChatState, String> {
         id: item.id.clone(), title: item.title.clone(), updated_at: item.updated_at.clone(), message_count: item.messages.len(),
     }).collect::<Vec<_>>();
     sessions.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
-    Ok(ChatState { active_id: store.active_id.clone(), sessions, messages: active.messages.clone(), referenced_ids: active.referenced_ids.clone(), working_context: active.working_context.clone(), project_memory: store.project_memory.iter().filter(|entry| entry.active).cloned().collect(), compacted_summary: active.compacted_summary.clone(), compacted_count: active.compacted_count, pending_choice: active.pending_choice.clone(), pending_library_search: active.pending_library_search.clone(), pending_chat_note_edit: active.pending_chat_note_edit.clone(), pending_command: active.pending_command.clone(), read_continuation: active.read_continuation.as_ref().map(|value| ReadContinuationSummary {
-        message_id: value.message_id.clone(),
-        mode: if value.progress.deep { "deep" } else if value.progress.full { "full" } else { "adaptive" }.into(),
-        has_progress: true,
-    }) })
+    // hasProgress 表示“存在可恢复且仍有内容的有效进度”，而非字段存在：
+    // 已有更新消息、参考失效或空进度都不应声称可续读。最终有效性仍由后端续读入口重新校验。
+    let read_continuation = active.read_continuation.as_ref().map(|value| {
+        let is_last = active.messages.last().is_some_and(|message| message.id == value.message_id);
+        let mut expected = value.referenced_ids.clone(); expected.sort();
+        let mut current = active.referenced_ids.clone(); current.sort();
+        let has_content = !value.progress.read_chunk_ids.is_empty() || value.progress.batch_count > 0 || !value.progress.findings.is_empty();
+        ReadContinuationSummary {
+            message_id: value.message_id.clone(),
+            mode: if value.progress.deep { "deep" } else if value.progress.full { "full" } else { "adaptive" }.into(),
+            has_progress: is_last && expected == current && has_content,
+        }
+    });
+    Ok(ChatState { active_id: store.active_id.clone(), sessions, messages: active.messages.clone(), referenced_ids: active.referenced_ids.clone(), working_context: active.working_context.clone(), project_memory: store.project_memory.iter().filter(|entry| entry.active).cloned().collect(), compacted_summary: active.compacted_summary.clone(), compacted_count: active.compacted_count, pending_choice: active.pending_choice.clone(), pending_library_search: active.pending_library_search.clone(), pending_chat_note_edit: active.pending_chat_note_edit.clone(), pending_command: active.pending_command.clone(), read_continuation })
 }
 
 fn load_chat_store(path: &PathBuf, legacy_path: &PathBuf) -> Result<ChatStore, Box<dyn std::error::Error>> {

@@ -141,7 +141,7 @@ async fn generate_final_answer(app: &AppHandle, client: &reqwest::Client, config
 }
 
 
-fn save_final_failure_exchange(session: &mut ChatSession, question: &str, error: &str, reason: AnswerEndReason, now: &str, elapsed_ms: u64,
+fn save_final_failure_exchange(session: &mut ChatSession, question: &str, error: &str, reason: AnswerEndReason, reading_reason: Option<ReadingEndReason>, now: &str, elapsed_ms: u64,
     frame: Option<ChatFrame>, mut steps: Vec<String>, read_sources: Vec<ReadSource>, read_coverage: Option<ReadCoverage>,
     choice_id: Option<&str>) -> ChatMessage {
     let detail = error.chars().filter(|ch| !ch.is_control()).take(350).collect::<String>();
@@ -153,7 +153,7 @@ fn save_final_failure_exchange(session: &mut ChatSession, question: &str, error:
         citations: Vec::new(), frame: None,
         run: Some(ChatRun { elapsed_ms, changed_files: Vec::new(), read_sources, read_coverage }), suggestions: Vec::new(),
         outcome: Some(MessageOutcome { kind: MessageKind::Answer, answer: AnswerStatus::Failed,
-            answer_reason: Some(reason), reading_reason: None, notices: Vec::new() }) };
+            answer_reason: Some(reason), reading_reason, notices: Vec::new() }) };
     answer_pending_choice(session, question, now, choice_id);
     session.messages.push(user);
     session.messages.push(assistant.clone());
@@ -564,7 +564,7 @@ pub async fn ask_agent(app: AppHandle, agent: State<'_, AgentState>, storage: St
             let active = next.sessions.iter_mut().find(|item| item.id == request_session_id).ok_or("当前会话不存在")?;
             if active.messages.is_empty() && active.title == "新会话" { active.title = session_title(question); }
             if read_progress.is_some() { tool_steps.push("可继续读取：本轮最终回答未返回，已保留阅读进度".into()); }
-            let assistant = save_final_failure_exchange(active, question, &failure.message, failure.reason, &now,
+            let assistant = save_final_failure_exchange(active, question, &failure.message, failure.reason, reading_reason, &now,
                 started_at.elapsed().as_millis().min(u64::MAX as u128) as u64,
                 attachment.as_ref().map(|(frame, _)| frame.clone()), tool_steps, read_sources, read_coverage, choice_id.as_deref());
             active.read_continuation = read_progress.map(|progress| ReadContinuation { message_id: assistant.id.clone(),
