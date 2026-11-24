@@ -141,6 +141,14 @@ pub struct AppState {
 }
 
 impl AppState {
+    /// 仅供隔离测试构造：不读取真实用户数据目录。
+    #[cfg(test)]
+    pub(crate) fn for_test(pair_code: &str, records_path: PathBuf) -> Self {
+        Self { records: Mutex::new(Vec::new()), capture_jobs: Mutex::new(Vec::new()),
+            records_path, pair_code: pair_code.into(),
+            last_extension_seen: Mutex::new(None), bridge_error: Mutex::new(None) }
+    }
+
     pub fn load(app: &AppHandle) -> Result<Self, Box<dyn std::error::Error>> {
         let data_dir = app.path().app_data_dir()?;
         fs::create_dir_all(&data_dir)?;
