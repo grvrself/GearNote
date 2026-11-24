@@ -138,6 +138,7 @@ impl BridgeCore {
         Self { stop, threads }
     }
 
+    #[cfg(test)]
     pub(crate) fn shutdown(self) {
         self.stop.store(true, Ordering::SeqCst);
         for thread in self.threads { let _ = thread.join(); }
