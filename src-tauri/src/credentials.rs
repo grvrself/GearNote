@@ -74,16 +74,89 @@ impl TaskCookies {
         fs::create_dir_all(credentials_dir).map_err(|error| format!("无法创建临时凭据目录：{error}"))?;
         restrict_dir_permissions(credentials_dir)?;
         let dir = credentials_dir.join(format!("task-{}", uuid::Uuid::new_v4()));
-        fs::create_dir(&dir).map_err(|error| format!("无法创建临时凭据任务目录：{error}"))?;
-        restrict_dir_permissions(&dir)?;
-        let lock = FileLock::acquire(&dir.join("lock"))?;
-        let file = dir.join("cookies.txt");
-        fs::write(&file, content).map_err(|error| format!("无法写入临时 cookies：{error}"))?;
-        restrict_file_permissions(&file)?;
-        Ok(Self { dir, file, lock: Some(lock) })
+        create_private_dir(&dir)?;
+        Self::prepare_in(&dir, content)
+    }
+
+    /// 目录已存在时建立清理所有权：此后任一步骤失败都由 Drop 清理本次任务目录，
+    /// 不会在 guard 建立前提前返回而留下明文文件。
+    fn prepare_in(dir: &Path, content: &str) -> Result<Self, String> {
+        let mut guard = Self { dir: dir.to_path_buf(), file: dir.join("cookies.txt"), lock: None };
+        restrict_dir_permissions(dir)?;
+        guard.lock = Some(FileLock::acquire(&dir.join("lock"))?);
+        write_private_file(&guard.file, content)?;
+        restrict_file_permissions(&guard.file)?;
+        Ok(guard)
     }
 
     pub fn file(&self) -> &Path { &self.file }
+}
+
+/// 创建目录时即收紧权限（Unix 0700），避免先以较宽权限创建再 chmod 的窗口。
+fn create_private_dir(dir: &Path) -> Result<(), String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        std::fs::DirBuilder::new().mode(0o700).create(dir)
+            .map_err(|error| format!("无法创建临时凭据任务目录：{error}"))?;
+    }
+    #[cfg(not(unix))]
+    {
+        fs::create_dir(dir).map_err(|error| format!("无法创建临时凭据任务目录：{error}"))?;
+    }
+    Ok(())
+}
+
+/// 写入文件时即收紧权限（Unix 0600）。错误只含 OS 诊断，不含凭据内容。
+fn write_private_file(path: &Path, content: &str) -> Result<(), String> {
+    #[cfg(unix)]
+    {
+        use std::{io::Write, os::unix::fs::OpenOptionsExt};
+        let mut file = fs::OpenOptions::new().create(true).write(true).truncate(true).mode(0o600)
+            .open(path).map_err(|error| format!("无法写入临时 cookies：{error}"))?;
+        file.write_all(content.as_bytes()).map_err(|error| format!("无法写入临时 cookies：{error}"))?;
+    }
+    #[cfg(not(unix))]
+    {
+        fs::write(path, content).map_err(|error| format!("无法写入临时 cookies：{error}"))?;
+    }
+    Ok(())
+}
+
+/// 从 Netscape cookies 内容提取敏感值（第 7 字段），用于错误返回脱敏。
+pub(crate) fn sensitive_values(content: &str) -> Vec<String> {
+    let mut values = Vec::new();
+    for line in content.lines() {
+        let line = line.trim_start_matches('\u{feff}');
+        if line.trim().is_empty() || (line.starts_with('#') && !line.starts_with("#HttpOnly_")) { continue; }
+        let fields: Vec<&str> = line.split('\t').collect();
+        if fields.len() == 7 && !fields[6].is_empty() { values.push(fields[6].to_string()); }
+    }
+    values
+}
+
+/// 保守脱敏：替换已知敏感值，并掩码 SESSDATA=... 形式；保留其余必要诊断信息。
+pub(crate) fn redact(text: &str, secrets: &[String]) -> String {
+    let mut result = text.to_string();
+    for secret in secrets {
+        if !secret.is_empty() { result = result.replace(secret.as_str(), "[已脱敏]"); }
+    }
+    redact_key_value(&result, "SESSDATA")
+}
+
+fn redact_key_value(text: &str, key: &str) -> String {
+    let needle = format!("{key}=");
+    let mut out = String::new();
+    let mut rest = text;
+    while let Some(pos) = rest.find(&needle) {
+        out.push_str(&rest[..pos + needle.len()]);
+        let after = &rest[pos + needle.len()..];
+        let end = after.find(|c: char| c.is_whitespace() || c == ';' || c == '&').unwrap_or(after.len());
+        out.push_str("[已脱敏]");
+        rest = &after[end..];
+    }
+    out.push_str(rest);
+    out
 }
 
 impl Drop for TaskCookies {
@@ -156,7 +229,11 @@ mod windows {
     #[repr(C)]
     struct AclSizeInformation { ace_count: u32, acl_bytes_in_use: u32, acl_bytes_free: u32 }
 
-    /// 核对 DACL 中没有 Everyone / Guests 的允许访问项；发现即拒绝创建凭据。
+    /// 过宽主体：Everyone、BUILTIN\Guests、BUILTIN\Users、Authenticated Users。
+    /// 当前用户、SYSTEM、Administrators 不在其中，不会误伤合法权限。
+    const BROAD_SIDS: [&str; 4] = ["S-1-1-0", "S-1-5-32-546", "S-1-5-32-545", "S-1-5-11"];
+
+    /// 核对 DACL 不对过宽主体授予访问；任何无法确证安全的情况都失败关闭，拒绝写入明文凭据。
     pub fn verify_no_broad_access(path: &Path) -> Result<(), String> {
         let wide: Vec<u16> = path.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
         let mut dacl: *mut c_void = std::ptr::null_mut();
@@ -171,32 +248,107 @@ mod windows {
     }
 
     fn inspect(dacl: *mut c_void) -> Result<(), String> {
-        if dacl.is_null() { return Ok(()); } // 无 DACL 的极端情况由继承策略兜底，这里不放宽
+        // NULL DACL 表示完全不限制访问，绝不能解释为“继承兜底”；失败关闭。
+        if dacl.is_null() { return Err("临时凭据对象没有 DACL（不受限访问），已拒绝写入".into()); }
         let mut size = AclSizeInformation { ace_count: 0, acl_bytes_in_use: 0, acl_bytes_free: 0 };
         if unsafe { GetAclInformation(dacl, &mut size as *mut _ as *mut c_void, std::mem::size_of::<AclSizeInformation>() as u32, 2) } == 0 {
             return Err("无法读取临时凭据访问控制列表".into());
         }
-        let broad = ["S-1-1-0", "S-1-5-32-546"]; // Everyone, BUILTIN\Guests
-        for sid_text in broad {
-            let wide: Vec<u16> = sid_text.encode_utf16().chain(std::iter::once(0)).collect();
-            let mut sid: *mut c_void = std::ptr::null_mut();
-            if unsafe { ConvertStringSidToSidW(wide.as_ptr(), &mut sid) } == 0 { continue; }
-            for index in 0..size.ace_count {
-                let mut ace: *mut c_void = std::ptr::null_mut();
-                if unsafe { GetAce(dacl, index, &mut ace) } == 0 || ace.is_null() { continue; }
-                let ace_type = unsafe { *(ace as *const u8) };
-                // ACCESS_ALLOWED_ACE_TYPE=0；SID 位于 4 字节头 + 4 字节掩码之后。
-                if ace_type == 0 {
-                    let ace_sid = unsafe { (ace as *const u8).add(8) as *const c_void };
-                    if unsafe { EqualSid(ace_sid, sid) } != 0 {
-                        unsafe { LocalFree(sid); }
-                        return Err("临时凭据目录存在过宽的访问权限，已拒绝写入".into());
-                    }
+        let broad = broad_sids()?;
+        for index in 0..size.ace_count {
+            let mut ace: *mut c_void = std::ptr::null_mut();
+            if unsafe { GetAce(dacl, index, &mut ace) } == 0 || ace.is_null() {
+                return Err("无法读取临时凭据访问控制项".into());
+            }
+            let ace_ptr = ace as *const u8;
+            let ace_type = unsafe { *ace_ptr };
+            // 拒绝型 ACE（1=ACCESS_DENIED, 6=ACCESS_DENIED_OBJECT）不授予访问，跳过。
+            if ace_type == 1 || ace_type == 6 { continue; }
+            let Some(sid) = (match ace_type {
+                // ACCESS_ALLOWED_ACE：4 字节头 + 4 字节掩码后是 SID。
+                0 => Some(unsafe { ace_ptr.add(8) as *const c_void }),
+                // ACCESS_ALLOWED_OBJECT_ACE：头4 + 掩码4 + 标志4，再按标志跳过可选 GUID。
+                5 => Some(unsafe {
+                    let flags = *(ace_ptr.add(8) as *const u32);
+                    let offset = 12 + if flags & 0x1 != 0 { 16 } else { 0 } + if flags & 0x2 != 0 { 16 } else { 0 };
+                    ace_ptr.add(offset) as *const c_void
+                }),
+                // 其它（含条件/回调允许型）无法确证安全，失败关闭。
+                _ => None,
+            }) else {
+                return Err("临时凭据存在无法核验的允许访问项，已拒绝写入".into());
+            };
+            for broad_sid in &broad {
+                if unsafe { EqualSid(sid, *broad_sid) } != 0 {
+                    free_sids(&broad);
+                    return Err("临时凭据目录存在过宽的访问权限，已拒绝写入".into());
                 }
             }
-            unsafe { LocalFree(sid); }
         }
+        free_sids(&broad);
         Ok(())
+    }
+
+    fn broad_sids() -> Result<Vec<*mut c_void>, String> {
+        let mut sids = Vec::new();
+        for text in BROAD_SIDS {
+            let wide: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
+            let mut sid: *mut c_void = std::ptr::null_mut();
+            if unsafe { ConvertStringSidToSidW(wide.as_ptr(), &mut sid) } == 0 || sid.is_null() {
+                free_sids(&sids);
+                return Err("无法构造用于核对的安全主体".into());
+            }
+            sids.push(sid);
+        }
+        Ok(sids)
+    }
+
+    fn free_sids(sids: &[*mut c_void]) {
+        for sid in sids { if !sid.is_null() { unsafe { LocalFree(*sid); } } }
+    }
+
+    /// 仅供隔离测试：用 SDDL 设置目录 DACL，或设置 NULL DACL，以构造安全/危险场景。
+    #[cfg(test)]
+    pub mod test_support {
+        use super::*;
+
+        #[link(name = "advapi32")]
+        extern "system" {
+            fn ConvertStringSecurityDescriptorToSecurityDescriptorW(text: *const u16, revision: u32,
+                descriptor: *mut *mut c_void, size: *mut u32) -> i32;
+            fn SetNamedSecurityInfoW(object: *const u16, object_type: u32, security_info: u32,
+                owner: *mut c_void, group: *mut c_void, dacl: *mut c_void, sacl: *mut c_void) -> u32;
+            fn GetSecurityDescriptorDacl(descriptor: *const c_void, present: *mut i32, dacl: *mut *mut c_void, defaulted: *mut i32) -> i32;
+        }
+
+        fn wide_path(path: &Path) -> Vec<u16> { path.as_os_str().encode_wide().chain(std::iter::once(0)).collect() }
+
+        /// 用 SDDL 的 DACL 部分覆盖目录 DACL。
+        pub fn set_dacl_sddl(path: &Path, sddl: &str) -> Result<(), String> {
+            let wide: Vec<u16> = sddl.encode_utf16().chain(std::iter::once(0)).collect();
+            let mut descriptor: *mut c_void = std::ptr::null_mut();
+            if unsafe { ConvertStringSecurityDescriptorToSecurityDescriptorW(wide.as_ptr(), 1, &mut descriptor, std::ptr::null_mut()) } == 0 {
+                return Err("SDDL 转换失败".into());
+            }
+            let mut present = 0; let mut dacl: *mut c_void = std::ptr::null_mut(); let mut defaulted = 0;
+            let ok = unsafe { GetSecurityDescriptorDacl(descriptor, &mut present, &mut dacl, &mut defaulted) };
+            let object = wide_path(path);
+            let status = if ok != 0 && present != 0 {
+                unsafe { SetNamedSecurityInfoW(object.as_ptr(), 1, 4, std::ptr::null_mut(), std::ptr::null_mut(), dacl, std::ptr::null_mut()) }
+            } else { 1 };
+            unsafe { LocalFree(descriptor); }
+            if status != 0 { return Err(format!("设置 DACL 失败（{status}）")); }
+            Ok(())
+        }
+
+        /// 设置 NULL DACL（完全不限制访问）。
+        pub fn set_null_dacl(path: &Path) -> Result<(), String> {
+            let object = wide_path(path);
+            // DACL_SECURITY_INFORMATION=4，传入 NULL dacl 且不带 PROTECTED 标志即设置 NULL DACL。
+            let status = unsafe { SetNamedSecurityInfoW(object.as_ptr(), 1, 4, std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut()) };
+            if status != 0 { return Err(format!("设置 NULL DACL 失败（{status}）")); }
+            Ok(())
+        }
     }
 }
 
@@ -371,6 +523,38 @@ mod tests {
         let _ = fs::remove_dir_all(root);
     }
 
+    #[test]
+    fn prepare_failure_after_dir_creation_cleans_up_task_dir() {
+        let root = temp_dir("prepare-fail");
+        let dir = root.join(format!("task-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&dir).unwrap();
+        // 让 cookies.txt 成为一个目录，使写入步骤失败；此时 guard 已建立，应当次清理。
+        fs::create_dir(dir.join("cookies.txt")).unwrap();
+        let result = TaskCookies::prepare_in(&dir, FAKE_COOKIES);
+        assert!(result.is_err());
+        assert!(!dir.exists(), "准备阶段失败后必须清理本次任务目录，不能留下明文文件");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn redaction_removes_known_secrets_and_sessdata_pattern() {
+        let secrets = vec!["fake-test-value".to_string()];
+        let text = "引擎失败：SESSDATA=fake-test-value 出现在 stderr；另有 SESSDATA=other-secret; 路径正常";
+        let redacted = redact(text, &secrets);
+        assert!(!redacted.contains("fake-test-value"), "已知敏感值必须被替换");
+        assert!(!redacted.contains("other-secret"), "SESSDATA= 形式必须被掩码");
+        assert!(redacted.contains("引擎失败"), "正常诊断信息应保留");
+        assert!(redacted.contains("路径正常"));
+        // 即使没有已知敏感值列表，SESSDATA= 形式仍被掩码。
+        assert!(!redact("SESSDATA=abc123", &[]).contains("abc123"));
+    }
+
+    #[test]
+    fn sensitive_values_extracts_cookie_seventh_field() {
+        let values = sensitive_values(FAKE_COOKIES);
+        assert_eq!(values, vec!["fake-test-value".to_string()]);
+    }
+
     #[cfg(unix)]
     #[test]
     fn unix_permissions_are_owner_only() {
@@ -389,8 +573,55 @@ mod tests {
     fn windows_acl_check_accepts_user_scoped_cache() {
         let root = temp_dir("acl");
         let credentials = root.join("credentials");
-        // 用户临时目录继承的 ACL 不应包含 Everyone/Guests 允许项。
+        // 用户临时目录继承的 ACL 不应包含过宽允许项。
         assert!(TaskCookies::prepare(FAKE_COOKIES, &credentials).is_ok());
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(windows)]
+    fn remove_with_reset(path: &Path) {
+        // 仅针对隔离测试目录：恢复可删除权限后清理，不触碰真实应用缓存。
+        let _ = windows::test_support::set_dacl_sddl(path, "D:(A;;GA;;;WD)(A;;GA;;;SY)");
+        let _ = fs::remove_dir_all(path);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_acl_rejects_broad_principals() {
+        // WD=Everyone, BG=Guests, BU=BUILTIN\Users, AU=Authenticated Users
+        for sddl in ["D:(A;;GA;;;WD)", "D:(A;;GA;;;BG)", "D:(A;;GA;;;BU)", "D:(A;;GA;;;AU)"] {
+            let root = temp_dir("broad");
+            windows::test_support::set_dacl_sddl(&root, sddl).unwrap();
+            assert!(windows::verify_no_broad_access(&root).is_err(), "应拒绝过宽 ACL：{sddl}");
+            remove_with_reset(&root);
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_acl_rejects_object_allow_ace_for_broad_principal() {
+        let root = temp_dir("object-ace");
+        // OA = ACCESS_ALLOWED_OBJECT_ACE，授予 Everyone。
+        windows::test_support::set_dacl_sddl(&root, "D:(OA;;GA;;;WD)").unwrap();
+        assert!(windows::verify_no_broad_access(&root).is_err());
+        remove_with_reset(&root);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_acl_rejects_null_dacl() {
+        let root = temp_dir("null-dacl");
+        windows::test_support::set_null_dacl(&root).unwrap();
+        assert!(windows::verify_no_broad_access(&root).is_err(), "NULL DACL 必须失败关闭");
+        remove_with_reset(&root);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_acl_accepts_system_and_administrators_only() {
+        let root = temp_dir("safe-dacl");
+        windows::test_support::set_dacl_sddl(&root, "D:(A;;GA;;;SY)(A;;GA;;;BA)").unwrap();
+        assert!(windows::verify_no_broad_access(&root).is_ok());
+        remove_with_reset(&root);
     }
 }

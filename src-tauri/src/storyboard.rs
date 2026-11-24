@@ -180,6 +180,8 @@ pub async fn analyze_video_storyboard(app: AppHandle, state: State<'_, AppState>
     let _ = crate::credentials::cleanup_stale(&credentials_dir);
     let _ = crate::credentials::cleanup_legacy(&cache_dir);
     let cookies = cookies_text.as_deref().map(|content| prepare_bilibili_cookies(content, &credentials_dir)).transpose()?;
+    // 提取敏感值用于错误返回脱敏；独立于移入闭包的 guard，存活到错误处理之后。
+    let credential_secrets = cookies_text.as_deref().map(crate::credentials::sensitive_values).unwrap_or_default();
     fs::create_dir_all(&dir).map_err(|error| format!("无法创建分镜目录：{error}"))?;
     for name in image_names(&dir).unwrap_or_default() {
         fs::remove_file(dir.join(name)).map_err(|error| format!("无法清理旧分镜图：{error}"))?;
@@ -230,7 +232,9 @@ pub async fn analyze_video_storyboard(app: AppHandle, state: State<'_, AppState>
         if stderr.contains("HTTP 567") {
             return Err("B 站拒绝匿名取流（HTTP 567）。请先在浏览器登录该站，再选择只含 B 站登录信息的 Netscape cookies.txt 重试；若已选择文件，请重新导出登录态。".into());
         }
-        return Err(format!("画面分析失败：{}", stderr.chars().take(500).collect::<String>()));
+        // 媒体工具可能把凭据写入 stderr；在返回边界脱敏，避免进入界面与日志。
+        let safe = crate::credentials::redact(&stderr, &credential_secrets);
+        return Err(format!("画面分析失败：{}", safe.chars().take(500).collect::<String>()));
     }
     let evidence_path = dir.join("board.evidence.json");
     let evidence: Evidence = serde_json::from_slice(&fs::read(&evidence_path)
