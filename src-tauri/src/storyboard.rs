@@ -120,6 +120,7 @@ pub(crate) async fn capture_frame(app: &AppHandle, source_url: &str, seconds: u3
     let ytdlp_binary = tool_path(app, "yt-dlp");
     let tools_dir = node_binary.parent().filter(|path| path.join("yt-dlp.exe").is_file()).map(Path::to_path_buf);
     let cache_dir = app.path().app_cache_dir().map_err(|error| error.to_string())?.join("video-storyboard");
+    let credentials_dir = cache_dir.join("credentials");
     let result = tauri::async_runtime::spawn_blocking(move || {
         let mut command = Command::new(node_binary);
         if let Some(tools_dir) = tools_dir.as_ref().filter(|path| path.is_dir()) {
@@ -142,7 +143,10 @@ pub(crate) async fn capture_frame(app: &AppHandle, source_url: &str, seconds: u3
         if stderr.contains("HTTP 567") {
             return Err("B 站拒绝匿名取流（HTTP 567）。请先在记录栏使用 cookies.txt 完成画面分析，再从缓存取帧。".into());
         }
-        return Err(format!("取帧失败：{}", stderr.chars().take(350).collect::<String>()));
+        // 取帧虽无 cookies 入参，底层工具仍可能把缓存凭据写进 stderr；与画面分析一致脱敏。
+        let secrets = crate::credentials::cached_sensitive_values(&credentials_dir);
+        let safe = crate::credentials::redact(&stderr, &secrets);
+        return Err(format!("取帧失败：{}", safe.chars().take(350).collect::<String>()));
     }
     let size = fs::metadata(&output_path).map_err(|_| "截图文件不存在")?.len();
     if size == 0 || size > 8_000_000 {

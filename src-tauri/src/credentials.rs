@@ -135,6 +135,21 @@ pub(crate) fn sensitive_values(content: &str) -> Vec<String> {
     values
 }
 
+/// 收集专用凭据目录中现存任务 cookies 的敏感值（只读），供取帧等无 cookies 入参的错误脱敏使用。
+pub(crate) fn cached_sensitive_values(credentials_dir: &Path) -> Vec<String> {
+    let mut values = Vec::new();
+    let Ok(entries) = fs::read_dir(credentials_dir) else { return values };
+    for entry in entries.filter_map(Result::ok) {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { continue };
+        if !name.starts_with("task-") { continue; }
+        if let Ok(content) = fs::read_to_string(entry.path().join("cookies.txt")) {
+            values.extend(sensitive_values(&content));
+        }
+    }
+    values
+}
+
 /// 保守脱敏：替换已知敏感值，并掩码 SESSDATA=... 形式；保留其余必要诊断信息。
 pub(crate) fn redact(text: &str, secrets: &[String]) -> String {
     let mut result = text.to_string();
@@ -164,10 +179,38 @@ impl Drop for TaskCookies {
         // 先释放锁并关闭句柄，再删除目录；删除失败只记录路径，绝不记录凭据内容，
         // 残留目录会由启动/新任务时的清理机制重试。
         self.lock.take();
-        if let Err(error) = fs::remove_dir_all(&self.dir) {
+        if let Err(error) = remove_task_dir(&self.dir) {
             eprintln!("GearNote 临时凭据清理失败，将在下次启动重试：{} ({error})", self.dir.display());
         }
     }
+}
+
+/// 删除任务目录时先单独移除明文凭据文件，再删整个目录：
+/// 即使目录删除中途失败，敏感内容也已优先移除，不会留下无锁保护的明文。
+fn remove_task_dir(dir: &Path) -> std::io::Result<()> {
+    let _ = fs::remove_file(dir.join("cookies.txt"));
+    fs::remove_dir_all(dir)
+}
+
+/// 无 lock 文件的 task-* 目录可能是删除中途失败的残留。保守判定：
+/// 仅含已知凭据文件、且 cookies.txt 超过 60 秒未修改时才视为可清理残留，
+/// 避免误删刚创建尚未加锁的活动任务。
+fn is_orphaned_lockless_task(dir: &Path) -> bool {
+    let Ok(entries) = fs::read_dir(dir) else { return false };
+    let mut has_cookies = false;
+    for entry in entries.filter_map(Result::ok) {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { return false };
+        match name {
+            "cookies.txt" => has_cookies = true,
+            "lock" => {}
+            _ => return false,
+        }
+    }
+    if !has_cookies { return false; }
+    let Ok(meta) = fs::metadata(dir.join("cookies.txt")) else { return false };
+    let Ok(modified) = meta.modified() else { return false };
+    modified.elapsed().map(|age| age > Duration::from_secs(60)).unwrap_or(false)
 }
 
 /// 凭据生命周期跟随实际媒体执行：guard 被移入执行闭包，
@@ -368,10 +411,15 @@ pub(crate) fn cleanup_stale(credentials_dir: &Path) -> usize {
         let Ok(canonical) = entry.path().canonicalize() else { continue };
         if !canonical.starts_with(&root) || canonical == root { continue; }
         let lock_path = canonical.join("lock");
-        if !lock_path.is_file() { continue; } // 无法证明所有权结构的目录保守跳过
-        let Ok(lock) = FileLock::acquire(&lock_path) else { continue };
-        drop(lock);
-        if fs::remove_dir_all(&canonical).is_ok() { removed += 1; }
+        if lock_path.is_file() {
+            // 有锁文件：抢到锁说明无活任务所有，可清理；抢不到则跳过。
+            let Ok(lock) = FileLock::acquire(&lock_path) else { continue };
+            drop(lock);
+        } else if !is_orphaned_lockless_task(&canonical) {
+            // 无锁文件：仅保守清理可证明的残留，其余跳过。
+            continue;
+        }
+        if remove_task_dir(&canonical).is_ok() { removed += 1; }
     }
     removed
 }
@@ -456,6 +504,75 @@ mod tests {
         assert!(live_dir.exists(), "仍在使用的凭据不能被误删");
         drop(live);
         assert!(!live_dir.exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    fn make_file_old(path: &Path) {
+        let past = std::time::SystemTime::now() - Duration::from_secs(120);
+        fs::File::options().write(true).open(path).unwrap().set_modified(past).unwrap();
+    }
+
+    #[test]
+    fn cleanup_removes_lockless_orphan_with_old_cookies() {
+        let root = temp_dir("lockless-orphan");
+        let credentials = root.join("credentials");
+        // 模拟“删除中途删掉了 lock 文件、cookies.txt 残留”的异常路径。
+        let orphan = credentials.join(format!("task-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&orphan).unwrap();
+        fs::write(orphan.join("cookies.txt"), FAKE_COOKIES).unwrap();
+        make_file_old(&orphan.join("cookies.txt"));
+        assert_eq!(cleanup_stale(&credentials), 1, "无锁但含陈旧明文的残留必须被清理");
+        assert!(!orphan.exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn cleanup_keeps_fresh_lockless_task_to_protect_active_creation() {
+        let root = temp_dir("lockless-fresh");
+        let credentials = root.join("credentials");
+        let fresh = credentials.join(format!("task-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&fresh).unwrap();
+        fs::write(fresh.join("cookies.txt"), FAKE_COOKIES).unwrap();
+        // 刚创建、尚未加锁的活动任务不能被误删。
+        assert_eq!(cleanup_stale(&credentials), 0);
+        assert!(fresh.exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn cleanup_keeps_lockless_dir_with_unrelated_file() {
+        let root = temp_dir("lockless-unrelated");
+        let credentials = root.join("credentials");
+        let dir = credentials.join(format!("task-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("cookies.txt"), FAKE_COOKIES).unwrap();
+        fs::write(dir.join("other.txt"), b"unrelated").unwrap();
+        make_file_old(&dir.join("cookies.txt"));
+        assert_eq!(cleanup_stale(&credentials), 0, "含非凭据文件的目录保守保留");
+        assert!(dir.exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn drop_removes_plaintext_cookies_file() {
+        let root = temp_dir("drop-file");
+        let credentials = root.join("credentials");
+        let task = TaskCookies::prepare(FAKE_COOKIES, &credentials).unwrap();
+        let file = task.file().to_path_buf();
+        assert!(file.is_file());
+        drop(task);
+        assert!(!file.exists(), "Drop 后明文凭据文件必须被移除");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn cached_sensitive_values_reads_existing_task_cookies() {
+        let root = temp_dir("cached-values");
+        let credentials = root.join("credentials");
+        let task = TaskCookies::prepare(FAKE_COOKIES, &credentials).unwrap();
+        let values = cached_sensitive_values(&credentials);
+        assert!(values.contains(&"fake-test-value".to_string()));
+        drop(task);
         let _ = fs::remove_dir_all(root);
     }
 
