@@ -42,11 +42,15 @@ export function useChat(openChat: () => void, applyNoteEditAndRefresh: (proposal
   const suggestionRef = useRef(0)
   const sessionActionRef = useRef(0)
   const pendingEventRef = useRef(false)
+  const initializedRef = useRef(false)
+  const pendingReferencePersistRef = useRef(false)
   const abortRef = useRef<AbortController | null>(null)
 
   const applyChatState = useCallback((state: ChatState, referenceRevision = referenceRevisionRef.current) => {
     if (!mountedRef.current) return
-    const sessionChanged = activeSessionIdRef.current !== state.activeId
+    // 只有初始化完成后的会话变化才算“切换”；首次加载（空→实际会话）不强制覆盖本地引用，
+    // 以免把初始化前到达的小窗引用同步丢掉。
+    const sessionChanged = initializedRef.current && activeSessionIdRef.current !== state.activeId
     if (sessionChanged) {
       operationRef.current += 1
       suggestionRef.current += 1
@@ -74,6 +78,7 @@ export function useChat(openChat: () => void, applyNoteEditAndRefresh: (proposal
     setProjectMemory(state.projectMemory)
     setCompactedSummary(state.compactedSummary)
     setCompactedCount(state.compactedCount)
+    initializedRef.current = true
   }, [])
 
   const refreshChatState = useCallback(async (expectedOperation = operationRef.current) => {
@@ -93,7 +98,12 @@ export function useChat(openChat: () => void, applyNoteEditAndRefresh: (proposal
     referencedIdsRef.current = next
     setReferencedIdsState(next)
     const sessionId = activeSessionIdRef.current
-    if (!isTauri() || !sessionId) return
+    if (!isTauri()) return
+    if (!sessionId) {
+      // 会话尚未确认（初始化未完成）：保留最新本地值，待会话确认后补写，不直接丢弃。
+      pendingReferencePersistRef.current = true
+      return
+    }
     void setChatReferences(sessionId, next).catch(error => {
       if (mountedRef.current && activeSessionIdRef.current === sessionId) setSessionError(String(error))
     })
@@ -284,6 +294,14 @@ export function useChat(openChat: () => void, applyNoteEditAndRefresh: (proposal
       if (disposed || initialRead !== stateReadRef.current || initialOperation !== operationRef.current) return
       setAgentStatus(status)
       applyChatState(saved, initialReferences)
+      // 初始化前到达的引用同步（如小窗上下文事件）在会话确认后补写到后端。
+      if (pendingReferencePersistRef.current && activeSessionIdRef.current) {
+        pendingReferencePersistRef.current = false
+        const sessionId = activeSessionIdRef.current
+        void setChatReferences(sessionId, referencedIdsRef.current).catch(error => {
+          if (mountedRef.current && activeSessionIdRef.current === sessionId) setSessionError(String(error))
+        })
+      }
     }).catch(() => { if (!disposed) setAgentError('对话或模型配置读取失败') })
     void listen('knowflow:chat-changed', () => {
       if (sendingRef.current) { pendingEventRef.current = true; return }

@@ -348,4 +348,26 @@ describe('useChat 聊天控制', () => {
     await act(async () => { await view.result.current.sendQuestion('需要选择的问题') })
     expect(suggestChatFollowups).not.toHaveBeenCalled()
   })
+
+  it('初始化未完成时到达的小窗引用同步，在会话确认后保留并补写', async () => {
+    const init = deferred<ChatState>()
+    vi.mocked(getChatState).mockReturnValue(init.promise)
+    const view = renderHook(() => useChat(vi.fn(), vi.fn()))
+    // 初始化待决、会话 ID 仍为空时注入小窗上下文同步。
+    act(() => view.result.current.setReferencedIds(['from-main']))
+    expect(view.result.current.referencedIds).toEqual(['from-main'])
+    // 后端初始状态返回较旧的引用。
+    await act(async () => { init.resolve(chatState({ referencedIds: ['stale-backend'] })); await init.promise })
+    await waitFor(() => expect(view.result.current.activeSessionId).toBe('session-a'))
+    // 保留较新的本地同步值，不被旧后端覆盖，并补写到后端。
+    expect(view.result.current.referencedIds).toEqual(['from-main'])
+    await waitFor(() => expect(setChatReferences).toHaveBeenCalledWith('session-a', ['from-main']))
+  })
+
+  it('聊天监听注册失败时显示错误且不泄漏', async () => {
+    listenMock.mockRejectedValue(new Error('注册失败'))
+    const view = await renderChat()
+    await waitFor(() => expect(view.result.current.agentError).toContain('对话更新监听失败'))
+    view.unmount()
+  })
 })
