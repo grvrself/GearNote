@@ -53,10 +53,11 @@ fn old_config_and_session_load_and_continuation_survives_persistence() {
     let mut legacy = serde_json::to_value(&session).unwrap();
     legacy.as_object_mut().unwrap().remove("readContinuation");
     assert!(serde_json::from_value::<ChatSession>(legacy).unwrap().read_continuation.is_none());
-    let message = save_final_failure_exchange(&mut session, "总结", "空回答", AnswerEndReason::EmptyAnswer, "1", 0, None, vec![], vec![], None, None);
+    let message = save_final_failure_exchange(&mut session, "总结", "空回答", AnswerEndReason::EmptyAnswer, Some(ReadingEndReason::BudgetExhausted), "1", 0, None, vec![], vec![], None, None);
     session.read_continuation = Some(ReadContinuation { message_id: message.id.clone(), question: "总结".into(),
         referenced_ids: vec!["video-budget".into()], fingerprint: reading_fingerprint(&[budget_record()]),
         progress: ReadProgress { deep: true, batch_count: 4, ..ReadProgress::default() } });
+    session.referenced_ids = vec!["video-budget".into()];
     let dir = std::env::temp_dir().join(format!("gearnote-budget-{}", Uuid::new_v4()));
     fs::create_dir_all(&dir).unwrap();
     let path = dir.join("knowflow.db");
@@ -67,6 +68,11 @@ fn old_config_and_session_load_and_continuation_survives_persistence() {
     assert_eq!(resumed.progress.batch_count, 4);
     assert!(continuation_for(&loaded.sessions[0], &message.id, &["different".into()]).is_err());
     assert!(continuation_for(&loaded.sessions[0], "stale-message", &["video-budget".into()]).is_err());
+    // 会话当前参考已改为 B，旧调用者仍传 A（与 continuation 原引用一致）也必须拒绝。
+    let mut switched = loaded.sessions[0].clone();
+    switched.referenced_ids = vec!["another-record".into()];
+    assert!(continuation_for(&switched, &message.id, &["video-budget".into()]).is_err(),
+        "续读必须核对当前会话保存的参考，不能只信客户端传入值");
     let mut changed = budget_record(); changed.transcript.as_mut().unwrap()[0].text = "修改后的正文".into();
     assert_ne!(resumed.fingerprint, reading_fingerprint(&[changed]));
     fs::remove_dir_all(dir).unwrap();

@@ -78,8 +78,11 @@ fn continuation_for(session: &ChatSession, message_id: &str, ids: &[String]) -> 
     if session.messages.last().is_none_or(|message| message.id != message_id) {
         return Err("会话已有新的消息，请重新提问后读取".into());
     }
+    // 三方核对：续读原引用、当前会话持久化引用、客户端本次传入引用必须一致。
+    // 仅比较客户端传入值会让“会话参考已改、旧调用者仍传原值”绕过校验。
     let mut expected = continuation.referenced_ids.clone(); expected.sort();
     let mut actual = ids.to_vec(); actual.sort();
-    if actual != expected { return Err("本轮参考已改变，请重新提问后读取".into()); }
+    let mut current = session.referenced_ids.clone(); current.sort();
+    if actual != expected || current != expected { return Err("本轮参考已改变，请重新提问后读取".into()); }
     Ok(continuation.clone())
 }

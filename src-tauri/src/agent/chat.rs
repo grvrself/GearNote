@@ -127,6 +127,8 @@ pub fn set_chat_references(app: AppHandle, state: State<'_, AgentState>, id: Str
         let Some(session) = store.sessions.iter_mut().find(|item| item.id == id) else { return Ok(false); };
         if session.referenced_ids == unique { return Ok(false); }
         session.referenced_ids = unique;
+        // 参考资料改变后，旧续读进度不再有效；主动失效，不依赖前端隐藏按钮。
+        session.read_continuation = None;
         Ok(true)
     })
 }
