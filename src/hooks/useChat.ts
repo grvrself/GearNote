@@ -97,6 +97,9 @@ export function useChat(openChat: () => void, applyNoteEditAndRefresh: (proposal
     referenceRevisionRef.current += 1
     referencedIdsRef.current = next
     setReferencedIdsState(next)
+    // 引用变化（含删除资料引起的过滤）会使后端清空续读进度；本地立即同步隐藏续读按钮，
+    // 不等下一次 get_chat_state，避免按钮残留显示。
+    setReadContinuation(null)
     const sessionId = activeSessionIdRef.current
     if (!isTauri()) return
     if (!sessionId) {

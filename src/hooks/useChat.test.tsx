@@ -370,4 +370,14 @@ describe('useChat 聊天控制', () => {
     await waitFor(() => expect(view.result.current.agentError).toContain('对话更新监听失败'))
     view.unmount()
   })
+
+  it('引用变化（如删除资料）立即清空本地续读状态，按钮不再残留', async () => {
+    const view = await renderChat(chatState({
+      referencedIds: ['record-a'],
+      readContinuation: { messageId: 'reply-a', mode: 'adaptive', hasProgress: true },
+    }))
+    expect(view.result.current.readContinuation).not.toBeNull()
+    act(() => view.result.current.setReferencedIds([]))
+    expect(view.result.current.readContinuation).toBeNull()
+  })
 })
