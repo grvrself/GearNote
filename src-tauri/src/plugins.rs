@@ -136,50 +136,71 @@ fn unsuccessful_tool_error(run: &ToolRun) -> String {
 }
 
 /// Diagnose the exact tool paths used by storyboard without changing tool resolution.
+/// 命令为 async 并把重型工作放入 spawn_blocking，避免占用 tokio 工作线程；
+/// 四个工具并行检测，墙钟时间约等于最慢的一个（yt-dlp），而非顺序累加。
 #[tauri::command]
-pub fn get_toolchain_status(app: AppHandle) -> Result<Vec<ToolStatus>, String> {
-    let tools = [
-        ("node", "--version"),
-        ("ffmpeg", "-version"),
-        ("ffprobe", "-version"),
-        ("yt-dlp", "--version"),
-    ];
-    let mut statuses = Vec::with_capacity(tools.len());
-    for (name, argument) in tools {
-        let path = crate::storyboard::tool_path(&app, name);
-        let display_path = path.to_string_lossy().into_owned();
-        let mut status = ToolStatus {
-            name: name.into(),
-            found: false,
-            path: display_path,
-            version: String::new(),
-            error: String::new(),
-        };
-        match run_tool_version(&path, argument) {
-            Ok(run) => {
-                status.found = true;
-                if run.timed_out {
-                    status.error = "版本检查超过 8 秒，程序已停止".into();
-                } else if !run.status.success() {
-                    status.error = unsuccessful_tool_error(&run);
-                } else {
-                    status.version = first_output_line(&run.stdout)
-                        .or_else(|| first_output_line(&run.stderr))
-                        .unwrap_or_default();
-                    if status.version.is_empty() {
-                        status.error = "程序成功退出，但没有返回版本信息".into();
-                    }
+pub async fn get_toolchain_status(app: AppHandle) -> Result<Vec<ToolStatus>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let tools = [
+            ("node", "--version"),
+            ("ffmpeg", "-version"),
+            ("ffprobe", "-version"),
+            ("yt-dlp", "--version"),
+        ];
+        std::thread::scope(|scope| {
+            let handles: Vec<_> = tools
+                .iter()
+                .map(|(name, argument)| {
+                    let app = &app;
+                    scope.spawn(move || check_tool(app, name, argument))
+                })
+                .collect();
+            handles
+                .into_iter()
+                .map(|handle| handle.join().unwrap_or_else(|_| ToolStatus {
+                    name: "unknown".into(), found: false, path: String::new(),
+                    version: String::new(), error: "工具检测线程异常".into(),
+                }))
+                .collect()
+        })
+    })
+    .await
+    .map_err(|error| format!("工具检测任务失败：{error}"))
+}
+
+fn check_tool(app: &AppHandle, name: &str, argument: &str) -> ToolStatus {
+    let path = crate::storyboard::tool_path(app, name);
+    let display_path = path.to_string_lossy().into_owned();
+    let mut status = ToolStatus {
+        name: name.into(),
+        found: false,
+        path: display_path,
+        version: String::new(),
+        error: String::new(),
+    };
+    match run_tool_version(&path, argument) {
+        Ok(run) => {
+            status.found = true;
+            if run.timed_out {
+                status.error = "版本检查超过 8 秒，程序已停止".into();
+            } else if !run.status.success() {
+                status.error = unsuccessful_tool_error(&run);
+            } else {
+                status.version = first_output_line(&run.stdout)
+                    .or_else(|| first_output_line(&run.stderr))
+                    .unwrap_or_default();
+                if status.version.is_empty() {
+                    status.error = "程序成功退出，但没有返回版本信息".into();
                 }
             }
-            Err(error) => {
-                // A bundled path can exist even when the OS refuses to launch it.
-                status.found = path.is_file();
-                status.error = error;
-            }
         }
-        statuses.push(status);
+        Err(error) => {
+            // A bundled path can exist even when the OS refuses to launch it.
+            status.found = path.is_file();
+            status.error = error;
+        }
     }
-    Ok(statuses)
+    status
 }
 
 fn bounded_directory_size(root: &Path) -> u64 {
@@ -220,28 +241,33 @@ fn bounded_directory_size(root: &Path) -> u64 {
 }
 
 /// Return workspace paths and bounded, best-effort disk usage diagnostics.
+/// 磁盘遍历放入 spawn_blocking，避免占用 tokio 工作线程。
 #[tauri::command]
-pub fn get_workspace_info(app: AppHandle) -> Result<WorkspaceInfo, String> {
-    let data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|error| format!("无法定位应用数据目录：{error}"))?;
-    let cache_dir = app
-        .path()
-        .app_cache_dir()
-        .map_err(|error| format!("无法定位应用缓存目录：{error}"))?;
-    let database_bytes = fs::metadata(data_dir.join("knowflow.db"))
-        .ok()
-        .filter(|metadata| metadata.is_file())
-        .map(|metadata| metadata.len())
-        .unwrap_or(0);
-    let cache_bytes = bounded_directory_size(&cache_dir);
-    Ok(WorkspaceInfo {
-        data_dir: data_dir.to_string_lossy().into_owned(),
-        cache_dir: cache_dir.to_string_lossy().into_owned(),
-        database_bytes,
-        cache_bytes,
+pub async fn get_workspace_info(app: AppHandle) -> Result<WorkspaceInfo, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let data_dir = app
+            .path()
+            .app_data_dir()
+            .map_err(|error| format!("无法定位应用数据目录：{error}"))?;
+        let cache_dir = app
+            .path()
+            .app_cache_dir()
+            .map_err(|error| format!("无法定位应用缓存目录：{error}"))?;
+        let database_bytes = fs::metadata(data_dir.join("knowflow.db"))
+            .ok()
+            .filter(|metadata| metadata.is_file())
+            .map(|metadata| metadata.len())
+            .unwrap_or(0);
+        let cache_bytes = bounded_directory_size(&cache_dir);
+        Ok(WorkspaceInfo {
+            data_dir: data_dir.to_string_lossy().into_owned(),
+            cache_dir: cache_dir.to_string_lossy().into_owned(),
+            database_bytes,
+            cache_bytes,
+        })
     })
+    .await
+    .map_err(|error| format!("工作区信息任务失败：{error}"))?
 }
 
 /// Create and open a fixed workspace directory; arbitrary paths are never accepted.

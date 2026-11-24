@@ -42,9 +42,11 @@ export function SettingsPanel({ section, onSectionChange, agentStatus, onAgentSt
 
   useEffect(() => {
     if (!desktop) return
+    // 诊断只在打开设置时执行一次；切换分组不再重复拉起工具进程与遍历缓存。
+    // 手动刷新走"关于与诊断"里的"重新检测"按钮。
     void getToolchainStatus().then(setTools).catch(cause => setError(String(cause)))
     void getWorkspaceInfo().then(setWorkspace).catch(cause => setError(String(cause)))
-  }, [desktop, section])
+  }, [desktop])
 
   const openPath = async (kind: 'data' | 'cache' | 'exports') => {
     try { await openWorkspacePath(kind) } catch (cause) { setError(String(cause)) }
