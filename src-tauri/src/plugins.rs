@@ -68,7 +68,9 @@ fn run_tool_version(path: &Path, argument: &str) -> Result<ToolRun, String> {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        command.creation_flags(0x0800_0000);
+        // CREATE_NO_WINDOW (0x08000000) | BELOW_NORMAL_PRIORITY_CLASS (0x00004000)：
+        // 版本检测是后台诊断，降低优先级避免其启动 CPU 冲击抢占 UI 渲染造成卡顿。
+        command.creation_flags(0x0800_4000);
     }
     let mut child = command
         .spawn()

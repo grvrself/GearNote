@@ -36,16 +36,29 @@ const sections: { id: SettingsSection; label: string; index: string }[] = [
 export function SettingsPanel({ section, onSectionChange, agentStatus, onAgentStatusChange, bridgeStatus }: Props) {
   const desktop = isTauri()
   const [tools, setTools] = useState<ToolStatus[]>([])
+  const [toolsLoading, setToolsLoading] = useState(desktop)
   const [workspace, setWorkspace] = useState<WorkspaceInfo | null>(null)
   const [error, setError] = useState('')
   const current = sections.find(item => item.id === section) ?? sections[0]
 
   useEffect(() => {
     if (!desktop) return
-    // 诊断只在打开设置时执行一次；切换分组不再重复拉起工具进程与遍历缓存。
+    let cancelled = false
+    // 诊断只在打开设置时执行一次，并延迟到首屏绘制之后启动：
+    // 避免工具进程（尤其 yt-dlp）的启动 CPU 冲击与首屏渲染争用造成卡顿。
     // 手动刷新走"关于与诊断"里的"重新检测"按钮。
-    void getToolchainStatus().then(setTools).catch(cause => setError(String(cause)))
-    void getWorkspaceInfo().then(setWorkspace).catch(cause => setError(String(cause)))
+    const schedule = (callback: () => void) => {
+      if (typeof window.requestIdleCallback === 'function') window.requestIdleCallback(callback, { timeout: 1500 })
+      else window.setTimeout(callback, 120)
+    }
+    schedule(() => {
+      if (cancelled) return
+      void getToolchainStatus()
+        .then(result => { if (!cancelled) { setTools(result); setToolsLoading(false) } })
+        .catch(cause => { if (!cancelled) { setError(String(cause)); setToolsLoading(false) } })
+      void getWorkspaceInfo().then(result => { if (!cancelled) setWorkspace(result) }).catch(cause => { if (!cancelled) setError(String(cause)) })
+    })
+    return () => { cancelled = true }
   }, [desktop])
 
   const openPath = async (kind: 'data' | 'cache' | 'exports') => {
@@ -67,7 +80,7 @@ export function SettingsPanel({ section, onSectionChange, agentStatus, onAgentSt
           <div className="settings-overview-status">
             <OverviewStatus title="Agent 服务" value={agentStatus?.hasKey && agentStatus.model ? '已配置' : '未配置'} detail={agentStatus?.model || '需要模型 ID 与密钥'} ok={Boolean(agentStatus?.hasKey && agentStatus.model)} />
             <OverviewStatus title="浏览器桥接" value={bridgeStatus?.connected ? '已连接' : '未连接'} detail={bridgeStatus?.error || 'Chrome / Edge 捕获'} ok={Boolean(bridgeStatus?.connected)} />
-            <OverviewStatus title="视频工具" value={`${readyCount} / 4 可用`} detail={readyCount === 4 ? '分镜与指定时间取帧' : '存在缺失工具'} ok={readyCount === 4} />
+            <OverviewStatus title="视频工具" value={toolsLoading ? '检测中' : `${readyCount} / 4 可用`} detail={toolsLoading ? '正在检查本机工具' : readyCount === 4 ? '分镜与指定时间取帧' : '存在缺失工具'} ok={!toolsLoading && readyCount === 4} />
             <OverviewStatus title="本地缓存" value={formatBytes(workspace?.cacheBytes ?? 0)} detail="可查看数据与存储明细" ok />
           </div>
           <div className="overview-grid">
@@ -78,7 +91,7 @@ export function SettingsPanel({ section, onSectionChange, agentStatus, onAgentSt
               <QuickLink index="05" title="界面与动效" description="机械传动、简约黑白和三档动效" status={theme === 'hud' ? '机械传动' : '简约黑白'} onClick={() => onSectionChange('appearance')} accent />
               <div className="current-config"><span>当前生效配置</span><p>{agentStatus?.model || '模型未配置'} · 动效{motionLabel} · 所有设置均保存在本机</p></div>
             </section>
-            <aside className="diagnostics-card"><MechanicalGear className="mech-diagnostics-gear" teeth={20} speed="26s" reverse /><div className="overview-section-title"><strong>系统诊断</strong><span>{desktop ? '本机实时' : '预览数据'}</span></div><div className="diagnostic-list">{tools.map(tool => <div key={tool.name}><i className={`status-dot${tool.found ? ' ok' : ''}`} /><span>{tool.name}</span><strong>{tool.found ? tool.version || '已就绪' : tool.error || '未找到'}</strong></div>)}</div><div className="storage-meter"><div><span>应用缓存</span><strong>{formatBytes(workspace?.cacheBytes ?? 0)}</strong></div><i><b style={{ width: `${cacheRatio}%` }} /></i><small>以 512MB 为参考刻度，不是配额。数据与导出文件均保存在本机。</small></div><div className="diagnostic-actions"><HudButton variant="primary" type="button" onClick={() => onSectionChange('about')}>查看完整诊断</HudButton><HudButton type="button" onClick={() => { void openPath('data') }}>打开数据目录</HudButton></div></aside>
+            <aside className="diagnostics-card"><MechanicalGear className="mech-diagnostics-gear" teeth={20} speed="26s" reverse /><div className="overview-section-title"><strong>系统诊断</strong><span>{desktop ? '本机实时' : '预览数据'}</span></div><div className="diagnostic-list">{toolsLoading && tools.length === 0 ? <div><i className="status-dot" /><span>正在检测本机工具…</span><strong>稍候</strong></div> : tools.map(tool => <div key={tool.name}><i className={`status-dot${tool.found ? ' ok' : ''}`} /><span>{tool.name}</span><strong>{tool.found ? tool.version || '已就绪' : tool.error || '未找到'}</strong></div>)}</div><div className="storage-meter"><div><span>应用缓存</span><strong>{formatBytes(workspace?.cacheBytes ?? 0)}</strong></div><i><b style={{ width: `${cacheRatio}%` }} /></i><small>以 512MB 为参考刻度，不是配额。数据与导出文件均保存在本机。</small></div><div className="diagnostic-actions"><HudButton variant="primary" type="button" onClick={() => onSectionChange('about')}>查看完整诊断</HudButton><HudButton type="button" onClick={() => { void openPath('data') }}>打开数据目录</HudButton></div></aside>
           </div>
           <div className="overview-footer"><span><i className="dot" />配置已保存到本机</span><span>不会自动清理资料 · 诊断不包含密钥和 Cookie</span></div>
         </>}
