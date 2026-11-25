@@ -3,7 +3,8 @@ import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateA
 import { isTauri } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { askAgent, getAgentStatus, getChatState, resolveCommandProposal, resolveLibrarySearch, setChatReferences,
-  suggestChatFollowups, type AgentStatus, type ChatSessionSummary, type ChatState } from '../agent'
+  suggestChatFollowups, type AgentStatus, type ChatIntent, type ChatSessionSummary, type ChatState } from '../agent'
+import { isCaptureCommand } from '../capture-command'
 import type { ChatFrame, ChatMessage, ChatStreaming } from '../chat-data'
 import { rejectNoteEdit } from '../notes'
 
@@ -135,7 +136,7 @@ export function useChat(openChat: () => void, applyNoteEditAndRefresh: (proposal
       })
   }, [refreshChatState])
 
-  const sendQuestion = async (question: string, frameId?: string, messageIds: string[] = [], choiceId?: string, deepMode = false, referenceOverride?: string[], continueMessageId?: string) => {
+  const sendQuestion = async (question: string, frameId?: string, messageIds: string[] = [], choiceId?: string, deepMode = false, referenceOverride?: string[], continueMessageId?: string, intent?: ChatIntent) => {
     if (sendingRef.current || !mountedRef.current) return false
     const operation = ++operationRef.current
     suggestionRef.current += 1
@@ -144,7 +145,7 @@ export function useChat(openChat: () => void, applyNoteEditAndRefresh: (proposal
     abortRef.current = abort
     sendingRef.current = true
     setSending(true)
-    setStreaming({ question, answer: '', startedAt: Date.now(), activities: [] })
+    setStreaming({ question, answer: '', startedAt: Date.now(), activities: [], capture: !intent && isCaptureCommand(question) })
     setSuggestionErrorId(null)
     setAgentError('')
     pendingEventRef.current = false
@@ -153,7 +154,7 @@ export function useChat(openChat: () => void, applyNoteEditAndRefresh: (proposal
         delta => updateStreaming(operation, sessionId, current => current && { ...current, answer: current.answer + delta }), frameId,
         activity => updateStreaming(operation, sessionId, current => current && { ...current, activity, activities: [...current.activities, activity] }),
         messageIds, choiceId, deepMode, continueMessageId,
-        (requestId, reading) => updateStreaming(operation, sessionId, current => current && { ...current, requestId, reading }), abort.signal)
+        (requestId, reading) => updateStreaming(operation, sessionId, current => current && { ...current, requestId, reading }), abort.signal, intent)
       const saved = operation === operationRef.current ? await refreshChatState(operation) : null
       if (operation !== operationRef.current || !mountedRef.current) return true
       setStreaming(null)
@@ -206,7 +207,7 @@ export function useChat(openChat: () => void, applyNoteEditAndRefresh: (proposal
     abortRef.current = abort
     sendingRef.current = true
     setSending(true)
-    setStreaming({ question, answer: '', startedAt: Date.now(), activities: [] })
+    setStreaming({ question, answer: '', startedAt: Date.now(), activities: [], capture: true })
     setAgentError('')
     try {
       const reply = await askAgent(question, [recordId], () => {}, undefined, undefined, [], undefined, false, undefined, undefined, abort.signal)

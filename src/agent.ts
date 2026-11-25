@@ -77,7 +77,8 @@ export const resolveLibrarySearch = (proposalId: string, accept: boolean) => inv
 export const resolveCommandProposal = (proposalId: string, accept: boolean) => invoke<ChatState>('resolve_command_proposal', { proposalId, accept })
 export const previewAgentContext = (question: string, referencedIds: string[], frameId?: string, messageIds: string[] = [], deepMode = false) =>
   invoke<ContextPreview>('preview_agent_context', { question, referencedIds, frameId: frameId ?? null, messageIds, deepMode })
-export async function askAgent(question: string, referencedIds: string[], onDelta: (delta: string) => void, frameId?: string, onActivity?: (message: string) => void, messageIds: string[] = [], choiceId?: string, deepMode = false, continueMessageId?: string, onReading?: (requestId: string, reading: boolean) => void, signal?: AbortSignal) {
+export type ChatIntent = 'library_search' | 'command' | 'note_edit'
+export async function askAgent(question: string, referencedIds: string[], onDelta: (delta: string) => void, frameId?: string, onActivity?: (message: string) => void, messageIds: string[] = [], choiceId?: string, deepMode = false, continueMessageId?: string, onReading?: (requestId: string, reading: boolean) => void, signal?: AbortSignal, intent?: ChatIntent) {
   const requestId = crypto.randomUUID()
   const stops: (() => void)[] = []
   let disposed = false
@@ -104,7 +105,7 @@ export async function askAgent(question: string, referencedIds: string[], onDelt
       if (payload.requestId === requestId) { onReading?.(requestId, payload.reading); onActivity?.(payload.message) }
     })
     if (signal?.aborted) throw new DOMException('The request was aborted', 'AbortError')
-    return await invoke<ChatMessage>('ask_agent', { question, referencedIds, requestId, frameId: frameId ?? null, messageIds, choiceId: choiceId ?? null, deepMode, continueMessageId: continueMessageId ?? null })
+    return await invoke<ChatMessage>('ask_agent', { question, referencedIds, requestId, frameId: frameId ?? null, messageIds, choiceId: choiceId ?? null, deepMode, continueMessageId: continueMessageId ?? null, intent: intent ?? null })
   } finally {
     signal?.removeEventListener('abort', cleanup)
     cleanup()

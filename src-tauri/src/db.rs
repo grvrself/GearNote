@@ -387,26 +387,13 @@ pub fn query_record_page(path: &Path, record_type: &str, search: &str, offset: u
         .map_err(|error| format!("资料计数失败：{error}"))?;
     let mut items = Vec::new();
     {
-        let mut query = transaction.prepare(&format!("SELECT id,record_type,title,site,status,source_url,saved_at,
-            json_extract(json,'$.durationSeconds'),json_extract(json,'$.captionLanguage'),json_extract(json,'$.faultReason')
+        let mut query = transaction.prepare(&format!("SELECT {RECORD_SUMMARY_COLUMNS}
             FROM record_rows WHERE {predicate} ORDER BY ordinal ASC LIMIT ?5 OFFSET ?6"))
             .map_err(|error| format!("资料分页查询失败：{error}"))?;
-        let rows = query.query_map(params![record_type, search, fts_query, scan_short, limit, offset], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?,
-                row.get::<_, String>(3)?, row.get::<_, String>(4)?, row.get::<_, String>(5)?, row.get::<_, String>(6)?,
-                row.get::<_, Option<u32>>(7)?, row.get::<_, Option<String>>(8)?, row.get::<_, Option<String>>(9)?))
-        })
+        let rows = query.query_map(params![record_type, search, fts_query, scan_short, limit, offset], record_summary_row)
             .map_err(|error| format!("资料分页查询失败：{error}"))?;
         for row in rows {
-            let (id, record_type, title, site, status, source_url, saved_at, duration_seconds, caption_language, fault_reason) = row.map_err(|error| format!("资料分页查询失败：{error}"))?;
-            let status = match status.as_str() {
-                "extracting" => crate::ProcessStatus::Extracting,
-                "summarizing" => crate::ProcessStatus::Summarizing,
-                "ready" => crate::ProcessStatus::Ready,
-                "fault" => crate::ProcessStatus::Fault,
-                _ => return Err("资料状态索引无效".into()),
-            };
-            items.push(RecordSummary { id, record_type, title, site, status, source_url, saved_at, duration_seconds, caption_language, fault_reason });
+            items.push(row.map_err(|error| format!("资料分页查询失败：{error}"))?);
         }
     }
     transaction.commit().map_err(|error| format!("资料查询事务结束失败：{error}"))?;
@@ -455,6 +442,89 @@ pub fn get_record(path: &Path, id: &str) -> Result<KnowledgeRecord, String> {
     let json: String = connection.query_row("SELECT json FROM record_rows WHERE id=?1", [id], |row| row.get(0))
         .optional().map_err(|error| format!("资料读取失败：{error}"))?.ok_or("资料不存在")?;
     serde_json::from_str(&json).map_err(|error| format!("资料记录无效：{error}"))
+}
+
+/// 按库内顺序读取指定资料的完整记录；不存在的 id 静默跳过（与旧的内存过滤行为一致）。
+pub fn get_records(path: &Path, ids: &[String]) -> Result<Vec<KnowledgeRecord>, String> {
+    if ids.is_empty() { return Ok(Vec::new()); }
+    let connection = open(path)?;
+    let placeholders = vec!["?"; ids.len()].join(",");
+    let mut query = connection.prepare(&format!("SELECT json FROM record_rows WHERE id IN ({placeholders}) ORDER BY ordinal ASC"))
+        .map_err(|error| format!("资料读取失败：{error}"))?;
+    let rows = query.query_map(rusqlite::params_from_iter(ids), |row| row.get::<_, String>(0))
+        .map_err(|error| format!("资料读取失败：{error}"))?;
+    rows.map(|row| row.map_err(|error| format!("资料读取失败：{error}"))
+        .and_then(|json| serde_json::from_str(&json).map_err(|error| format!("资料记录无效：{error}")))).collect()
+}
+
+fn record_summary_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<RecordSummary> {
+    let status: String = row.get(4)?;
+    let status = match status.as_str() {
+        "extracting" => crate::ProcessStatus::Extracting,
+        "summarizing" => crate::ProcessStatus::Summarizing,
+        "ready" => crate::ProcessStatus::Ready,
+        "fault" => crate::ProcessStatus::Fault,
+        _ => return Err(rusqlite::Error::FromSqlConversionFailure(4, rusqlite::types::Type::Text, "资料状态索引无效".into())),
+    };
+    Ok(RecordSummary { id: row.get(0)?, record_type: row.get(1)?, title: row.get(2)?, site: row.get(3)?,
+        status, source_url: row.get(5)?, saved_at: row.get(6)?,
+        duration_seconds: row.get(7)?, caption_language: row.get(8)?, fault_reason: row.get(9)? })
+}
+
+const RECORD_SUMMARY_COLUMNS: &str = "id,record_type,title,site,status,source_url,saved_at,
+    json_extract(json,'$.durationSeconds'),json_extract(json,'$.captionLanguage'),json_extract(json,'$.faultReason')";
+
+/// 只读索引列，不加载正文/字幕；供启动时构建内存索引。
+pub fn read_record_index(path: &Path) -> Result<Vec<RecordSummary>, String> {
+    let connection = open(path)?;
+    let mut query = connection.prepare(&format!("SELECT {RECORD_SUMMARY_COLUMNS} FROM record_rows ORDER BY ordinal ASC"))
+        .map_err(|error| format!("资料索引读取失败：{error}"))?;
+    let rows = query.query_map([], record_summary_row).map_err(|error| format!("资料索引读取失败：{error}"))?;
+    rows.map(|row| row.map_err(|error| format!("资料索引读取失败：{error}"))).collect()
+}
+
+/// 启动时保证逐行资料与片段索引就绪；返回 records 实体是否已存在。
+/// v2 且片段就绪的常规启动不做全量读取；旧版本迁移/快照恢复仍走 read_records。
+pub fn ensure_records_ready(path: &Path) -> Result<bool, String> {
+    let (version, segments, has_snapshot) = {
+        let connection = open(path)?;
+        let version: Option<i64> = connection.query_row("SELECT version FROM entity_meta WHERE name='records'", [], |row| row.get(0))
+            .optional().map_err(|error| format!("资料迁移状态读取失败：{error}"))?;
+        let segments: Option<i64> = connection.query_row("SELECT version FROM entity_meta WHERE name='segments'", [], |row| row.get(0))
+            .optional().map_err(|error| format!("资料片段版本读取失败：{error}"))?;
+        let has_snapshot: i64 = connection.query_row("SELECT EXISTS(SELECT 1 FROM snapshots WHERE name='records')", [], |row| row.get(0))
+            .map_err(|error| format!("旧资料快照检查失败：{error}"))?;
+        (version, segments, has_snapshot == 1)
+    };
+    if version.is_some_and(|value| value != 1 && value != 2) { return Err("资料数据库版本高于当前程序，无法读取".into()); }
+    if segments.is_some_and(|value| value != 1) { return Err("资料片段索引版本高于当前程序，无法写入".into()); }
+    if version == Some(2) && segments == Some(1) { return Ok(true); }
+    if version.is_some() || has_snapshot { read_records(path)?; Ok(true) } else { Ok(false) }
+}
+
+/// 只加载未核对字幕来源的 B 站视频候选，逐条失效并写回；常规启动候选为空。
+pub fn invalidate_unverified_bilibili(path: &Path) -> Result<(), String> {
+    let candidates: Vec<(usize, KnowledgeRecord)> = {
+        let connection = open(path)?;
+        let mut query = connection.prepare("SELECT ordinal,json FROM record_rows
+            WHERE record_type='video' AND status='ready' AND COALESCE(json_extract(json,'$.captionSourceVerified'),0)=0")
+            .map_err(|error| format!("字幕核对检查失败：{error}"))?;
+        let rows = query.query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)))
+            .map_err(|error| format!("字幕核对检查失败：{error}"))?;
+        let mut candidates = Vec::new();
+        for row in rows {
+            let (ordinal, json) = row.map_err(|error| format!("字幕核对检查失败：{error}"))?;
+            candidates.push((ordinal as usize, serde_json::from_str(&json).map_err(|error| format!("资料记录无效：{error}"))?));
+        }
+        candidates
+    };
+    let mut records: Vec<KnowledgeRecord> = candidates.iter().map(|(_, record)| record.clone()).collect();
+    if crate::storage::invalidate_unverified_bilibili(&mut records) {
+        for ((ordinal, _), record) in candidates.iter().zip(&records) {
+            upsert_record(path, record, *ordinal)?;
+        }
+    }
+    Ok(())
 }
 
 #[derive(Serialize, Deserialize)]
@@ -705,63 +775,65 @@ pub fn delete_note_folder(path: &Path, id: &str, notes: &[Note], timestamp: u128
     Ok(next)
 }
 
-fn sync_chat_rows(transaction: &Transaction<'_>, store: &ChatStore) -> Result<(), String> {
+fn check_chat_writable(transaction: &Transaction<'_>, store: &ChatStore) -> Result<(), String> {
     let version: Option<i64> = transaction.query_row("SELECT version FROM entity_meta WHERE name='chat'", [], |row| row.get(0))
         .optional().map_err(|error| format!("会话迁移状态读取失败：{error}"))?;
     if version.is_some_and(|value| value != 1 && value != 2) { return Err("会话数据库版本高于当前程序，无法写入".into()); }
     if store.sessions.is_empty() || !store.sessions.iter().any(|session| session.id == store.active_id) {
         return Err("会话缺少当前会话，未写入数据库".into());
     }
-    let mut old_sessions = HashSet::new();
-    {
-        let mut query = transaction.prepare("SELECT id FROM session_rows").map_err(|error| format!("会话索引读取失败：{error}"))?;
-        for row in query.query_map([], |row| row.get::<_, String>(0)).map_err(|error| format!("会话索引读取失败：{error}"))? {
-            old_sessions.insert(row.map_err(|error| format!("会话索引读取失败：{error}"))?);
-        }
-    }
+    Ok(())
+}
+
+fn upsert_session_row(transaction: &Transaction<'_>, position: usize, session: &ChatSession) -> Result<(), String> {
+    let ordinal = i64::try_from(position).map_err(|_| "会话数量超过数据库上限")?;
+    let mut metadata = session.clone();
+    metadata.messages.clear();
+    let json = serde_json::to_string(&metadata).map_err(|error| format!("会话编码失败：{error}"))?;
+    transaction.execute("INSERT INTO session_rows(id,ordinal,title,project_id,updated_at,json) VALUES (?1,?2,?3,?4,?5,?6)
+        ON CONFLICT(id) DO UPDATE SET ordinal=excluded.ordinal,title=excluded.title,project_id=excluded.project_id,
+            updated_at=excluded.updated_at,json=excluded.json
+        WHERE session_rows.ordinal != excluded.ordinal OR session_rows.json != excluded.json",
+        params![&session.id, ordinal, &session.title, &session.project_id, &session.updated_at, json])
+        .map_err(|error| format!("会话逐条写入失败：{error}"))?;
+    Ok(())
+}
+
+fn upsert_message_row(transaction: &Transaction<'_>, session_id: &str, position: usize, message: &ChatMessage) -> Result<(), String> {
+    let ordinal = i64::try_from(position).map_err(|_| "消息数量超过数据库上限")?;
+    let json = serde_json::to_string(message).map_err(|error| format!("消息编码失败：{error}"))?;
+    transaction.execute("INSERT INTO message_rows(session_id,id,ordinal,role,created_at,json) VALUES (?1,?2,?3,?4,?5,?6)
+        ON CONFLICT(session_id,id) DO UPDATE SET ordinal=excluded.ordinal,role=excluded.role,
+            created_at=excluded.created_at,json=excluded.json
+        WHERE message_rows.ordinal != excluded.ordinal OR message_rows.json != excluded.json",
+        params![session_id, &message.id, ordinal, &message.role, &message.created_at, json])
+        .map_err(|error| format!("消息逐条写入失败：{error}"))?;
+    Ok(())
+}
+
+fn sync_session_messages(transaction: &Transaction<'_>, session: &ChatSession) -> Result<(), String> {
     let mut old_messages = HashSet::new();
     {
-        let mut query = transaction.prepare("SELECT session_id,id FROM message_rows").map_err(|error| format!("消息索引读取失败：{error}"))?;
-        for row in query.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
-            .map_err(|error| format!("消息索引读取失败：{error}"))? {
+        let mut query = transaction.prepare("SELECT id FROM message_rows WHERE session_id=?1")
+            .map_err(|error| format!("消息索引读取失败：{error}"))?;
+        for row in query.query_map([&session.id], |row| row.get::<_, String>(0)).map_err(|error| format!("消息索引读取失败：{error}"))? {
             old_messages.insert(row.map_err(|error| format!("消息索引读取失败：{error}"))?);
         }
     }
-    let mut seen_sessions = HashSet::new();
-    for (position, session) in store.sessions.iter().enumerate() {
-        if session.id.is_empty() || !seen_sessions.insert(session.id.as_str()) { return Err("会话编号为空或重复，未写入数据库".into()); }
-        let ordinal = i64::try_from(position).map_err(|_| "会话数量超过数据库上限")?;
-        let mut metadata = session.clone();
-        metadata.messages.clear();
-        let json = serde_json::to_string(&metadata).map_err(|error| format!("会话编码失败：{error}"))?;
-        transaction.execute("INSERT INTO session_rows(id,ordinal,title,project_id,updated_at,json) VALUES (?1,?2,?3,?4,?5,?6)
-            ON CONFLICT(id) DO UPDATE SET ordinal=excluded.ordinal,title=excluded.title,project_id=excluded.project_id,
-                updated_at=excluded.updated_at,json=excluded.json
-            WHERE session_rows.ordinal != excluded.ordinal OR session_rows.json != excluded.json",
-            params![&session.id, ordinal, &session.title, &session.project_id, &session.updated_at, json])
-            .map_err(|error| format!("会话逐条写入失败：{error}"))?;
-        old_sessions.remove(&session.id);
-        let mut seen_messages = HashSet::new();
-        for (message_position, message) in session.messages.iter().enumerate() {
-            if message.id.is_empty() || !seen_messages.insert(message.id.as_str()) { return Err("消息编号为空或重复，未写入数据库".into()); }
-            let message_ordinal = i64::try_from(message_position).map_err(|_| "消息数量超过数据库上限")?;
-            let message_json = serde_json::to_string(message).map_err(|error| format!("消息编码失败：{error}"))?;
-            transaction.execute("INSERT INTO message_rows(session_id,id,ordinal,role,created_at,json) VALUES (?1,?2,?3,?4,?5,?6)
-                ON CONFLICT(session_id,id) DO UPDATE SET ordinal=excluded.ordinal,role=excluded.role,
-                    created_at=excluded.created_at,json=excluded.json
-                WHERE message_rows.ordinal != excluded.ordinal OR message_rows.json != excluded.json",
-                params![&session.id, &message.id, message_ordinal, &message.role, &message.created_at, message_json])
-                .map_err(|error| format!("消息逐条写入失败：{error}"))?;
-            old_messages.remove(&(session.id.clone(), message.id.clone()));
-        }
+    let mut seen_messages = HashSet::new();
+    for (position, message) in session.messages.iter().enumerate() {
+        if message.id.is_empty() || !seen_messages.insert(message.id.as_str()) { return Err("消息编号为空或重复，未写入数据库".into()); }
+        upsert_message_row(transaction, &session.id, position, message)?;
+        old_messages.remove(&message.id);
     }
-    for (session_id, id) in old_messages {
-        transaction.execute("DELETE FROM message_rows WHERE session_id=?1 AND id=?2", params![session_id, id])
+    for id in old_messages {
+        transaction.execute("DELETE FROM message_rows WHERE session_id=?1 AND id=?2", params![&session.id, id])
             .map_err(|error| format!("旧消息清理失败：{error}"))?;
     }
-    for id in old_sessions {
-        transaction.execute("DELETE FROM session_rows WHERE id=?1", [id]).map_err(|error| format!("旧会话清理失败：{error}"))?;
-    }
+    Ok(())
+}
+
+fn write_chat_meta_row(transaction: &Transaction<'_>, store: &ChatStore) -> Result<(), String> {
     let memory = serde_json::to_string(&store.project_memory).map_err(|error| format!("项目记忆编码失败：{error}"))?;
     transaction.execute("INSERT INTO chat_meta(id,active_id,project_memory_json) VALUES (1,?1,?2)
         ON CONFLICT(id) DO UPDATE SET active_id=excluded.active_id,project_memory_json=excluded.project_memory_json",
@@ -769,6 +841,53 @@ fn sync_chat_rows(transaction: &Transaction<'_>, store: &ChatStore) -> Result<()
     transaction.execute("INSERT INTO entity_meta(name,version) VALUES ('chat',2) ON CONFLICT(name) DO UPDATE SET version=excluded.version", [])
         .map_err(|error| format!("会话迁移状态写入失败：{error}"))?;
     Ok(())
+}
+
+fn sync_chat_rows(transaction: &Transaction<'_>, store: &ChatStore) -> Result<(), String> {
+    check_chat_writable(transaction, store)?;
+    let mut old_sessions = HashSet::new();
+    {
+        let mut query = transaction.prepare("SELECT id FROM session_rows").map_err(|error| format!("会话索引读取失败：{error}"))?;
+        for row in query.query_map([], |row| row.get::<_, String>(0)).map_err(|error| format!("会话索引读取失败：{error}"))? {
+            old_sessions.insert(row.map_err(|error| format!("会话索引读取失败：{error}"))?);
+        }
+    }
+    let mut seen_sessions = HashSet::new();
+    for (position, session) in store.sessions.iter().enumerate() {
+        if session.id.is_empty() || !seen_sessions.insert(session.id.as_str()) { return Err("会话编号为空或重复，未写入数据库".into()); }
+        upsert_session_row(transaction, position, session)?;
+        old_sessions.remove(&session.id);
+        sync_session_messages(transaction, session)?;
+    }
+    for id in old_sessions {
+        transaction.execute("DELETE FROM message_rows WHERE session_id=?1", [&id]).map_err(|error| format!("旧消息清理失败：{error}"))?;
+        transaction.execute("DELETE FROM session_rows WHERE id=?1", [id]).map_err(|error| format!("旧会话清理失败：{error}"))?;
+    }
+    write_chat_meta_row(transaction, store)?;
+    Ok(())
+}
+
+/// 增量写入：只同步 changed 列出的会话（含其消息），removed 为 (会话 id, 原 ordinal)。
+/// 其余会话行不触碰；chat_meta 每次写入。调用方须保证 store 已是修改后的完整状态。
+pub fn write_chat_delta(path: &Path, store: &ChatStore, changed: &[String], removed: &[(String, usize)]) -> Result<(), String> {
+    let mut connection = open(path)?;
+    let transaction = connection.transaction().map_err(|error| format!("会话事务启动失败：{error}"))?;
+    check_chat_writable(&transaction, store)?;
+    for (id, ordinal) in removed {
+        let ordinal = i64::try_from(*ordinal).map_err(|_| "会话数量超过数据库上限")?;
+        transaction.execute("DELETE FROM message_rows WHERE session_id=?1", [id]).map_err(|error| format!("会话消息删除失败：{error}"))?;
+        transaction.execute("DELETE FROM session_rows WHERE id=?1", [id]).map_err(|error| format!("会话删除失败：{error}"))?;
+        transaction.execute("UPDATE session_rows SET ordinal=ordinal-1 WHERE ordinal>?1", [ordinal])
+            .map_err(|error| format!("会话顺序更新失败：{error}"))?;
+    }
+    for id in changed {
+        let (position, session) = store.sessions.iter().enumerate().find(|(_, session)| &session.id == id)
+            .ok_or("待写入的会话不存在，未写入数据库")?;
+        upsert_session_row(&transaction, position, session)?;
+        sync_session_messages(&transaction, session)?;
+    }
+    write_chat_meta_row(&transaction, store)?;
+    transaction.commit().map_err(|error| format!("会话事务提交失败：{error}"))
 }
 
 pub fn read_chat(path: &Path) -> Result<Option<ChatStore>, String> {
@@ -1224,6 +1343,55 @@ mod tests {
         connection.execute("UPDATE entity_meta SET version=1 WHERE name='chat'", []).unwrap();
         drop(connection);
         assert_eq!(read_chat(&path).unwrap().unwrap().sessions.len(), 2);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn chat_delta_matches_full_write() {
+        let dir = std::env::temp_dir().join(format!("knowflow-chat-delta-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(FILE_NAME);
+        let mut store = chat_store();
+        write_chat(&path, &store).unwrap();
+
+        // 追加消息 + 改标题：只写 chat-a，chat-b 行不动。
+        store.sessions[0].title = "甲改".into();
+        store.sessions[0].messages.push(serde_json::from_value(json!({"id":"msg-2","role":"agent","createdAt":"4","paragraphs":["回答甲"]})).unwrap());
+        write_chat_delta(&path, &store, &["chat-a".into()], &[]).unwrap();
+        let loaded = read_chat(&path).unwrap().unwrap();
+        assert_eq!(loaded.sessions[0].title, "甲改");
+        assert_eq!(loaded.sessions[0].messages.len(), 2);
+        assert_eq!(loaded.sessions[1].messages[0].paragraphs[0], "问题乙");
+
+        // 新建会话并切换：changed 含新会话，meta 更新。
+        let fresh: ChatSession = serde_json::from_value(json!({"id":"chat-c","title":"丙","createdAt":"5","updatedAt":"5","referencedIds":[],"messages":[]})).unwrap();
+        store.sessions.push(fresh);
+        store.active_id = "chat-c".into();
+        write_chat_delta(&path, &store, &["chat-c".into()], &[]).unwrap();
+        let loaded = read_chat(&path).unwrap().unwrap();
+        assert_eq!(loaded.active_id, "chat-c");
+        assert_eq!(loaded.sessions.len(), 3);
+
+        // 删除中间会话：ordinal 前移，消息随行删除，结果与全量写一致。
+        store.sessions.remove(1);
+        write_chat_delta(&path, &store, &[], &[("chat-b".into(), 1)]).unwrap();
+        let loaded = read_chat(&path).unwrap().unwrap();
+        assert_eq!(loaded.sessions.iter().map(|session| session.id.as_str()).collect::<Vec<_>>(), vec!["chat-a", "chat-c"]);
+        let connection = open(&path).unwrap();
+        let count: i64 = connection.query_row("SELECT count(*) FROM message_rows WHERE session_id='chat-b'", [], |row| row.get(0)).unwrap();
+        assert_eq!(count, 0);
+        drop(connection);
+        let full_path = dir.join("full.db");
+        write_chat(&full_path, &store).unwrap();
+        assert_eq!(serde_json::to_string(&read_chat(&path).unwrap().unwrap()).unwrap(),
+            serde_json::to_string(&read_chat(&full_path).unwrap().unwrap()).unwrap());
+
+        // 会话内消息删除也会被增量同步清理。
+        store.sessions[0].messages.remove(0);
+        write_chat_delta(&path, &store, &["chat-a".into()], &[]).unwrap();
+        let loaded = read_chat(&path).unwrap().unwrap();
+        assert_eq!(loaded.sessions[0].messages.len(), 1);
+        assert_eq!(loaded.sessions[0].messages[0].id, "msg-2");
         std::fs::remove_dir_all(dir).unwrap();
     }
 

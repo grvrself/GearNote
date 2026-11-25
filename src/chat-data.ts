@@ -16,7 +16,7 @@ export type MessageNotice = { code: string; message: string }
 export type MessageOutcome = { kind: MessageKind; answer: AnswerStatus; answerReason?: AnswerEndReason; readingReason?: ReadingEndReason; notices?: MessageNotice[] }
 
 export type ChatRun = { elapsedMs: number; changedFiles: string[]; readSources?: { sourceIndex: number; recordId: string; title: string; atSeconds?: number | null }[]; readCoverage?: { readUntilSeconds: number; totalSeconds: number; batchCount: number; complete: boolean; reason: string } }
-export type ChatStreaming = { question: string; answer: string; startedAt: number; activity?: string; activities: string[]; requestId?: string; reading?: boolean }
+export type ChatStreaming = { question: string; answer: string; startedAt: number; activity?: string; activities: string[]; requestId?: string; reading?: boolean; capture?: boolean }
 export type ChatSuggestion = { label: string; prompt: string }
 
 export type ChatMessage = {

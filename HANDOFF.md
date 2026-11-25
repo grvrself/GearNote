@@ -99,6 +99,36 @@ GearNote（简称 GN）是一款 Windows 优先的 Tauri 2 桌面知识工作台
 
 ## 可复制给新聊天的开场
 
+### 2026-11-25 架构索引与三项收口（本轮）
+
+**模块索引**（补齐 2026-11-11 表格未涵盖的后端模块，均已核对存在）：
+
+| 模块 | 作用 |
+| --- | --- |
+| `src-tauri/src/skills.rs` | 从 GitHub 安装技能、列出/卸载已装技能、读取技能提示词（`install_skill_from_github` 等 4 个命令）。 |
+| `src-tauri/src/plugins.rs` | 工具链状态检测、工作区信息、打开工作区路径（`get_toolchain_status` 等 3 个命令）。 |
+| `src-tauri/src/command_proposal.rs` | 已确认 ffmpeg / ffprobe / yt-dlp 命令的执行引擎：输出上限 8KB、超时与取消；无独立 Tauri 命令，由 `agent/proposals.rs` 的提案流程调用。 |
+| `src-tauri/src/semantic.rs` | 可选向量检索：只作用于本轮显式已选资料，向量缓存在 SQLite；任何服务/缓存/响应错误返回 None 退回词法检索。 |
+| `src-tauri/src/credentials.rs` | B 站临时 cookies 生命周期：每任务独立目录、跨进程文件锁、残留清理；明文副本如实存在，任务结束删除。 |
+| `src-tauri/src/deep_video.rs` | 深度视频字幕分批（每批 3000 字、每轮 4 批）。 |
+| `src-tauri/src/read_tools.rs` | 只读资料工具索引（ReadIndex，目录上限 2000 片段）。 |
+| `src-tauri/src/retrieval_eval.rs`、`retrieval_eval_extended.rs` | 确定性检索评测 fixture，不调用模型 API 或用户数据库。 |
+| `src-tauri/src/note_compose.rs`、`note_design.rs`、`note_images.rs` | 从资料生成高级笔记草稿、高级版主题/HTML/PDF 导出（PDF 依赖本机 Edge）、笔记截图附件。 |
+
+`src-tauri/src/agent/` 由 `mod.rs` 以 `include!` 拼接 13 个源文件与 4 个测试文件，共享同一作用域（跨文件符号直接可见）。这是已知技术债，本轮未重构。
+
+**当前视图与设置分组**（核对 `src/components/Sidebar.tsx`）：6 个视图 `chat / library / studio / skills / plugins / settings`（Agent 对话、资料库、高级笔记、技能、插件、设置）；设置 8 个分组 `overview / agent / reading / persona / appearance / data / shortcuts / about`。
+
+**本轮三项收口**：
+
+1. **会话写入去重**：`db::write_chat_delta` 增量写入变化的会话/消息行；内存修改失败时恢复原状态，不再整份克隆 ChatStore 落盘。
+2. **资料内存索引化**：`AppState.records` 改为 `Mutex<Vec<RecordSummary>>` 摘要索引；正文、字幕、分镜经 `db::get_record(s)` 按需读取（按 ordinal 排序、静默跳过缺失 id，保持 reading_fingerprint 语义）。资料写入先落库再更新索引。`NotesState` 仍是全量镜像，本轮明确不改。
+3. **显式意图路由**：`ask_agent` 新增 `intent` 参数（`library_search / command / note_edit`），由提问框下方三个入口按钮传入；删除 `proposals.rs` 中三组中文短语拦截与否定词表。intent 与截图、消息引用、深度模式、续读、选择题互斥。提案/确认层不变；已确认的搜资料库后续提问仍按原逻辑启用探索。
+
+**引用校验现状**（README 已同步）：生产路径是 `agent/evidence.rs::assess_answer_evidence`——允许自然段落，只核对实际写出的编号与紧邻引句；不通过时保留模型原文并附 `citation_unverified` 提醒，**不再拒存**。严格的逐行校验 `validate_answer_evidence` 仅存在于 `#[cfg(test)]`。本文 2026-11-11/11-13 段落中「拒绝保存」的描述是当时行为，已被取代。
+
+**验证**：Rust 183 项测试通过（1 忽略）；前端 vitest 31 项通过；`tsc --noEmit` 与 `npm run build` 无错误。桌面端手工验收（三个操作入口、问答引用、续读、截帧、会话切换/删除）尚未执行。
+
 ### 2026-11-23 自动连续阅读（0.1.19）
 
 - 新增 `agent/reading_task.rs`：限定在当前已选资料的任务计数、截止时间、停止信号。`AgentState.reading` 仅保存当前活动请求；`stop_agent_reading` 必须匹配当前 request_id。停止通过 waker 唤醒并取消等待中的阅读请求，读取阶段结束即清理控制对象；最终回答独立生成。

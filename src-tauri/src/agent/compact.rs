@@ -62,7 +62,7 @@ async fn compact_session_context(app: &AppHandle, state: &AgentState, session_id
         session.compacted_summary = summary;
         session.compacted_count = end;
         session.compacted_at = now_millis()?;
-        Ok(true)
+        Ok(ChatEdit::Session(session_id.into()))
     })
 }
 

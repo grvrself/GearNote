@@ -29,12 +29,12 @@ beforeEach(() => {
 })
 
 describe('MiniApp 聊天适配', () => {
-  it('小窗发送直接使用公共控制器的 sendQuestion', () => {
+  it('小窗发送转发到公共控制器的 sendQuestion', () => {
     render(<MiniApp />)
     const controller = vi.mocked(useChat).mock.results[0].value as ReturnType<typeof useChat>
     fireEvent.click(screen.getByRole('button', { name: '小窗发送' }))
-    expect(latestOnSend).toBe(controller.sendQuestion)
-    expect(controller.sendQuestion).toHaveBeenCalledWith('来自小窗')
+    expect(latestOnSend).toBeDefined()
+    expect(controller.sendQuestion).toHaveBeenCalledWith('来自小窗', undefined, undefined, undefined, undefined, undefined, undefined, undefined)
     expect(useChat).toHaveBeenCalledWith(expect.any(Function), applyNoteEdit)
   })
 })

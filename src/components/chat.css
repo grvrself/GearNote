@@ -160,6 +160,14 @@
 .composer-frame button:hover:not(:disabled) { color: var(--paper); }
 .composer-frame button:disabled { color: var(--muted); }
 .composer-frame button:focus-visible { outline: var(--edge) solid var(--accent); outline-offset: var(--focus-offset); }
+.composer-intent { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); padding: var(--space-2); border: var(--edge) solid var(--accent); color: var(--paper); font-size: var(--fs-11); }
+.composer-intent > span { flex: 1; min-width: 0; }
+.composer-intent button { flex: none; border: 0; color: var(--accent); background: transparent; font: var(--fs-11) var(--font-body); cursor: pointer; }
+.composer-intent button:hover:not(:disabled) { color: var(--paper); }
+.composer-intent button:disabled { color: var(--muted); cursor: not-allowed; }
+.composer-intent button:focus-visible { outline: var(--edge) solid var(--accent); outline-offset: var(--focus-offset); }
+.intent-toggle.is-active .hud-button-border { background: var(--accent); }
+.intent-toggle.is-active .hud-button-content { color: var(--accent); }
 .chat-composer textarea::placeholder { color: var(--muted); }
 .deep-mode-toggle { display:flex; align-items:center; gap:var(--space-2); width:fit-content; color:var(--paper); font-size:var(--fs-11); cursor:pointer; }
 .deep-mode-toggle input { margin:0; accent-color:var(--accent); }
@@ -167,7 +175,7 @@
 .deep-mode-toggle:focus-within { outline:var(--edge) solid var(--accent); outline-offset:var(--focus-offset); }
 .composer-foot { display: flex; justify-content: space-between; align-items: center; gap: var(--space-2); }
 .composer-foot > span { color: var(--muted); font-size: var(--fs-11); }
-.composer-foot > div { display: flex; gap: var(--space-2); }
+.composer-foot > div { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-2); }
 
 @media (max-width: 1250px) {
   .message-card { max-width: var(--message-narrow-max-width); }

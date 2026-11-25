@@ -29,9 +29,9 @@ pub fn preview_agent_context(app: AppHandle, agent: State<'_, AgentState>, stora
         } else { None };
         (session.messages[session.compacted_count.min(session.messages.len())..].to_vec(), selected_messages(session, &message_ids)?, frame, store.project_memory.iter().filter(|entry| memory_is_current(entry)).cloned().collect::<Vec<_>>(), session.working_context.clone(), session.compacted_summary.clone(), session.pending_choice.as_ref().filter(|choice| choice.status == "open").cloned())
     };
-    let records = storage.records.lock().map_err(|_| "资料库暂不可用")?.iter()
-        .filter(|record| referenced_ids.contains(&record.id) || image_frame.as_ref().is_some_and(|frame| frame.record_id == record.id))
-        .cloned().collect::<Vec<_>>();
+    let mut record_ids = referenced_ids.clone();
+    if let Some(frame) = &image_frame { record_ids.push(frame.record_id.clone()); }
+    let records = crate::db::get_records(&storage.records_path, &record_ids)?;
     let image = if let Some(frame) = image_frame {
         let path = app.path().app_data_dir().map_err(|error| error.to_string())?
             .join("chat-frames").join(format!("{}.jpg", frame.image_id));
@@ -161,8 +161,47 @@ fn save_final_failure_exchange(session: &mut ChatSession, question: &str, error:
     assistant
 }
 
+fn parse_chat_intent(intent: Option<&str>) -> Result<Option<&'static str>, String> {
+    match intent {
+        None => Ok(None),
+        Some("library_search") => Ok(Some("library_search")),
+        Some("command") => Ok(Some("command")),
+        Some("note_edit") => Ok(Some("note_edit")),
+        Some(_) => Err("操作入口无效".into()),
+    }
+}
+
+fn validate_intent_request(
+    intent: Option<&str>,
+    continue_message_id: Option<&str>,
+    frame_id: Option<&str>,
+    choice_id: Option<&str>,
+    deep_mode: bool,
+    message_ids: &[String],
+) -> Result<Option<&'static str>, String> {
+    let parsed = parse_chat_intent(intent)?;
+    if parsed.is_some()
+        && (continue_message_id.is_some() || frame_id.is_some() || choice_id.is_some() || deep_mode || !message_ids.is_empty())
+    {
+        return Err("操作入口不能与截图、消息引用、深度模式、续读或选择题同时使用".into());
+    }
+    Ok(parsed)
+}
+
+fn resolve_capture_command(question: &str, intent: Option<&str>) -> Option<Result<u32, String>> {
+    capture_time(question).filter(|_| intent.is_none())
+}
+
 #[tauri::command]
-pub async fn ask_agent(app: AppHandle, agent: State<'_, AgentState>, storage: State<'_, AppState>, notes: State<'_, NotesState>, question: String, referenced_ids: Vec<String>, request_id: String, frame_id: Option<String>, message_ids: Vec<String>, choice_id: Option<String>, deep_mode: bool, continue_message_id: Option<String>) -> Result<ChatMessage, String> {
+pub async fn ask_agent(app: AppHandle, agent: State<'_, AgentState>, storage: State<'_, AppState>, notes: State<'_, NotesState>, question: String, referenced_ids: Vec<String>, request_id: String, frame_id: Option<String>, message_ids: Vec<String>, choice_id: Option<String>, deep_mode: bool, continue_message_id: Option<String>, intent: Option<String>) -> Result<ChatMessage, String> {
+    let intent = validate_intent_request(
+        intent.as_deref(),
+        continue_message_id.as_deref(),
+        frame_id.as_deref(),
+        choice_id.as_deref(),
+        deep_mode,
+        &message_ids,
+    )?;
     let continuation = if let Some(id) = continue_message_id.as_deref() {
         if frame_id.is_some() || !message_ids.is_empty() || choice_id.is_some() { return Err("续读时请移除图片和对话参考".into()); }
         let store = agent.sessions.lock().map_err(|_| "会话暂不可用")?;
@@ -190,7 +229,7 @@ pub async fn ask_agent(app: AppHandle, agent: State<'_, AgentState>, storage: St
         let session = store.sessions.iter().find(|item| item.id == request_session_id).ok_or("当前会话不存在")?;
         validate_choice_submission(session, question, choice_id.as_deref())?;
     }
-    if let Some(parsed) = capture_time(question) {
+    if let Some(parsed) = resolve_capture_command(question, intent) {
         let seconds = parsed?;
         let videos = {
             let records = storage.records.lock().map_err(|_| "资料库暂不可用")?;
@@ -222,15 +261,13 @@ pub async fn ask_agent(app: AppHandle, agent: State<'_, AgentState>, storage: St
             outcome: Some(MessageOutcome::answer(MessageKind::Frame, AnswerStatus::NotApplicable)) };
         let saved = (|| {
             let mut store = agent.sessions.lock().map_err(|_| "会话暂不可用")?;
-            let mut next = store.clone();
-            if next.active_id != request_session_id { return Err("会话已切换，本轮截图未保存".into()); }
-            let active = next.sessions.iter_mut().find(|item| item.id == next.active_id).ok_or("当前会话不存在")?;
+            if store.active_id != request_session_id { return Err("会话已切换，本轮截图未保存".into()); }
+            let active = store.sessions.iter_mut().find(|item| item.id == request_session_id).ok_or("当前会话不存在")?;
             if active.messages.is_empty() && active.title == "新会话" { active.title = session_title(question); }
             active.messages.push(user);
             active.messages.push(assistant.clone());
             active.updated_at = now.clone();
-            persist_chat_store(&agent.sessions_path, &next)?;
-            *store = next;
+            save_chat_session(&agent, &mut store, &request_session_id)?;
             Ok::<(), String>(())
         })();
         if let Err(error) = saved { let _ = fs::remove_file(image_path); return Err(error); }
@@ -242,39 +279,33 @@ pub async fn ask_agent(app: AppHandle, agent: State<'_, AgentState>, storage: St
     let key = agent.key.lock().map_err(|_| "请先在设置页填写 API 密钥")?.clone().ok_or("请先在设置页填写 API 密钥")?;
     let persona = agent.persona.lock().map_err(|_| "人格文件暂不可用")?.clone();
     if config.model.is_empty() { return Err("请先在设置页填写模型名称".into()); }
-    let mut confirmed_library_followup = false;
-    if library_search_requested(question) && frame_id.is_none() && !deep_mode && choice_id.is_none() {
-        let (already_confirmed, open_proposal) = {
-            let store = agent.sessions.lock().map_err(|_| "会话暂不可用")?;
-            let session = store.sessions.iter().find(|item| item.id == request_session_id).ok_or("当前会话不存在")?;
-            let confirmed = session.pending_library_search.as_ref().is_some_and(|proposal|
-                proposal.status == "accepted" && proposal.question == question && proposal.records.iter().all(|record| referenced_ids.contains(&record.id)));
-            let open = session.pending_library_search.as_ref().is_some_and(|proposal| proposal.status == "open");
-            (confirmed, open)
-        };
-        if open_proposal { return Err("请先确认或跳过上一次资料库搜索".into()); }
-        confirmed_library_followup = already_confirmed;
-        if !already_confirmed {
-            let client = reqwest::Client::builder().connect_timeout(Duration::from_secs(15)).timeout(Duration::from_secs(60))
-                .build().map_err(|_| "无法初始化搜索连接")?;
-            let _ = app.emit("knowflow:agent-tool", ToolActivity { request_id: request_id.clone(), message: "正在搜索整个资料库的标题…".into() });
-            let query = propose_library_query(&client, &config, &key, question).await?;
-            let records = crate::db::search_library_titles(&agent.sessions_path, &query, 8)?;
-            let now = now_millis()?;
-            let mut store = agent.sessions.lock().map_err(|_| "会话暂不可用")?;
-            let mut next = store.clone();
-            if next.active_id != request_session_id { return Err("会话已切换，搜索结果未保存".into()); }
-            let active = next.sessions.iter_mut().find(|item| item.id == request_session_id).ok_or("当前会话不存在")?;
-            if active.messages.is_empty() && active.title == "新会话" { active.title = session_title(question); }
-            let assistant = save_library_exchange(active, question, records, &now, started_at.elapsed().as_millis().min(u64::MAX as u128) as u64);
-            persist_chat_store(&agent.sessions_path, &next)?;
-            *store = next;
-            drop(store);
-            let _ = app.emit("knowflow:chat-changed", ());
-            return Ok(assistant);
+    let confirmed_library_followup = {
+        let store = agent.sessions.lock().map_err(|_| "会话暂不可用")?;
+        let session = store.sessions.iter().find(|item| item.id == request_session_id).ok_or("当前会话不存在")?;
+        if intent == Some("library_search") && session.pending_library_search.as_ref().is_some_and(|proposal| proposal.status == "open") {
+            return Err("请先确认或跳过上一次资料库搜索".into());
         }
+        session.pending_library_search.as_ref().is_some_and(|proposal|
+            proposal.status == "accepted" && proposal.question == question && proposal.records.iter().all(|record| referenced_ids.contains(&record.id)))
+    };
+    if intent == Some("library_search") && !confirmed_library_followup {
+        let client = reqwest::Client::builder().connect_timeout(Duration::from_secs(15)).timeout(Duration::from_secs(60))
+            .build().map_err(|_| "无法初始化搜索连接")?;
+        let _ = app.emit("knowflow:agent-tool", ToolActivity { request_id: request_id.clone(), message: "正在搜索整个资料库的标题…".into() });
+        let query = propose_library_query(&client, &config, &key, question).await?;
+        let records = crate::db::search_library_titles(&agent.sessions_path, &query, 8)?;
+        let now = now_millis()?;
+        let mut store = agent.sessions.lock().map_err(|_| "会话暂不可用")?;
+        if store.active_id != request_session_id { return Err("会话已切换，搜索结果未保存".into()); }
+        let active = store.sessions.iter_mut().find(|item| item.id == request_session_id).ok_or("当前会话不存在")?;
+        if active.messages.is_empty() && active.title == "新会话" { active.title = session_title(question); }
+        let assistant = save_library_exchange(active, question, records, &now, started_at.elapsed().as_millis().min(u64::MAX as u128) as u64);
+        save_chat_session(&agent, &mut store, &request_session_id)?;
+        drop(store);
+        let _ = app.emit("knowflow:chat-changed", ());
+        return Ok(assistant);
     }
-    if chat_note_edit_requested(question) && !library_search_requested(question) && !command_requested(question) && frame_id.is_none() && !deep_mode && choice_id.is_none() {
+    if intent == Some("note_edit") {
         {
             let store = agent.sessions.lock().map_err(|_| "会话暂不可用")?;
             let session = store.sessions.iter().find(|item| item.id == request_session_id).ok_or("当前会话不存在")?;
@@ -288,8 +319,7 @@ pub async fn ask_agent(app: AppHandle, agent: State<'_, AgentState>, storage: St
         };
         if note.body.chars().count() > 12_000 { return Err("这篇笔记超过 12000 字，暂不能生成修改建议".into()); }
         let evidence_required = note_evidence_requested(question);
-        let records = storage.records.lock().map_err(|_| "资料库暂不可用")?.iter()
-            .filter(|record| referenced_ids.contains(&record.id)).cloned().collect::<Vec<_>>();
+        let records = crate::db::get_records(&storage.records_path, &referenced_ids)?;
         let (mut sources, _) = context::select_sources(&records, &referenced_ids, question);
         sources.truncate(8);
         for source in &mut sources { source.text = source.text.chars().take(1_200).collect(); }
@@ -306,19 +336,17 @@ pub async fn ask_agent(app: AppHandle, agent: State<'_, AgentState>, storage: St
         workflow::store_note_proposal(&notes.path, &note, &after, &proposal)?;
         let now = now_millis()?;
         let mut store = agent.sessions.lock().map_err(|_| "会话暂不可用")?;
-        let mut next = store.clone();
-        if next.active_id != request_session_id { return Err("会话已切换，笔记建议未显示".into()); }
-        let active = next.sessions.iter_mut().find(|item| item.id == request_session_id).ok_or("当前会话不存在")?;
+        if store.active_id != request_session_id { return Err("会话已切换，笔记建议未显示".into()); }
+        let active = store.sessions.iter_mut().find(|item| item.id == request_session_id).ok_or("当前会话不存在")?;
         if active.messages.is_empty() && active.title == "新会话" { active.title = session_title(question); }
         let assistant = save_chat_note_exchange(active, question, &note.title, proposal, &sources, &now,
             started_at.elapsed().as_millis().min(u64::MAX as u128) as u64);
-        persist_chat_store(&agent.sessions_path, &next)?;
-        *store = next;
+        save_chat_session(&agent, &mut store, &request_session_id)?;
         drop(store);
         let _ = app.emit("knowflow:chat-changed", ());
         return Ok(assistant);
     }
-    if command_requested(question) && !library_search_requested(question) && frame_id.is_none() && !deep_mode && choice_id.is_none() {
+    if intent == Some("command") {
         {
             let store = agent.sessions.lock().map_err(|_| "会话暂不可用")?;
             let session = store.sessions.iter().find(|item| item.id == request_session_id).ok_or("当前会话不存在")?;
@@ -332,14 +360,12 @@ pub async fn ask_agent(app: AppHandle, agent: State<'_, AgentState>, storage: St
         let (program, args) = propose_command_args(&client, &config, &key, question).await?;
         let now = now_millis()?;
         let mut store = agent.sessions.lock().map_err(|_| "会话暂不可用")?;
-        let mut next = store.clone();
-        if next.active_id != request_session_id { return Err("会话已切换，命令提案未保存".into()); }
-        let active = next.sessions.iter_mut().find(|item| item.id == request_session_id).ok_or("当前会话不存在")?;
+        if store.active_id != request_session_id { return Err("会话已切换，命令提案未保存".into()); }
+        let active = store.sessions.iter_mut().find(|item| item.id == request_session_id).ok_or("当前会话不存在")?;
         if active.messages.is_empty() && active.title == "新会话" { active.title = session_title(question); }
         let assistant = save_command_exchange(active, question, program, args, &now,
             started_at.elapsed().as_millis().min(u64::MAX as u128) as u64)?;
-        persist_chat_store(&agent.sessions_path, &next)?;
-        *store = next;
+        save_chat_session(&agent, &mut store, &request_session_id)?;
         drop(store);
         let _ = app.emit("knowflow:chat-changed", ());
         return Ok(assistant);
@@ -395,8 +421,7 @@ pub async fn ask_agent(app: AppHandle, agent: State<'_, AgentState>, storage: St
         image_source = Some(SourceChunk::image(frame.record_id.clone(), title, frame.at_seconds));
         Some((frame, format!("data:image/jpeg;base64,{}", crate::storyboard::base64(&bytes))))
     } else { None };
-    let records = storage.records.lock().map_err(|_| "资料库暂不可用")?.iter()
-        .filter(|record| referenced_ids.contains(&record.id)).cloned().collect::<Vec<_>>();
+    let records = crate::db::get_records(&storage.records_path, &referenced_ids)?;
     let full_reading = config.reading_budget.strategy == ReadingStrategy::Full || continuation.as_ref().is_some_and(|value| value.progress.full);
     let deep_mode = deep_mode || (full_reading && (config.explore_references || confirmed_library_followup || continuation.is_some()) && referenced_ids.len() == 1 && records.first().is_some_and(|record| record.record_type == "video") && image_source.is_none() && selected.is_empty() && open_choice.is_none());
     let deep_record = if deep_mode { Some(validate_deep_video(&records, &referenced_ids, image_source.is_some(), !selected.is_empty(), open_choice.is_some())?) } else { None };
@@ -473,14 +498,12 @@ pub async fn ask_agent(app: AppHandle, agent: State<'_, AgentState>, storage: St
             Err(error) => {
                 let now = now_millis()?;
                 let mut store = agent.sessions.lock().map_err(|_| "会话暂不可用")?;
-                let mut next = store.clone();
-                if next.active_id != request_session_id { return Err("会话已切换，深度阅读失败记录未保存".into()); }
-                let active = next.sessions.iter_mut().find(|item| item.id == request_session_id).ok_or("当前会话不存在")?;
+                if store.active_id != request_session_id { return Err("会话已切换，深度阅读失败记录未保存".into()); }
+                let active = store.sessions.iter_mut().find(|item| item.id == request_session_id).ok_or("当前会话不存在")?;
                 if active.messages.is_empty() && active.title == "新会话" { active.title = session_title(question); }
                 let assistant = save_deep_failure_exchange(active, question, &error, &now,
                     started_at.elapsed().as_millis().min(u64::MAX as u128) as u64, choice_id.as_deref());
-                persist_chat_store(&agent.sessions_path, &next)?;
-                *store = next;
+                save_chat_session(&agent, &mut store, &request_session_id)?;
                 drop(store);
                 let _ = app.emit("knowflow:chat-changed", ());
                 return Ok(assistant);
@@ -502,14 +525,12 @@ pub async fn ask_agent(app: AppHandle, agent: State<'_, AgentState>, storage: St
     if let Some((draft, steps)) = exploration.as_ref().and_then(|value| value.choice.clone().map(|draft| (draft, value.steps.clone()))) {
         let now = now_millis()?;
         let mut store = agent.sessions.lock().map_err(|_| "会话暂不可用")?;
-        let mut next = store.clone();
-        if next.active_id != request_session_id { return Err("会话已切换，本轮选择题未保存".into()); }
-        let active = next.sessions.iter_mut().find(|item| item.id == request_session_id).ok_or("当前会话不存在")?;
+        if store.active_id != request_session_id { return Err("会话已切换，本轮选择题未保存".into()); }
+        let active = store.sessions.iter_mut().find(|item| item.id == request_session_id).ok_or("当前会话不存在")?;
         if active.pending_choice.as_ref().is_some_and(|choice| choice.status == "open") { return Err("会话已有未回答的选择题".into()); }
         if active.messages.is_empty() && active.title == "新会话" { active.title = session_title(question); }
         let assistant = save_choice_exchange(active, question, draft, steps, &now, started_at.elapsed().as_millis().min(u64::MAX as u128) as u64);
-        persist_chat_store(&agent.sessions_path, &next)?;
-        *store = next;
+        save_chat_session(&agent, &mut store, &request_session_id)?;
         drop(store);
         let _ = app.emit("knowflow:chat-changed", ());
         return Ok(assistant);
@@ -559,9 +580,8 @@ pub async fn ask_agent(app: AppHandle, agent: State<'_, AgentState>, storage: St
         Err(failure) => {
             let now = now_millis()?;
             let mut store = agent.sessions.lock().map_err(|_| "会话暂不可用")?;
-            let mut next = store.clone();
-            if next.active_id != request_session_id { return Err("会话已切换，本轮失败记录未保存".into()); }
-            let active = next.sessions.iter_mut().find(|item| item.id == request_session_id).ok_or("当前会话不存在")?;
+            if store.active_id != request_session_id { return Err("会话已切换，本轮失败记录未保存".into()); }
+            let active = store.sessions.iter_mut().find(|item| item.id == request_session_id).ok_or("当前会话不存在")?;
             if active.messages.is_empty() && active.title == "新会话" { active.title = session_title(question); }
             if read_progress.is_some() { tool_steps.push("可继续读取：本轮最终回答未返回，已保留阅读进度".into()); }
             let assistant = save_final_failure_exchange(active, question, &failure.message, failure.reason, reading_reason, &now,
@@ -569,8 +589,7 @@ pub async fn ask_agent(app: AppHandle, agent: State<'_, AgentState>, storage: St
                 attachment.as_ref().map(|(frame, _)| frame.clone()), tool_steps, read_sources, read_coverage, choice_id.as_deref());
             active.read_continuation = read_progress.map(|progress| ReadContinuation { message_id: assistant.id.clone(),
                 question: question.into(), referenced_ids: referenced_ids.clone(), fingerprint: reading_fingerprint(&records), progress });
-            persist_chat_store(&agent.sessions_path, &next)?;
-            *store = next;
+            save_chat_session(&agent, &mut store, &request_session_id)?;
             drop(store);
             let _ = app.emit("knowflow:chat-changed", ());
             return Ok(assistant);
@@ -598,9 +617,8 @@ pub async fn ask_agent(app: AppHandle, agent: State<'_, AgentState>, storage: St
         run: Some(ChatRun { elapsed_ms: started_at.elapsed().as_millis().min(u64::MAX as u128) as u64, changed_files: Vec::new(), read_sources, read_coverage }), suggestions: Vec::new(), outcome: Some(outcome) };
     {
         let mut store = agent.sessions.lock().map_err(|_| "会话暂不可用")?;
-        let mut next = store.clone();
-        if next.active_id != request_session_id { return Err("会话已切换，本轮回答未保存".into()); }
-        let active = next.sessions.iter_mut().find(|item| item.id == next.active_id).ok_or("当前会话不存在")?;
+        if store.active_id != request_session_id { return Err("会话已切换，本轮回答未保存".into()); }
+        let active = store.sessions.iter_mut().find(|item| item.id == request_session_id).ok_or("当前会话不存在")?;
         if active.messages.is_empty() && active.title == "新会话" { active.title = session_title(question); }
         answer_pending_choice(active, question, &now, choice_id.as_deref());
         active.read_continuation = read_progress.map(|progress| ReadContinuation { message_id: assistant.id.clone(),
@@ -611,8 +629,7 @@ pub async fn ask_agent(app: AppHandle, agent: State<'_, AgentState>, storage: St
         active.messages.push(user);
         active.messages.push(assistant.clone());
         active.updated_at = now;
-        persist_chat_store(&agent.sessions_path, &next)?;
-        *store = next;
+        save_chat_session(&agent, &mut store, &request_session_id)?;
     }
     let _ = app.emit("knowflow:chat-changed", ());
     Ok(assistant)

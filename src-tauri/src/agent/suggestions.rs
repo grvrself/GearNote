@@ -96,14 +96,12 @@ pub async fn suggest_chat_followups(app: AppHandle, state: State<'_, AgentState>
     if suggestions.is_empty() { return Ok(suggestions); }
     let mut store = state.sessions.lock().map_err(|_| "会话暂不可用")?;
     if store.active_id != session_id { return Ok(Vec::new()); }
-    let mut next = store.clone();
-    let session = next.sessions.iter_mut().find(|item| item.id == session_id).ok_or("会话不存在")?;
+    let session = store.sessions.iter_mut().find(|item| item.id == session_id).ok_or("会话不存在")?;
     let Some(last) = session.messages.last_mut() else { return Ok(Vec::new()); };
     if last.id != message_id || last.role != "agent" { return Ok(Vec::new()); }
     if !last.suggestions.is_empty() { return Ok(last.suggestions.clone()); }
     last.suggestions = suggestions.clone();
-    persist_chat_store(&state.sessions_path, &next)?;
-    *store = next;
+    save_chat_session(&state, &mut store, &session_id)?;
     drop(store);
     let _ = app.emit("knowflow:chat-changed", ());
     Ok(suggestions)

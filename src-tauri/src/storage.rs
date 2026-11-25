@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
-    io::Write,
     path::PathBuf,
     sync::Mutex,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -132,7 +131,8 @@ struct CaptureJobEntry {
 }
 
 pub struct AppState {
-    pub records: Mutex<Vec<KnowledgeRecord>>,
+    /// 内存只保留摘要索引；正文/字幕按需经 db::get_record(s) 读取。
+    pub records: Mutex<Vec<RecordSummary>>,
     capture_jobs: Mutex<Vec<CaptureJobEntry>>,
     pub records_path: PathBuf,
     pub pair_code: String,
@@ -168,16 +168,12 @@ impl AppState {
         }
         let db_path = data_dir.join(crate::db::FILE_NAME);
         crate::db::backup_before_phase_four(&db_path).map_err(std::io::Error::other)?;
-        let mut records: Vec<KnowledgeRecord> = if let Some(saved) = crate::db::read_records(&db_path).map_err(std::io::Error::other)? {
-            saved
-        } else {
-            let legacy = if records_path.exists() { serde_json::from_slice(&fs::read(&records_path)?)? } else { Vec::new() };
+        if !crate::db::ensure_records_ready(&db_path).map_err(std::io::Error::other)? {
+            let legacy: Vec<KnowledgeRecord> = if records_path.exists() { serde_json::from_slice(&fs::read(&records_path)?)? } else { Vec::new() };
             crate::db::write_records(&db_path, &legacy).map_err(std::io::Error::other)?;
-            legacy
-        };
-        if invalidate_unverified_bilibili(&mut records) {
-            persist_records(&db_path, &records).map_err(std::io::Error::other)?;
         }
+        crate::db::invalidate_unverified_bilibili(&db_path).map_err(std::io::Error::other)?;
+        let records = crate::db::read_record_index(&db_path).map_err(std::io::Error::other)?;
         let pair_path = data_dir.join("extension-pair-code.txt");
         let pair_code = if pair_path.exists() {
             fs::read_to_string(&pair_path)?.trim().to_owned()
@@ -302,7 +298,10 @@ impl AppState {
                 .is_some_and(|mut saved_url| normalize_bilibili_article_url(&mut saved_url) && saved_url == parsed)
         });
         if let Some(index) = existing_index {
-            if !bilibili_article { return Ok(CaptureResult { record: records[index].clone(), already_saved: true, updated: false }); }
+            if !bilibili_article {
+                let record = crate::db::get_record(&self.records_path, &records[index].id)?;
+                return Ok(CaptureResult { record, already_saved: true, updated: false });
+            }
         }
         let excerpt = text
             .split("\n\n")
@@ -330,19 +329,13 @@ impl AppState {
             caption_source_verified: false,
         };
         if let Some(index) = existing_index {
-            let existing_id = records[index].id.clone();
-            let previous = std::mem::replace(&mut records[index], KnowledgeRecord { id: existing_id, ..record });
-            if let Err(error) = persist_record_at(&self.records_path, &records[index], index, &records) {
-                records[index] = previous;
-                return Err(error);
-            }
-            return Ok(CaptureResult { record: records[index].clone(), already_saved: false, updated: true });
+            let record = KnowledgeRecord { id: records[index].id.clone(), ..record };
+            crate::db::upsert_record(&self.records_path, &record, index)?;
+            records[index] = RecordSummary::of(&record);
+            return Ok(CaptureResult { record, already_saved: false, updated: true });
         }
-        records.insert(0, record.clone());
-        if let Err(error) = persist_record_at(&self.records_path, &records[0], 0, &records) {
-            records.remove(0);
-            return Err(error);
-        }
+        crate::db::upsert_record(&self.records_path, &record, 0)?;
+        records.insert(0, RecordSummary::of(&record));
         Ok(CaptureResult { record, already_saved: false, updated: false })
     }
 
@@ -448,23 +441,16 @@ impl AppState {
         let mut records = self.records.lock().map_err(|_| "资料库暂不可用".to_owned())?;
         if let Some(index) = records.iter().position(|item| item.record_type == "video" && item.source_url == record.source_url) {
             if records[index].status == crate::ProcessStatus::Ready {
-                return Ok(CaptureResult { record: records[index].clone(), already_saved: true, updated: false });
+                let saved = crate::db::get_record(&self.records_path, &records[index].id)?;
+                return Ok(CaptureResult { record: saved, already_saved: true, updated: false });
             }
-            let existing_id = records[index].id.clone();
-            let old = std::mem::replace(&mut records[index], KnowledgeRecord {
-                id: existing_id, ..record.clone()
-            });
-            if let Err(error) = persist_record_at(&self.records_path, &records[index], index, &records) {
-                records[index] = old;
-                return Err(error);
-            }
-            return Ok(CaptureResult { record: records[index].clone(), already_saved: false, updated: true });
+            let record = KnowledgeRecord { id: records[index].id.clone(), ..record };
+            crate::db::upsert_record(&self.records_path, &record, index)?;
+            records[index] = RecordSummary::of(&record);
+            return Ok(CaptureResult { record, already_saved: false, updated: true });
         }
-        records.insert(0, record.clone());
-        if let Err(error) = persist_record_at(&self.records_path, &records[0], 0, &records) {
-            records.remove(0);
-            return Err(error);
-        }
+        crate::db::upsert_record(&self.records_path, &record, 0)?;
+        records.insert(0, RecordSummary::of(&record));
         Ok(CaptureResult { record, already_saved: false, updated: false })
     }
 
@@ -488,7 +474,7 @@ fn normalize_bilibili_article_url(url: &mut Url) -> bool {
     true
 }
 
-fn invalidate_unverified_bilibili(records: &mut [KnowledgeRecord]) -> bool {
+pub(crate) fn invalidate_unverified_bilibili(records: &mut [KnowledgeRecord]) -> bool {
     let mut changed = false;
     for record in records {
         let host = Url::parse(&record.source_url).ok()
@@ -540,9 +526,10 @@ mod tests {
             "sourceUrl": "https://www.bilibili.com/opus/396287239310805041?from=search",
             "contentText": "会员提示和旧正文", "excerpt": []
         })).unwrap();
-        let path = std::env::temp_dir().join(format!("knowflow-article-test-{}.json", Uuid::new_v4()));
+        let path = std::env::temp_dir().join(format!("knowflow-article-test-{}.db", Uuid::new_v4()));
+        crate::db::write_records(&path, &[old.clone()]).unwrap();
         let state = AppState {
-            records: Mutex::new(vec![old]), capture_jobs: Mutex::new(Vec::new()), records_path: path.clone(), pair_code: String::new(),
+            records: Mutex::new(vec![RecordSummary::of(&old)]), capture_jobs: Mutex::new(Vec::new()), records_path: path.clone(), pair_code: String::new(),
             last_extension_seen: Mutex::new(None), bridge_error: Mutex::new(None),
         };
         let result = state.capture(ArticleCapture {
@@ -555,55 +542,18 @@ mod tests {
         assert_eq!(result.record.id, "rec-existing");
         assert!(!result.record.content_text.contains("会员提示"));
         assert_eq!(result.record.source_url, "https://www.bilibili.com/opus/396287239310805041");
-        let saved: Vec<KnowledgeRecord> = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        let saved = crate::db::read_records(&path).unwrap().unwrap();
         assert_eq!(saved.len(), 1);
         assert_eq!(saved[0].id, "rec-existing");
+        assert!(!saved[0].content_text.contains("会员提示"));
+        drop(state);
         fs::remove_file(path).unwrap();
     }
 }
 
-pub(crate) fn persist_records(path: &PathBuf, records: &[KnowledgeRecord]) -> Result<(), String> {
-    if path.extension().is_some_and(|value| value == "db") { return crate::db::write_records(path, records); }
-    let serialized = serde_json::to_vec_pretty(records).map_err(|_| "资料无法编码".to_owned())?;
-    let temp_path = path.with_extension("json.tmp");
-    let backup_path = path.with_extension("json.bak");
-    let mut temp = fs::File::create(&temp_path).map_err(|error| format!("保存资料失败：{error}"))?;
-    temp.write_all(&serialized).map_err(|error| format!("保存资料失败：{error}"))?;
-    temp.sync_all().map_err(|error| format!("保存资料失败：{error}"))?;
-    drop(temp);
-    if backup_path.exists() {
-        fs::remove_file(&backup_path).map_err(|error| format!("清理旧备份失败：{error}"))?;
-    }
-    let had_previous = path.exists();
-    if had_previous {
-        fs::rename(path, &backup_path).map_err(|error| format!("备份资料失败：{error}"))?;
-    }
-    if let Err(error) = fs::rename(&temp_path, path) {
-        if had_previous {
-            let _ = fs::rename(&backup_path, path);
-        }
-        return Err(format!("保存资料失败：{error}"));
-    }
-    if had_previous {
-        let _ = fs::remove_file(&backup_path);
-    }
-    Ok(())
-}
-
-pub(crate) fn persist_record_at(path: &PathBuf, record: &KnowledgeRecord, position: usize, all_records: &[KnowledgeRecord]) -> Result<(), String> {
-    if path.extension().is_some_and(|value| value == "db") { crate::db::upsert_record(path, record, position) }
-    else { persist_records(path, all_records) }
-}
-
 #[tauri::command]
 pub fn list_records(state: State<'_, AppState>) -> Result<Vec<RecordSummary>, String> {
-    let records = state.records.lock().map_err(|_| "资料库暂不可用")?;
-    Ok(records.iter().map(|record| RecordSummary {
-        id: record.id.clone(), record_type: record.record_type.clone(), title: record.title.clone(),
-        site: record.site.clone(), saved_at: record.saved_at.clone(), status: record.status,
-        source_url: record.source_url.clone(),
-        duration_seconds: record.duration_seconds, caption_language: record.caption_language.clone(), fault_reason: record.fault_reason.clone(),
-    }).collect())
+    Ok(state.records.lock().map_err(|_| "资料库暂不可用")?.clone())
 }
 
 #[tauri::command]
@@ -612,17 +562,11 @@ pub fn delete_record(app: AppHandle, agent: State<'_, crate::agent::AgentState>,
     if *busy { return Err("Agent 正在读取资料，请等回答结束后再删除".into()); }
     let mut records = state.records.lock().map_err(|_| "资料库暂不可用")?;
     let position = records.iter().position(|record| record.id == id).ok_or("资料已不存在")?;
-    let record = &records[position];
-    if matches!(record.status, crate::ProcessStatus::Extracting | crate::ProcessStatus::Summarizing) {
+    if matches!(records[position].status, crate::ProcessStatus::Extracting | crate::ProcessStatus::Summarizing) {
         return Err("资料仍在处理中，完成后才能删除".into());
     }
-    if state.records_path.extension().is_some_and(|value| value == "db") {
-        crate::db::delete_record(&state.records_path, record)?;
-    } else {
-        let mut next = records.clone();
-        next.remove(position);
-        persist_records(&state.records_path, &next)?;
-    }
+    let record = crate::db::get_record(&state.records_path, &id)?;
+    crate::db::delete_record(&state.records_path, &record)?;
     records.remove(position);
     drop(records);
     drop(busy);
@@ -640,7 +584,7 @@ pub fn dismiss_capture_job(state: State<'_, AppState>, id: String) -> Result<boo
     state.dismiss_capture_job(&id)
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RecordSummary {
     pub(crate) id: String,
@@ -654,6 +598,17 @@ pub struct RecordSummary {
     pub(crate) duration_seconds: Option<u32>,
     pub(crate) caption_language: Option<String>,
     pub(crate) fault_reason: Option<String>,
+}
+
+impl RecordSummary {
+    pub(crate) fn of(record: &KnowledgeRecord) -> Self {
+        Self {
+            id: record.id.clone(), record_type: record.record_type.clone(), title: record.title.clone(),
+            site: record.site.clone(), saved_at: record.saved_at.clone(), status: record.status,
+            source_url: record.source_url.clone(), duration_seconds: record.duration_seconds,
+            caption_language: record.caption_language.clone(), fault_reason: record.fault_reason.clone(),
+        }
+    }
 }
 
 #[tauri::command]

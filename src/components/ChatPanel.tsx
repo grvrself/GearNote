@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ChatFrame, ChatMessage, ChatStreaming } from '../chat-data'
 import type { KnowledgeRecord } from '../data'
-import type { ContextPreview, PendingChoice, PendingLibrarySearch, PendingChatNoteEdit, PendingCommand, ProjectMemory, WorkingContext, ReadContinuationSummary } from '../agent'
+import type { ChatIntent, ContextPreview, PendingChoice, PendingLibrarySearch, PendingChatNoteEdit, PendingCommand, ProjectMemory, WorkingContext, ReadContinuationSummary } from '../agent'
 import { getChatFrameImage, stopAgentReading } from '../agent'
 import { isCaptureCommand } from '../capture-command'
 import { CapturedFrame } from './CapturedFrame'
@@ -36,7 +36,7 @@ type Props = {
   suggestionErrorId?: string | null
   error?: string
   onContinueReading?: (messageId: string) => Promise<boolean>
-  onSend?: (question: string, frameId?: string, messageIds?: string[], choiceId?: string, deepMode?: boolean) => Promise<boolean>
+  onSend?: (question: string, frameId?: string, messageIds?: string[], choiceId?: string, deepMode?: boolean, intent?: ChatIntent) => Promise<boolean>
   onPreviewContext?: (question: string, frameId?: string, messageIds?: string[], deepMode?: boolean) => Promise<ContextPreview>
   onOpenAgentSetup?: () => void
   onSummarize?: (deepMode?: boolean) => void
@@ -52,6 +52,12 @@ type Props = {
 }
 
 const timeFormatter = new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })
+
+const intentEntries: { intent: ChatIntent; label: string; hint: string }[] = [
+  { intent: 'library_search', label: '搜资料库', hint: '在整个资料库搜索标题；结果确认后才加入本轮参考' },
+  { intent: 'note_edit', label: '改笔记', hint: '生成笔记修改建议；确认后才写入。请在问题中写明笔记标题' },
+  { intent: 'command', label: '运行命令', hint: '提出 ffmpeg / ffprobe / yt-dlp 命令；确认后才执行' },
+]
 
 function formatElapsed(seconds: number) {
   const hours = Math.floor(seconds / 3600)
@@ -102,6 +108,7 @@ export function ChatPanel({ records, frameToAttach = null, onFrameAttached, pend
   const [stopReadingError, setStopReadingError] = useState('')
   useEffect(() => { if (!streaming?.reading) { setStoppingReading(false); setStopReadingError('') } }, [streaming?.reading])
   const [deepMode, setDeepMode] = useState(false)
+  const [intent, setIntent] = useState<ChatIntent | null>(null)
   const [choiceSubmitting, setChoiceSubmitting] = useState(false)
   const [librarySubmitting, setLibrarySubmitting] = useState(false)
   const [noteSubmitting, setNoteSubmitting] = useState(false)
@@ -130,16 +137,23 @@ export function ChatPanel({ records, frameToAttach = null, onFrameAttached, pend
   const referenceLabel = referencedRecords[0]?.title ?? (selectedMessages[0] ? `${selectedMessages[0].role === 'agent' ? 'Agent 回答' : '你的消息'}：${selectedMessages[0].paragraphs.join(' ')}` : '')
   const usableMemory = projectMemory.filter(item => !item.expiresAt || Number(item.expiresAt) > Date.now())
   const hasBackground = usableMemory.length > 0 || Boolean(compactedSummary || workingContext.goal || workingContext.completed || workingContext.nextStep)
-  const canSend = agentAvailable || isCaptureCommand(draft)
+  const captureDraft = !intent && isCaptureCommand(draft)
+  const canSend = agentAvailable || captureDraft
+  const streamingCapture = streaming ? (streaming.capture ?? isCaptureCommand(streaming.question)) : false
 
-  useEffect(() => { setDraft(''); setAttachedFrame(null); setSelectedMessageIds([]); setDeepMode(false); setDismissedNotes([]); setContextPreview(null); setContextPreviewOpen(false) }, [sessionId])
-  useEffect(() => {
-    if (!frameToAttach || frameToAttach.sessionId !== sessionId) return
-    setAttachedFrame(frameToAttach.frame)
+  const attachFrame = (frame: ChatFrame) => {
+    setAttachedFrame(frame)
     setDeepMode(false)
+    setIntent(null)
     setContextPreview(null)
     setContextPreviewOpen(false)
     draftRef.current?.focus()
+  }
+
+  useEffect(() => { setDraft(''); setAttachedFrame(null); setSelectedMessageIds([]); setDeepMode(false); setIntent(null); setDismissedNotes([]); setContextPreview(null); setContextPreviewOpen(false) }, [sessionId])
+  useEffect(() => {
+    if (!frameToAttach || frameToAttach.sessionId !== sessionId) return
+    attachFrame(frameToAttach.frame)
     onFrameAttached?.()
   }, [frameToAttach])
   useEffect(() => { setDeepMode(false); setContextPreview(null); setContextPreviewOpen(false) }, [referencedIds.join('|')])
@@ -158,6 +172,7 @@ export function ChatPanel({ records, frameToAttach = null, onFrameAttached, pend
 
   const toggleMessageReference = (id: string) => {
     if (sending) return
+    setIntent(null)
     setSelectedMessageIds(current => current.includes(id) ? current.filter(value => value !== id) : current.length < 4 ? [...current, id] : current)
     setContextPreview(null)
     setContextPreviewOpen(false)
@@ -166,12 +181,13 @@ export function ChatPanel({ records, frameToAttach = null, onFrameAttached, pend
   const send = async () => {
     const sendingSessionId = sessionId
     const question = draft.trim()
-    const capture = isCaptureCommand(question)
+    const capture = !intent && isCaptureCommand(question)
     if (!question || !onSend || !(agentAvailable || capture) || sending || (capture && referencedRecords.length === 0)) return
     setDraft('')
     setContextPreview(null)
     setContextPreviewOpen(false)
-    const sent = await onSend(question, capture ? undefined : attachedFrame?.imageId, capture ? [] : selectedMessageIds, undefined, !capture && activeDeepMode)
+    const sent = await onSend(question, capture ? undefined : attachedFrame?.imageId, capture ? [] : selectedMessageIds, undefined, !capture && !intent && activeDeepMode, intent ?? undefined)
+    if (sent) setIntent(null)
     if (sent && !capture) { setAttachedFrame(null); setSelectedMessageIds([]) }
     if (!sent && sessionIdRef.current === sendingSessionId) setDraft(question)
   }
@@ -228,7 +244,7 @@ export function ChatPanel({ records, frameToAttach = null, onFrameAttached, pend
         <ChamferCard className={`message-card${selectedMessageIds.includes(message.id) ? ' message-card-referenced' : ''}`} id={message.id}>
           {message.role === 'agent' && <span className="message-agent-mark" aria-hidden="true"><GearIcon kind="brand" size={16} /></span>}
           <div className="message-meta"><span>{message.role === 'agent' ? 'GearNote' : '你'}</span><time dateTime={/^\d+$/.test(message.createdAt) ? new Date(Number(message.createdAt)).toISOString() : message.createdAt}>{timeFormatter.format(new Date(/^\d+$/.test(message.createdAt) ? Number(message.createdAt) : message.createdAt))}</time></div>
-          <div className="message-body">{message.paragraphs.map((paragraph, index) => <p key={index}>{paragraph}</p>)}{message.points && <ol>{message.points.map(point => <li key={point}>{point}</li>)}</ol>}{message.frame && <CapturedFrame frame={message.frame} title={records.find(record => record.id === message.frame?.recordId)?.title ?? '视频'} selected={attachedFrame?.imageId === message.frame.imageId} onAttach={() => { setAttachedFrame(message.frame ?? null); setContextPreview(null); setContextPreviewOpen(false); draftRef.current?.focus() }} />}</div>
+          <div className="message-body">{message.paragraphs.map((paragraph, index) => <p key={index}>{paragraph}</p>)}{message.points && <ol>{message.points.map(point => <li key={point}>{point}</li>)}</ol>}{message.frame && <CapturedFrame frame={message.frame} title={records.find(record => record.id === message.frame?.recordId)?.title ?? '视频'} selected={attachedFrame?.imageId === message.frame.imageId} onAttach={() => { if (message.frame) attachFrame(message.frame) }} />}</div>
           <div className="message-reference-control"><button type="button" aria-pressed={selectedMessageIds.includes(message.id)} disabled={sending || (!selectedMessageIds.includes(message.id) && selectedMessageIds.length >= 4)} title={selectedMessageIds.includes(message.id) ? '移出本轮参考' : '将这条消息加入本轮参考'} onClick={() => toggleMessageReference(message.id)}>{selectedMessageIds.includes(message.id) ? '✓ 已选为参考 · 移除' : '＋ 选此消息为参考'}</button></div>
           {message.role === 'agent' && <MessageRun message={message} onRevealRecord={onRevealRecord} />}
           {message.role === 'agent' && (message.outcome
@@ -283,13 +299,14 @@ export function ChatPanel({ records, frameToAttach = null, onFrameAttached, pend
       </li>)}
       {streaming && <>
         <li className="message-row" data-role="user" data-streaming="true"><ChamferCard className="message-card"><div className="message-meta"><span>你</span><span>刚刚</span></div><div className="message-body"><p>{streaming.question}</p></div></ChamferCard></li>
-        <li className="message-row" data-role="agent" data-streaming="true"><ChamferCard className="message-card"><div className="message-meta"><span>GearNote</span><span role="status">{isCaptureCommand(streaming.question) ? '正在截取' : streaming.answer ? '正在回答' : streaming.activity || '等待回复'}</span></div><StreamingRun streaming={streaming} /><div className="message-body"><p>{isCaptureCommand(streaming.question) ? '正在从视频取帧…' : streaming.answer || streaming.activity || '等待模型正文…'}</p></div>{!isCaptureCommand(streaming.question) && !streaming.answer && <div className="mono-thinking-gear" aria-hidden="true"><GearIcon kind="center" size={20} /></div>}</ChamferCard></li>
+        <li className="message-row" data-role="agent" data-streaming="true"><ChamferCard className="message-card"><div className="message-meta"><span>GearNote</span><span role="status">{streamingCapture ? '正在截取' : streaming.answer ? '正在回答' : streaming.activity || '等待回复'}</span></div><StreamingRun streaming={streaming} /><div className="message-body"><p>{streamingCapture ? '正在从视频取帧…' : streaming.answer || streaming.activity || '等待模型正文…'}</p></div>{!streamingCapture && !streaming.answer && <div className="mono-thinking-gear" aria-hidden="true"><GearIcon kind="center" size={20} /></div>}</ChamferCard></li>
       </>}
     </ol>
 
     {!compact && <GearDivider area="composer" />}
     <div className="chat-composer" id="cmd-01">
-      <div className="composer-head"><label htmlFor="agent-draft"><MechanicalGear className="mech-inline-gear" teeth={12} speed="10s" />向 Agent 提问</label><div>{onPreviewContext && <button className="context-preview-toggle" type="button" aria-expanded={contextPreviewOpen} disabled={sending || contextPreviewBusy || !draft.trim() || isCaptureCommand(draft)} onClick={() => { void previewContext() }}>{contextPreviewBusy ? '读取中' : contextPreviewOpen ? '收起上下文' : '本轮上下文'}</button>}<span data-available={canSend}>{sending ? isCaptureCommand(draft) ? '正在截取' : '正在回答' : canSend ? '可以发送' : '尚未接入'}</span></div></div>
+      <div className="composer-head"><label htmlFor="agent-draft"><MechanicalGear className="mech-inline-gear" teeth={12} speed="10s" />向 Agent 提问</label><div>{onPreviewContext && <button className="context-preview-toggle" type="button" aria-expanded={contextPreviewOpen} disabled={sending || contextPreviewBusy || !draft.trim() || Boolean(intent) || isCaptureCommand(draft)} onClick={() => { void previewContext() }}>{contextPreviewBusy ? '读取中' : contextPreviewOpen ? '收起上下文' : '本轮上下文'}</button>}<span data-available={canSend}>{sending ? streamingCapture ? '正在截取' : '正在回答' : canSend ? '可以发送' : '尚未接入'}</span></div></div>
+      {intent && <div className="composer-intent" role="status"><span>{intentEntries.find(entry => entry.intent === intent)?.hint}</span><button type="button" disabled={sending} aria-label="取消操作入口" onClick={() => setIntent(null)}>取消</button></div>}
       {attachedFrame && <div className="composer-frame">{attachedFramePreview && <img src={attachedFramePreview} alt="待发送的视频截图" />}<span>已选截图 / {formatElapsed(attachedFrame.atSeconds)} · 发送时会交给当前模型</span><button type="button" disabled={sending} aria-label="移除已选截图" onClick={() => { setAttachedFrame(null); setContextPreview(null); setContextPreviewOpen(false) }}>移除</button></div>}
       {referenceCount > 0 && <details className="reference-review" aria-label="本轮参考">
         <summary className="reference-review-summary" title={referenceLabel}><strong>本轮参考</strong><span>{referenceLabel}</span><small aria-live="polite">{referenceCount} 条</small></summary>
@@ -310,7 +327,7 @@ export function ChatPanel({ records, frameToAttach = null, onFrameAttached, pend
         setStoppingReading(true); setStopReadingError('')
         void stopAgentReading(streaming.requestId!).catch(error => { setStopReadingError(String(error)); setStoppingReading(false) })
       }}>{stoppingReading ? '正在转入回答…' : '停止阅读并回答'}</HudButton>{stopReadingError && <p role="alert">{stopReadingError}</p>}</div>}
-      {deepEligible && <label className="deep-mode-toggle"><input type="checkbox" checked={deepMode} disabled={sending} onChange={event => { setDeepMode(event.target.checked); setContextPreview(null); setContextPreviewOpen(false) }} /><span>深度模式</span><small>顺序自动读取字幕；阅读策略与整项预算可在设置中调整，可能增加 API 用量</small></label>}
+      {deepEligible && <label className="deep-mode-toggle"><input type="checkbox" checked={deepMode} disabled={sending} onChange={event => { setDeepMode(event.target.checked); if (event.target.checked) setIntent(null); setContextPreview(null); setContextPreviewOpen(false) }} /><span>深度模式</span><small>顺序自动读取字幕；阅读策略与整项预算可在设置中调整，可能增加 API 用量</small></label>}
       {contextPreviewError && <p className="chat-error" role="alert">{contextPreviewError}</p>}
       {contextPreviewOpen && contextPreview && <div className="context-inspector" aria-label="本轮上下文预览">
         <div className="context-inspector-head"><strong>本轮上下文 / 发送前预览</strong><span>{contextPreview.textChars.toLocaleString()} / {contextPreview.limitChars.toLocaleString()} 字符{contextPreview.reservedChars > 0 ? ` · 预留 ${contextPreview.reservedChars.toLocaleString()}` : ''}</span></div>
@@ -326,7 +343,7 @@ export function ChatPanel({ records, frameToAttach = null, onFrameAttached, pend
         {contextPreview.explorationMode ? <details open><summary>{activeDeepMode ? '深度模式 · 字幕待逐批读取' : '资料目录 · 正文待读取'}</summary><pre>{contextPreview.directoryText}</pre></details> : <details open><summary>资料片段 · {contextPreview.sources.length} 条</summary>{contextPreview.sources.map(source => <div className="context-preview-source" key={source.index}><strong>{source.label} {source.title}{source.atSeconds == null ? '' : ` / ${formatElapsed(source.atSeconds)}`}{source.visual ? ' · 图片' : ''}{source.selectionReason === 'coverage' ? ' · 覆盖式选取' : ''}</strong><small>捕获时间：{source.capturedAt || '未知'} · 来源：{source.sourceUrl || '未记录'}</small><pre>{source.text}</pre></div>)}</details>}
       </div>}
       {error && <p className="chat-error" role="alert">{error}</p>}
-      <div className="composer-foot"><span>{attachedFrame ? '图片已加入本次提问' : selectedMessages.length > 0 ? `${selectedMessages.length} 条对话消息已选中` : referencedRecords.length === 0 ? hasBackground ? '可依据记忆和会话计划提问' : '可直接提问，也可添加参考资料' : `${referencedRecords.length} 条资料已选中`}</span><div><HudButton type="button" onClick={onShowHistory}>＋ 添加参考</HudButton>{onSummarize && <HudButton type="button" disabled={!agentAvailable || sending || referencedRecords.length === 0} onClick={() => onSummarize?.(activeDeepMode)}>总结</HudButton>}{!agentAvailable && onOpenAgentSetup && <HudButton type="button" onClick={onOpenAgentSetup}>配置 Agent</HudButton>}<HudButton type="button" variant="primary" disabled={!canSend || sending || !draft.trim() || (isCaptureCommand(draft) && referencedRecords.length === 0)} onClick={() => { void send() }}>{sending ? isCaptureCommand(draft) ? '截取中' : '生成中' : <><span className="mono-send-plane"><PaperPlaneIcon /></span>发送<span className="hud-send-arrow"> →</span></>}</HudButton></div></div>
+      <div className="composer-foot"><span>{attachedFrame ? '图片已加入本次提问' : selectedMessages.length > 0 ? `${selectedMessages.length} 条对话消息已选中` : referencedRecords.length === 0 ? hasBackground ? '可依据记忆和会话计划提问' : '可直接提问，也可添加参考资料' : `${referencedRecords.length} 条资料已选中`}</span><div>{intentEntries.map(entry => <HudButton key={entry.intent} type="button" className={`intent-toggle${intent === entry.intent ? ' is-active' : ''}`} aria-pressed={intent === entry.intent} title={entry.hint} disabled={sending || !agentAvailable || Boolean(attachedFrame) || selectedMessages.length > 0 || activeDeepMode} onClick={() => { setIntent(current => current === entry.intent ? null : entry.intent); setContextPreview(null); setContextPreviewOpen(false) }}>{entry.label}</HudButton>)}<HudButton type="button" onClick={onShowHistory}>＋ 添加参考</HudButton>{onSummarize && <HudButton type="button" disabled={!agentAvailable || sending || referencedRecords.length === 0} onClick={() => onSummarize?.(activeDeepMode)}>总结</HudButton>}{!agentAvailable && onOpenAgentSetup && <HudButton type="button" onClick={onOpenAgentSetup}>配置 Agent</HudButton>}<HudButton type="button" variant="primary" disabled={!canSend || sending || !draft.trim() || (captureDraft && referencedRecords.length === 0)} onClick={() => { void send() }}>{sending ? streamingCapture ? '截取中' : '生成中' : <><span className="mono-send-plane"><PaperPlaneIcon /></span>发送<span className="hud-send-arrow"> →</span></>}</HudButton></div></div>
     </div>
   </section>
 }

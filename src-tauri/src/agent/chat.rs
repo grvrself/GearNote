@@ -22,23 +22,47 @@ fn capture_time(question: &str) -> Option<Result<u32, String>> {
     Some(Ok(seconds))
 }
 
+/// 闭包声明本次修改的范围，持久化只写受影响的行。
+enum ChatEdit {
+    None,
+    Meta,
+    Session(String),
+    Removed { id: String, ordinal: usize, created: Option<String> },
+}
+
+impl ChatEdit {
+    fn targets(&self) -> (Vec<String>, Vec<(String, usize)>) {
+        match self {
+            Self::None | Self::Meta => (Vec::new(), Vec::new()),
+            Self::Session(id) => (vec![id.clone()], Vec::new()),
+            Self::Removed { id, ordinal, created } => (created.iter().cloned().collect(), vec![(id.clone(), *ordinal)]),
+        }
+    }
+}
+
 fn mutate_chat<F>(app: &AppHandle, state: &AgentState, require_idle: bool, notify: bool, edit: F) -> Result<ChatState, String>
-where F: FnOnce(&mut ChatStore) -> Result<bool, String> {
+where F: FnOnce(&mut ChatStore) -> Result<ChatEdit, String> {
     let busy_guard = if require_idle { Some(state.busy.lock().map_err(|_| "Agent 暂不可用")?) } else { None };
     if busy_guard.as_deref() == Some(&true) {
         return Err("正在生成回答，请完成后再切换会话".into());
     }
     let mut store = state.sessions.lock().map_err(|_| "会话暂不可用")?;
-    let mut next = store.clone();
-    let changed = edit(&mut next)?;
-    if changed {
-        persist_chat_store(&state.sessions_path, &next)?;
-        *store = next;
+    let changed = match edit(&mut store) {
+        Ok(changed) => changed,
+        Err(error) => { restore_chat_store(state, &mut store); return Err(error); }
+    };
+    if !matches!(changed, ChatEdit::None) {
+        let (changed_ids, removed) = changed.targets();
+        if let Err(error) = persist_chat_delta(&state.sessions_path, &store, &changed_ids, &removed) {
+            restore_chat_store(state, &mut store);
+            return Err(error);
+        }
     }
     let view = state_view(&store)?;
+    let notify = notify && !matches!(changed, ChatEdit::None);
     drop(store);
     drop(busy_guard);
-    if changed && notify { let _ = app.emit("knowflow:chat-changed", ()); }
+    if notify { let _ = app.emit("knowflow:chat-changed", ()); }
     Ok(view)
 }
 
@@ -47,13 +71,14 @@ pub(crate) fn record_completed_event(app: &AppHandle, description: &str, event_i
     let timestamp = now_millis()?;
     let marker = format!("[操作:{event_id}]");
     mutate_chat(app, &state, false, true, |store| {
-        let session = store.sessions.iter_mut().find(|item| item.id == store.active_id).ok_or("当前会话不存在")?;
-        if session.working_context.goal.trim().is_empty() || session.working_context.completed.contains(&marker) { return Ok(false); }
+        let id = store.active_id.clone();
+        let session = store.sessions.iter_mut().find(|item| item.id == id).ok_or("当前会话不存在")?;
+        if session.working_context.goal.trim().is_empty() || session.working_context.completed.contains(&marker) { return Ok(ChatEdit::None); }
         let line = format!("{marker} {description}（{timestamp}）");
         let combined = if session.working_context.completed.trim().is_empty() { line } else { format!("{}\n{line}", session.working_context.completed) };
         session.working_context.completed = combined.chars().rev().take(1200).collect::<String>().chars().rev().collect();
         session.working_context.updated_at = timestamp;
-        Ok(true)
+        Ok(ChatEdit::Session(id))
     })?;
     Ok(())
 }
@@ -62,9 +87,10 @@ pub(crate) fn record_completed_event(app: &AppHandle, description: &str, event_i
 pub fn create_chat_session(app: AppHandle, state: State<'_, AgentState>) -> Result<ChatState, String> {
     mutate_chat(&app, &state, true, true, |store| {
         let session = new_session()?;
+        let edit = ChatEdit::Session(session.id.clone());
         store.active_id = session.id.clone();
         store.sessions.push(session);
-        Ok(true)
+        Ok(edit)
     })
 }
 
@@ -72,9 +98,9 @@ pub fn create_chat_session(app: AppHandle, state: State<'_, AgentState>) -> Resu
 pub fn switch_chat_session(app: AppHandle, state: State<'_, AgentState>, id: String) -> Result<ChatState, String> {
     mutate_chat(&app, &state, true, true, |store| {
         if !store.sessions.iter().any(|item| item.id == id) { return Err("会话不存在".into()); }
-        if store.active_id == id { return Ok(false); }
+        if store.active_id == id { return Ok(ChatEdit::None); }
         store.active_id = id;
-        Ok(true)
+        Ok(ChatEdit::Meta)
     })
 }
 
@@ -86,9 +112,9 @@ pub fn rename_chat_session(app: AppHandle, state: State<'_, AgentState>, id: Str
     }
     mutate_chat(&app, &state, false, true, |store| {
         let session = store.sessions.iter_mut().find(|item| item.id == id).ok_or("会话不存在")?;
-        if session.title == title { return Ok(false); }
+        if session.title == title { return Ok(ChatEdit::None); }
         session.title = title.into();
-        Ok(true)
+        Ok(ChatEdit::Session(id))
     })
 }
 
@@ -101,12 +127,13 @@ pub fn delete_chat_session(app: AppHandle, state: State<'_, AgentState>, id: Str
     };
     let view = mutate_chat(&app, &state, true, true, |store| {
         let index = store.sessions.iter().position(|item| item.id == id).ok_or("会话不存在")?;
+        let fresh = if store.sessions.len() == 1 { Some(new_session()?) } else { None };
         store.sessions.remove(index);
-        if store.sessions.is_empty() { store.sessions.push(new_session()?); }
+        let created = fresh.map(|session| { let created = session.id.clone(); store.sessions.push(session); created });
         if store.active_id == id {
             store.active_id = store.sessions.iter().max_by(|a, b| a.updated_at.cmp(&b.updated_at)).unwrap().id.clone();
         }
-        Ok(true)
+        Ok(ChatEdit::Removed { id, ordinal: index, created })
     })?;
     if let Ok(dir) = app.path().app_data_dir() {
         for image_id in images {
@@ -124,12 +151,12 @@ pub fn set_chat_references(app: AppHandle, state: State<'_, AgentState>, id: Str
     let mut seen = HashSet::new();
     let unique = referenced_ids.into_iter().filter(|item| seen.insert(item.clone())).collect::<Vec<_>>();
     mutate_chat(&app, &state, false, false, |store| {
-        let Some(session) = store.sessions.iter_mut().find(|item| item.id == id) else { return Ok(false); };
-        if session.referenced_ids == unique { return Ok(false); }
+        let Some(session) = store.sessions.iter_mut().find(|item| item.id == id) else { return Ok(ChatEdit::None); };
+        if session.referenced_ids == unique { return Ok(ChatEdit::None); }
         session.referenced_ids = unique;
         // 参考资料改变后，旧续读进度不再有效；主动失效，不依赖前端隐藏按钮。
         session.read_continuation = None;
-        Ok(true)
+        Ok(ChatEdit::Session(id))
     })
 }
 
@@ -162,9 +189,10 @@ pub fn resolve_library_search(app: AppHandle, state: State<'_, AgentState>, prop
     if accept { crate::db::ready_library_titles(&state.sessions_path, &ids)?; }
     let now = now_millis()?;
     mutate_chat(&app, &state, true, true, |store| {
-        let session = store.sessions.iter_mut().find(|item| item.id == store.active_id).ok_or("当前会话不存在")?;
+        let id = store.active_id.clone();
+        let session = store.sessions.iter_mut().find(|item| item.id == id).ok_or("当前会话不存在")?;
         resolve_library_search_in_session(session, &proposal_id, accept, &now)?;
-        Ok(true)
+        Ok(ChatEdit::Session(id))
     })
 }
 
@@ -174,9 +202,10 @@ pub fn save_working_context(app: AppHandle, state: State<'_, AgentState>, goal: 
         if value.chars().count() > 1200 || value.contains('\0') { return Err("工作状态每项最多 1200 字".into()); }
     }
     mutate_chat(&app, &state, true, true, |store| {
-        let session = store.sessions.iter_mut().find(|item| item.id == store.active_id).ok_or("当前会话不存在")?;
+        let id = store.active_id.clone();
+        let session = store.sessions.iter_mut().find(|item| item.id == id).ok_or("当前会话不存在")?;
         session.working_context = WorkingContext { goal, completed, next_step, updated_at: now_millis()? };
-        Ok(true)
+        Ok(ChatEdit::Session(id))
     })
 }
 
@@ -189,7 +218,7 @@ pub fn confirm_project_memory(app: AppHandle, state: State<'_, AgentState>, cont
     mutate_chat(&app, &state, true, true, |store| {
         let now = now_millis()?;
         store.project_memory.push(ProjectMemory { id: format!("mem-{}", Uuid::new_v4()), content: content.into(), source, created_at: now.clone(), confirmed_at: now, expires_at, active: true });
-        Ok(true)
+        Ok(ChatEdit::Meta)
     })
 }
 
@@ -198,7 +227,7 @@ pub fn revoke_project_memory(app: AppHandle, state: State<'_, AgentState>, id: S
     mutate_chat(&app, &state, true, true, |store| {
         let entry = store.project_memory.iter_mut().find(|entry| entry.id == id).ok_or("项目记忆不存在")?;
         entry.active = false;
-        Ok(true)
+        Ok(ChatEdit::Meta)
     })
 }
 

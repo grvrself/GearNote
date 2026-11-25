@@ -147,6 +147,26 @@ fn persist_chat_store(path: &PathBuf, store: &ChatStore) -> Result<(), String> {
     Ok(())
 }
 
+fn persist_chat_delta(path: &PathBuf, store: &ChatStore, changed: &[String], removed: &[(String, usize)]) -> Result<(), String> {
+    if path.extension().is_some_and(|value| value == "db") { return crate::db::write_chat_delta(path, store, changed, removed); }
+    persist_chat_store(path, store)
+}
+
+// 写入失败时磁盘仍保持修改前状态（事务/原子替换），从磁盘重读即可回滚内存；
+// 重读本身失败（磁盘不可用等极端情况）则保留现状并依赖下次成功写入收敛。
+fn restore_chat_store(state: &AgentState, store: &mut ChatStore) {
+    let legacy = state.sessions_path.parent().map(|dir| dir.join("chat.json")).unwrap_or_else(|| PathBuf::from("chat.json"));
+    if let Ok(fresh) = load_chat_store(&state.sessions_path, &legacy) { *store = fresh; }
+}
+
+fn save_chat_session(state: &AgentState, store: &mut ChatStore, session_id: &str) -> Result<(), String> {
+    if let Err(error) = persist_chat_delta(&state.sessions_path, store, &[session_id.to_owned()], &[]) {
+        restore_chat_store(state, store);
+        return Err(error);
+    }
+    Ok(())
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentStatus { base_url: String, model: String, explore_references: bool, context_tier: ContextTier,
@@ -300,7 +320,10 @@ pub fn list_chat_messages(state: State<'_, AgentState>) -> Result<Vec<ChatMessag
 #[tauri::command]
 pub fn get_chat_state(state: State<'_, AgentState>, storage: State<'_, AppState>) -> Result<ChatState, String> {
     let store = state.sessions.lock().map_err(|_| "会话暂不可用")?;
-    let records = storage.records.lock().map_err(|_| "资料库暂不可用")?;
+    let continuation_ids = store.sessions.iter().find(|item| item.id == store.active_id)
+        .and_then(|session| session.read_continuation.as_ref())
+        .map(|value| value.referenced_ids.clone()).unwrap_or_default();
+    let records = crate::db::get_records(&storage.records_path, &continuation_ids)?;
     state_view_with_records(&store, Some(&records))
 }
 

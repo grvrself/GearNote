@@ -4,8 +4,6 @@
 
     #[test]
     fn library_search_requires_explicit_request_and_confirmation() {
-        assert!(library_search_requested("请在整个资料库里找 Rust"));
-        assert!(!library_search_requested("请总结已选的 Rust 资料"));
         let mut session = new_session().unwrap();
         let title = crate::db::LibraryTitle { id: "unselected".into(), title: "Rust 指南".into() };
         let answer = save_library_exchange(&mut session, "在整个资料库里找 Rust", vec![title], "100", 20);
@@ -34,8 +32,6 @@
 
     #[test]
     fn chat_note_proposal_waits_for_confirmation_without_writing() {
-        assert!(chat_note_edit_requested("请修改笔记《测试笔记》"));
-        assert!(!chat_note_edit_requested("总结这篇笔记"));
         assert!(note_evidence_requested("根据资料修改笔记"));
         assert_eq!(note_edit_tool()["function"]["name"], "propose_note_edit");
         let dir = std::env::temp_dir().join(format!("gearnote-chat-note-{}", Uuid::new_v4()));
@@ -57,9 +53,6 @@
 
     #[test]
     fn command_proposal_does_not_execute_before_confirmation() {
-        assert!(command_requested("请运行 ffprobe 查看版本"));
-        assert!(!command_requested("ffprobe 是什么？"));
-        assert!(!command_requested("不要运行 ffprobe"));
         assert_eq!(command_tool()["function"]["name"], "propose_command");
         let mut session = new_session().unwrap();
         let message = save_command_exchange(&mut session, "请运行 ffprobe 查看版本", "ffprobe".into(), vec!["-version".into()], "100", 10).unwrap();
@@ -461,6 +454,24 @@
         assert!(capture_time("请解释 01:20 的画面").is_none());
         assert!(capture_time("截取 01:80 的画面").unwrap().is_err());
         assert!(capture_time("截取 00:20 和 00:30").unwrap().is_err());
+    }
+    #[test]
+    fn intent_validation_checks_whitelist_conflicts_and_capture_bypass() {
+        assert_eq!(validate_intent_request(None, None, None, None, false, &[]).unwrap(), None);
+        for allowed in ["library_search", "command", "note_edit"] {
+            assert_eq!(validate_intent_request(Some(allowed), None, None, None, false, &[]).unwrap(), Some(allowed));
+        }
+        assert!(validate_intent_request(Some("unknown"), None, None, None, false, &[]).is_err());
+        assert!(validate_intent_request(Some("library_search"), Some("msg-1"), None, None, false, &[]).is_err());
+        assert!(validate_intent_request(Some("library_search"), None, Some("frame-1"), None, false, &[]).is_err());
+        assert!(validate_intent_request(Some("library_search"), None, None, Some("choice-1"), false, &[]).is_err());
+        assert!(validate_intent_request(Some("library_search"), None, None, None, true, &[]).is_err());
+        let refs = vec!["msg-ref".to_string()];
+        assert!(validate_intent_request(Some("library_search"), None, None, None, false, &refs).is_err());
+
+        assert_eq!(resolve_capture_command("截取 01:20 的画面", None).unwrap().unwrap(), 80);
+        assert!(resolve_capture_command("截取 01:20 的画面", Some("command")).is_none());
+        assert!(resolve_capture_command("截取 01:20 的画面", Some("library_search")).is_none());
     }
     #[test]
     fn legacy_chat_migrates_without_losing_messages() {

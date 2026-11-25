@@ -10,25 +10,6 @@ fn exploration_payload(config: &AgentConfig, messages: &[serde_json::Value], too
     payload
 }
 
-fn library_search_requested(question: &str) -> bool {
-    question.contains("在整个资料库里找") && !["不要在整个资料库里找", "别在整个资料库里找", "不用在整个资料库里找", "如何在整个资料库里找"]
-        .iter().any(|phrase| question.contains(phrase))
-}
-
-fn chat_note_edit_requested(question: &str) -> bool {
-    question.contains("笔记") && ["修改", "改写", "补充", "追加", "替换", "改成", "加到"].iter().any(|verb| question.contains(verb))
-        && !["不要修改笔记", "别修改笔记", "不必修改笔记", "无需修改笔记"].iter().any(|phrase| question.contains(phrase))
-}
-
-fn command_requested(question: &str) -> bool {
-    if ["不要运行", "不要执行", "别运行", "别执行", "如何运行", "怎么运行"].iter().any(|phrase| question.contains(phrase)) { return false; }
-    ["运行命令", "执行命令", "跑命令", "运行 ffmpeg", "执行 ffmpeg", "运行ffmpeg", "执行ffmpeg",
-        "运行 ffprobe", "执行 ffprobe", "运行ffprobe", "执行ffprobe", "运行 yt-dlp", "执行 yt-dlp",
-        "运行yt-dlp", "执行yt-dlp", "请用 ffmpeg", "请用ffmpeg", "帮我用 ffmpeg", "帮我用ffmpeg",
-        "请用 ffprobe", "请用ffprobe", "帮我用 ffprobe", "帮我用ffprobe", "请用 yt-dlp", "请用yt-dlp", "帮我用 yt-dlp", "帮我用yt-dlp"]
-        .iter().any(|phrase| question.contains(phrase))
-}
-
 fn command_tool() -> serde_json::Value {
     serde_json::json!({"type":"function","function":{"name":"propose_command",
         "description":"仅提出待用户确认的媒体命令；不会执行。",
@@ -231,11 +212,10 @@ pub async fn resolve_command_proposal(app: AppHandle, state: State<'_, AgentStat
     let _guard = BusyGuard(&state.busy);
     let (program, args) = {
         let mut store = state.sessions.lock().map_err(|_| "会话暂不可用")?;
-        let mut next = store.clone();
-        let session = next.sessions.iter_mut().find(|item| item.id == next.active_id).ok_or("当前会话不存在")?;
+        let id = store.active_id.clone();
+        let session = store.sessions.iter_mut().find(|item| item.id == id).ok_or("当前会话不存在")?;
         let pair = transition_command(session, &proposal_id, accept)?;
-        persist_chat_store(&state.sessions_path, &next)?;
-        *store = next;
+        save_chat_session(&state, &mut store, &id)?;
         pair
     };
     let _ = app.emit("knowflow:chat-changed", ());
@@ -249,7 +229,8 @@ pub async fn resolve_command_proposal(app: AppHandle, state: State<'_, AgentStat
     let success = accept && result_text.starts_with("执行成功（退出码 0）");
     let now = now_millis()?;
     mutate_chat(&app, &state, false, true, |store| {
-        let session = store.sessions.iter_mut().find(|item| item.id == store.active_id).ok_or("当前会话不存在")?;
+        let id = store.active_id.clone();
+        let session = store.sessions.iter_mut().find(|item| item.id == id).ok_or("当前会话不存在")?;
         let proposal = session.pending_command.as_mut().filter(|item| item.id == proposal_id).ok_or("命令提案已失效")?;
         if proposal.status != if accept { "running" } else { "rejected" } { return Err("命令提案状态已变化".into()); }
         proposal.status = if !accept { "rejected" } else if success { "finished" } else { "failed" }.into();
@@ -259,7 +240,7 @@ pub async fn resolve_command_proposal(app: AppHandle, state: State<'_, AgentStat
                 changed_files: Vec::new(), read_sources: Vec::new(), read_coverage: None }), suggestions: Vec::new(),
             outcome: Some(MessageOutcome::answer(MessageKind::CommandResult, AnswerStatus::NotApplicable)) });
         session.updated_at = now;
-        Ok(true)
+        Ok(ChatEdit::Session(id))
     })
 }
 
@@ -269,9 +250,9 @@ pub(crate) fn mark_chat_note_edit(app: &AppHandle, proposal_id: &str, status: &s
         for session in &mut store.sessions {
             if let Some(pending) = session.pending_chat_note_edit.as_mut().filter(|item| item.proposal.id == proposal_id) {
                 pending.proposal.status = status.into();
-                return Ok(true);
+                return Ok(ChatEdit::Session(session.id.clone()));
             }
         }
-        Ok(false)
+        Ok(ChatEdit::None)
     });
 }

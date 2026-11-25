@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { ComponentProps } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { stopAgentReading } from '../agent'
+import { getChatFrameImage, stopAgentReading } from '../agent'
 import type { ChatMessage } from '../chat-data'
 import { ChatPanel } from './ChatPanel'
 
@@ -82,6 +82,70 @@ describe('ChatPanel 关键交互', () => {
     const message: ChatMessage = { ...reply }
     render(<ChatPanel {...panelProps({ messages: [message], onContinueReading: vi.fn(), readContinuation: { messageId: reply.id, mode: 'adaptive', hasProgress: false } })} />)
     expect(screen.queryByRole('button', { name: '继续读取' })).not.toBeInTheDocument()
+  })
+
+  it('显式操作入口随发送传递 intent，可取消，发送成功后清除', async () => {
+    const onSend = vi.fn().mockResolvedValue(true)
+    render(<ChatPanel {...panelProps({ onSend })} />)
+    fireEvent.click(screen.getByRole('button', { name: '改笔记' }))
+    expect(screen.getByRole('button', { name: '改笔记' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByText('生成笔记修改建议；确认后才写入。请在问题中写明笔记标题')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '取消操作入口' }))
+    expect(screen.getByRole('button', { name: '改笔记' })).toHaveAttribute('aria-pressed', 'false')
+    fireEvent.click(screen.getByRole('button', { name: '搜资料库' }))
+    fireEvent.change(screen.getByLabelText('向 Agent 提问'), { target: { value: 'Rust 异步教程' } })
+    fireEvent.click(screen.getByRole('button', { name: /发送/ }))
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith('Rust 异步教程', undefined, [], undefined, false, 'library_search'))
+    await waitFor(() => expect(screen.getByRole('button', { name: '搜资料库' })).toHaveAttribute('aria-pressed', 'false'))
+  })
+
+  it('消息内截图加入提问或勾选深度模式时自动清除已选 intent', async () => {
+    vi.mocked(getChatFrameImage).mockResolvedValue('data:image/jpeg;base64,abc')
+    const videoRecord = { id: 'vid-1', type: 'video' as const, title: '测试视频', site: 'example.com', savedAt: '2026-11-25T00:00:00Z', status: 'ready' as const, sourceUrl: 'https://example.com/v', contentText: '', excerpt: [] }
+    const frameReply: ChatMessage = { ...reply, id: 'reply-frame', frame: { imageId: 'img-1', recordId: 'vid-1', atSeconds: 80 } }
+    render(<ChatPanel {...panelProps({ records: [videoRecord], referencedIds: ['vid-1'], messages: [frameReply] })} />)
+
+    fireEvent.click(screen.getByRole('button', { name: '搜资料库' }))
+    expect(screen.getByRole('button', { name: '搜资料库' })).toHaveAttribute('aria-pressed', 'true')
+    await waitFor(() => expect(screen.getByRole('button', { name: '加入提问' })).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: '加入提问' }))
+    expect(screen.getByRole('button', { name: '搜资料库' })).toHaveAttribute('aria-pressed', 'false')
+    expect(screen.queryByRole('button', { name: '取消操作入口' })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '移除已选截图' }))
+    fireEvent.click(screen.getByRole('button', { name: '改笔记' }))
+    expect(screen.getByRole('button', { name: '改笔记' })).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.click(screen.getByLabelText(/深度模式/))
+    expect(screen.getByRole('button', { name: '改笔记' })).toHaveAttribute('aria-pressed', 'false')
+    expect(screen.queryByRole('button', { name: '取消操作入口' })).not.toBeInTheDocument()
+  })
+
+  it('选中 intent 后输入截帧指令仍按普通请求发送与展示状态', async () => {
+    const onSend = vi.fn().mockResolvedValue(true)
+    const view = render(<ChatPanel {...panelProps({ onSend, sending: true, streaming: { question: '截取 01:20 的画面', answer: '', startedAt: 1, activities: [], capture: false } })} />)
+    expect(screen.getAllByText('等待回复').length).toBeGreaterThan(0)
+    expect(screen.queryByText('正在截取')).not.toBeInTheDocument()
+
+    view.rerender(<ChatPanel {...panelProps({ onSend, sending: false })} />)
+    fireEvent.click(screen.getByRole('button', { name: '运行命令' }))
+    fireEvent.change(screen.getByLabelText('向 Agent 提问'), { target: { value: '截取 01:20 的画面' } })
+    view.rerender(<ChatPanel {...panelProps({ onSend, sending: true })} />)
+    expect(screen.getByText('正在回答')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /生成中/ })).toBeInTheDocument()
+    expect(screen.queryByText('正在截取')).not.toBeInTheDocument()
+    expect(screen.queryByText('截取中')).not.toBeInTheDocument()
+
+    view.rerender(<ChatPanel {...panelProps({ onSend, sending: false })} />)
+    fireEvent.click(screen.getByRole('button', { name: /发送/ }))
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith('截取 01:20 的画面', undefined, [], undefined, false, 'command'))
+  })
+
+  it('截帧发送期间输入框已清空，顶栏与发送按钮仍按流式 capture 显示截取状态', () => {
+    render(<ChatPanel {...panelProps({ sending: true, streaming: { question: '截取 01:20 的画面', answer: '', startedAt: 1, activities: [], capture: true } })} />)
+    expect(screen.getAllByText('正在截取').length).toBeGreaterThanOrEqual(2)
+    expect(screen.getByRole('button', { name: '截取中' })).toBeInTheDocument()
+    expect(screen.queryByText('正在回答')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /生成中/ })).not.toBeInTheDocument()
   })
 
   it('结构化提醒按 code 渲染，修改展示文案不影响显示', () => {

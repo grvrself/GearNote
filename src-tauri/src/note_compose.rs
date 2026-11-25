@@ -201,7 +201,7 @@ pub async fn compose_note_from_sources(agent: State<'_, AgentState>, storage: St
         return Err("请选择 1–3 条不同的资料，并把整理重点控制在 300 字内".into());
     }
     db::ready_library_titles(&agent.sessions_path, &selected_ids)?;
-    let records = storage.records.lock().map_err(|_| "资料库暂不可用")?.clone();
+    let records = db::get_records(&storage.records_path, &selected_ids)?;
     let question = if focus.trim().is_empty() { "总结重点、事实与过程" } else { focus.trim() };
     let (mut chunks, _) = context::select_sources(&records, &selected_ids, question);
     if chunks.is_empty() { return Err("选中的资料没有可读取的正文或字幕".into()); }

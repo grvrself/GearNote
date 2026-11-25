@@ -1,4 +1,4 @@
-use crate::storage::{persist_record_at, AppState, StoryboardCell, StoryboardResult};
+use crate::storage::{AppState, StoryboardCell, StoryboardResult};
 use serde::Deserialize;
 use std::{fs, path::{Path, PathBuf}, process::Command};
 use tauri::{AppHandle, Manager, State};
@@ -156,11 +156,19 @@ pub(crate) async fn capture_frame(app: &AppHandle, source_url: &str, seconds: u3
     Ok(output_path)
 }
 
+/// 持锁定位并写回分镜结果，避免异步下载期间并发捕获/删除导致位置索引漂移。
+fn save_storyboard_result(state: &AppState, record_id: &str, result: &StoryboardResult) -> Result<(), String> {
+    let records = state.records.lock().map_err(|_| "资料库暂不可用")?;
+    let position = records.iter().position(|record| record.id == record_id).ok_or("视频记录已被删除")?;
+    let mut record = crate::db::get_record(&state.records_path, record_id)?;
+    record.storyboard = Some(result.clone());
+    crate::db::upsert_record(&state.records_path, &record, position)
+}
+
 #[tauri::command]
 pub async fn analyze_video_storyboard(app: AppHandle, state: State<'_, AppState>, record_id: String, cookies_text: Option<String>) -> Result<StoryboardResult, String> {
     let (source_url, is_bilibili) = {
-        let records = state.records.lock().map_err(|_| "资料库暂不可用")?;
-        let record = records.iter().find(|record| record.id == record_id).ok_or("找不到该视频记录")?;
+        let record = crate::db::get_record(&state.records_path, &record_id)?;
         if record.record_type != "video" { return Err("只有视频记录可分析画面。".into()); }
         if record.storyboard.is_some() { return Err("该视频已完成画面分析。".into()); }
         let url = url::Url::parse(&record.source_url).map_err(|_| "视频链接无效")?;
@@ -245,14 +253,7 @@ pub async fn analyze_video_storyboard(app: AppHandle, state: State<'_, AppState>
         .map_err(|error| format!("无法读取分镜时间点：{error}"))?)
         .map_err(|error| format!("分镜时间点无效：{error}"))?;
     let result = StoryboardResult { image_count: image_names(&dir)?.len(), cells: evidence.cells };
-    let mut records = state.records.lock().map_err(|_| "资料库暂不可用")?;
-    let position = records.iter().position(|record| record.id == record_id).ok_or("视频记录已被删除")?;
-    let previous = records[position].storyboard.replace(result.clone());
-    if let Err(error) = persist_record_at(&state.records_path, &records[position], position, &records) {
-        records[position].storyboard = previous;
-        return Err(error);
-    }
-    drop(records);
+    save_storyboard_result(&state, &record_id, &result)?;
     let _ = crate::agent::record_completed_event(&app, "视频画面分析已完成", &format!("storyboard-{record_id}"));
     Ok(result)
 }
@@ -273,11 +274,9 @@ pub(crate) fn base64(bytes: &[u8]) -> String {
 
 #[tauri::command]
 pub fn get_storyboard_image(app: AppHandle, state: State<'_, AppState>, record_id: String, index: usize) -> Result<String, String> {
-    let records = state.records.lock().map_err(|_| "资料库暂不可用")?;
-    let record = records.iter().find(|record| record.id == record_id).ok_or("找不到该视频记录")?;
+    let record = crate::db::get_record(&state.records_path, &record_id)?;
     let count = record.storyboard.as_ref().ok_or("尚未分析画面")?.image_count;
     if index >= count { return Err("分镜图片编号无效".into()); }
-    drop(records);
     let dir = app.path().app_data_dir().map_err(|error| error.to_string())?
         .join("storyboards").join(&record_id);
     let name = image_names(&dir)?.get(index).cloned().ok_or("分镜图片缺失")?;
@@ -330,5 +329,38 @@ mod tests {
         assert!(validate_bilibili_cookies(valid).is_ok());
         assert!(validate_bilibili_cookies(".example.com\tTRUE\t/\tTRUE\t1800000000\tSESSDATA\tsecret\n").is_err());
         assert!(validate_bilibili_cookies(".bilibili.com\tTRUE\t/\tTRUE\t1800000000\tbuvid3\ttest\n").is_err());
+    }
+
+    #[test]
+    fn saving_storyboard_uses_current_position_after_concurrent_insert() {
+        let dir = std::env::temp_dir().join(format!("gearnote-storyboard-race-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        let db_path = dir.join(crate::db::FILE_NAME);
+        let video: crate::storage::KnowledgeRecord = serde_json::from_value(serde_json::json!({
+            "id": "vid-1", "type": "video", "title": "测试视频", "site": "example.com",
+            "savedAt": "2026-11-25T00:00:00Z", "status": "ready",
+            "sourceUrl": "https://example.com/video", "contentText": "字幕", "excerpt": []
+        })).unwrap();
+        crate::db::write_records(&db_path, &[video.clone()]).unwrap();
+        let state = AppState::for_test("", db_path.clone());
+        state.records.lock().unwrap().push(crate::storage::RecordSummary::of(&video));
+
+        // 模拟异步分镜期间并发捕获新文章，旧视频 ordinal 从 0 后移为 1。
+        state.capture(crate::storage::ArticleCapture {
+            url: "https://example.com/article".into(),
+            title: "新文章".into(),
+            text: "测试文章正文内容。".repeat(20),
+            captured_at: "2026-11-25T00:01:00Z".into(),
+        }).unwrap();
+
+        let result = StoryboardResult {
+            image_count: 1,
+            cells: vec![StoryboardCell { cell: 1, sheet: 1, from: 0.0, to: 1.0, frame_at: Some(0.5) }],
+        };
+        save_storyboard_result(&state, "vid-1", &result).unwrap();
+        let saved = crate::db::get_record(&db_path, "vid-1").unwrap();
+        assert_eq!(saved.storyboard.unwrap().image_count, 1);
+        drop(state);
+        fs::remove_dir_all(dir).unwrap();
     }
 }

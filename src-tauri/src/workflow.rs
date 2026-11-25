@@ -192,8 +192,7 @@ pub async fn propose_note_edit(agent: State<'_, AgentState>, notes: State<'_, No
     let evidence_required = ["按资料", "根据资料", "依据资料", "结合资料", "参考资料", "按来源", "根据来源", "依据来源", "参考来源"].iter().any(|phrase| instruction.contains(phrase));
     let sources = if evidence_required {
         let ids = note.sources.iter().map(|source| source.record_id.clone()).collect::<Vec<_>>();
-        let records = storage.records.lock().map_err(|_| "资料库暂不可用")?.iter()
-            .filter(|record| ids.contains(&record.id)).cloned().collect::<Vec<_>>();
+        let records = crate::db::get_records(&storage.records_path, &ids)?;
         let (mut selected, _) = context::select_sources(&records, &ids, instruction);
         selected.truncate(8);
         for source in &mut selected { source.text = source.text.chars().take(1_200).collect(); }
