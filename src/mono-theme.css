@@ -128,6 +128,15 @@ body[data-theme='mono'] .gear-divider span { flex: 1; height: 1px; background: v
 body[data-theme='mono'] .gear-divider-history { margin: 0 var(--space-4); }
 body[data-theme='mono'] .gear-divider-composer { flex: none; margin: 0 var(--space-4) var(--space-2); }
 body[data-theme='mono'] .chat-composer { border-radius: 8px; }
+body[data-theme='mono'] .composer-intents { border-color: var(--line); border-radius: 6px; background: #0D0D0F; }
+body[data-theme='mono'] .intent-chip { border-radius: 4px; }
+body[data-theme='mono'] .intent-chip[aria-pressed='true'],
+body[data-theme='mono'] .intent-chip.is-active { border-color: var(--line-secondary); color: var(--paper); background: var(--selected); }
+body[data-theme='mono'] .composer-intent { border-color: var(--line-secondary); border-radius: 6px; background: var(--panel-2); }
+body[data-theme='mono'] .slash-menu { border-color: var(--line-secondary); border-radius: 6px; background: #0D0D0F; }
+body[data-theme='mono'] .slash-option { border-radius: 4px; }
+body[data-theme='mono'] .slash-option.is-active,
+body[data-theme='mono'] .slash-option:hover { border-color: var(--line-secondary); background: var(--selected); }
 body[data-theme='mono'] .message-card-referenced .chamfer-content { border-left: 2px solid var(--paper); }
 body[data-theme='mono'] .message-note-offer button:first-child { display: inline-flex; align-items: center; }
 body[data-theme='mono'] .message-note-offer button:first-child { border-color: var(--paper); color: var(--accent-ink); background: var(--paper); border-radius: 6px; }

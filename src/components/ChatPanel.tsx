@@ -53,11 +53,19 @@ type Props = {
 
 const timeFormatter = new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })
 
-const intentEntries: { intent: ChatIntent; label: string; hint: string }[] = [
-  { intent: 'library_search', label: '搜资料库', hint: '在整个资料库搜索标题；结果确认后才加入本轮参考' },
-  { intent: 'note_edit', label: '改笔记', hint: '生成笔记修改建议；确认后才写入。请在问题中写明笔记标题' },
-  { intent: 'command', label: '运行命令', hint: '提出 ffmpeg / ffprobe / yt-dlp 命令；确认后才执行' },
+const intentEntries: { intent: ChatIntent; slash: string; label: string; shortHint: string; hint: string; aliases: string[] }[] = [
+  { intent: 'library_search', slash: '/search', label: '搜资料库', shortHint: '全库搜索标题，确认后加入参考', hint: '在整个资料库搜索标题；结果确认后才加入本轮参考', aliases: ['search', 'library', 'lib', 'sou', 's', '搜', '资料', '搜资料库'] },
+  { intent: 'note_edit', slash: '/note', label: '改笔记', shortHint: '生成修改建议，需写明笔记标题', hint: '生成笔记修改建议；确认后才写入。请在问题中写明笔记标题', aliases: ['note', 'edit', 'gai', 'n', '改', '笔记', '改笔记'] },
+  { intent: 'command', slash: '/cmd', label: '运行命令', shortHint: '提出 ffmpeg / ffprobe / yt-dlp 提案', hint: '提出 ffmpeg / ffprobe / yt-dlp 命令；确认后才执行', aliases: ['cmd', 'command', 'run', 'ffmpeg', 'ffprobe', 'yt-dlp', 'c', '命令', '运行', '运行命令'] },
 ]
+
+function IntentIcon({ intent }: { intent: ChatIntent }) {
+  return <svg className="intent-icon" viewBox="0 0 16 16" aria-hidden="true">
+    {intent === 'library_search' && <><circle cx="7" cy="7" r="4.2" /><path d="m10.2 10.2 3.3 3.3" /></>}
+    {intent === 'note_edit' && <path d="M3 13h10M4.5 10.2 10.8 3.9l1.8 1.8-6.3 6.3-2.2.4z" />}
+    {intent === 'command' && <path d="M3 4.5 6.5 8 3 11.5M8 11.5h5" />}
+  </svg>
+}
 
 function formatElapsed(seconds: number) {
   const hours = Math.floor(seconds / 3600)
@@ -109,6 +117,8 @@ export function ChatPanel({ records, frameToAttach = null, onFrameAttached, pend
   useEffect(() => { if (!streaming?.reading) { setStoppingReading(false); setStopReadingError('') } }, [streaming?.reading])
   const [deepMode, setDeepMode] = useState(false)
   const [intent, setIntent] = useState<ChatIntent | null>(null)
+  const [slashDismissed, setSlashDismissed] = useState(false)
+  const [slashIndex, setSlashIndex] = useState(0)
   const [choiceSubmitting, setChoiceSubmitting] = useState(false)
   const [librarySubmitting, setLibrarySubmitting] = useState(false)
   const [noteSubmitting, setNoteSubmitting] = useState(false)
@@ -135,22 +145,46 @@ export function ChatPanel({ records, frameToAttach = null, onFrameAttached, pend
   previewIdentityRef.current = previewIdentity
   const referenceCount = referencedRecords.length + selectedMessages.length
   const referenceLabel = referencedRecords[0]?.title ?? (selectedMessages[0] ? `${selectedMessages[0].role === 'agent' ? 'Agent 回答' : '你的消息'}：${selectedMessages[0].paragraphs.join(' ')}` : '')
-  const usableMemory = projectMemory.filter(item => !item.expiresAt || Number(item.expiresAt) > Date.now())
-  const hasBackground = usableMemory.length > 0 || Boolean(compactedSummary || workingContext.goal || workingContext.completed || workingContext.nextStep)
   const captureDraft = !intent && isCaptureCommand(draft)
   const canSend = agentAvailable || captureDraft
   const streamingCapture = streaming ? (streaming.capture ?? isCaptureCommand(streaming.question)) : false
+  const intentsDisabled = sending || !agentAvailable || Boolean(attachedFrame) || selectedMessageIds.length > 0 || activeDeepMode
+  const slashMatch = !intentsDisabled ? draft.match(/^\/([^\s]*)$/) : null
+  const slashQuery = slashMatch?.[1].toLowerCase() ?? ''
+  const slashOptions = slashMatch
+    ? intentEntries.filter(entry =>
+        !slashQuery
+        || entry.slash.slice(1).includes(slashQuery)
+        || entry.label.toLowerCase().includes(slashQuery)
+        || entry.aliases.some(alias => alias.includes(slashQuery)),
+      )
+    : []
+  const slashOpen = Boolean(slashMatch) && !slashDismissed && slashOptions.length > 0
+  const activeSlashIndex = slashOptions.length > 0 ? Math.min(slashIndex, slashOptions.length - 1) : 0
+  const selectedIntent = intentEntries.find(entry => entry.intent === intent)
 
   const attachFrame = (frame: ChatFrame) => {
     setAttachedFrame(frame)
     setDeepMode(false)
     setIntent(null)
+    setSlashDismissed(false)
+    setSlashIndex(0)
     setContextPreview(null)
     setContextPreviewOpen(false)
     draftRef.current?.focus()
   }
 
-  useEffect(() => { setDraft(''); setAttachedFrame(null); setSelectedMessageIds([]); setDeepMode(false); setIntent(null); setDismissedNotes([]); setContextPreview(null); setContextPreviewOpen(false) }, [sessionId])
+  const applySlashIntent = (chosen: ChatIntent) => {
+    setIntent(chosen)
+    setDraft('')
+    setSlashDismissed(false)
+    setSlashIndex(0)
+    setContextPreview(null)
+    setContextPreviewOpen(false)
+    draftRef.current?.focus()
+  }
+
+  useEffect(() => { setDraft(''); setAttachedFrame(null); setSelectedMessageIds([]); setDeepMode(false); setIntent(null); setSlashDismissed(false); setSlashIndex(0); setDismissedNotes([]); setContextPreview(null); setContextPreviewOpen(false) }, [sessionId])
   useEffect(() => {
     if (!frameToAttach || frameToAttach.sessionId !== sessionId) return
     attachFrame(frameToAttach.frame)
@@ -173,6 +207,8 @@ export function ChatPanel({ records, frameToAttach = null, onFrameAttached, pend
   const toggleMessageReference = (id: string) => {
     if (sending) return
     setIntent(null)
+    setSlashDismissed(false)
+    setSlashIndex(0)
     setSelectedMessageIds(current => current.includes(id) ? current.filter(value => value !== id) : current.length < 4 ? [...current, id] : current)
     setContextPreview(null)
     setContextPreviewOpen(false)
@@ -306,7 +342,11 @@ export function ChatPanel({ records, frameToAttach = null, onFrameAttached, pend
     {!compact && <GearDivider area="composer" />}
     <div className="chat-composer" id="cmd-01">
       <div className="composer-head"><label htmlFor="agent-draft"><MechanicalGear className="mech-inline-gear" teeth={12} speed="10s" />向 Agent 提问</label><div>{onPreviewContext && <button className="context-preview-toggle" type="button" aria-expanded={contextPreviewOpen} disabled={sending || contextPreviewBusy || !draft.trim() || Boolean(intent) || isCaptureCommand(draft)} onClick={() => { void previewContext() }}>{contextPreviewBusy ? '读取中' : contextPreviewOpen ? '收起上下文' : '本轮上下文'}</button>}<span data-available={canSend}>{sending ? streamingCapture ? '正在截取' : '正在回答' : canSend ? '可以发送' : '尚未接入'}</span></div></div>
-      {intent && <div className="composer-intent" role="status"><span>{intentEntries.find(entry => entry.intent === intent)?.hint}</span><button type="button" disabled={sending} aria-label="取消操作入口" onClick={() => setIntent(null)}>取消</button></div>}
+      {selectedIntent && <div className="composer-intent" role="status">
+        <span className="composer-intent-badge"><IntentIcon intent={selectedIntent.intent} />{selectedIntent.label}</span>
+        <span className="composer-intent-hint">{selectedIntent.hint}</span>
+        <button type="button" disabled={sending} aria-label="取消操作入口" onClick={() => setIntent(null)}>取消</button>
+      </div>}
       {attachedFrame && <div className="composer-frame">{attachedFramePreview && <img src={attachedFramePreview} alt="待发送的视频截图" />}<span>已选截图 / {formatElapsed(attachedFrame.atSeconds)} · 发送时会交给当前模型</span><button type="button" disabled={sending} aria-label="移除已选截图" onClick={() => { setAttachedFrame(null); setContextPreview(null); setContextPreviewOpen(false) }}>移除</button></div>}
       {referenceCount > 0 && <details className="reference-review" aria-label="本轮参考">
         <summary className="reference-review-summary" title={referenceLabel}><strong>本轮参考</strong><span>{referenceLabel}</span><small aria-live="polite">{referenceCount} 条</small></summary>
@@ -322,7 +362,64 @@ export function ChatPanel({ records, frameToAttach = null, onFrameAttached, pend
         </li>)}</ul>
         <small className="message-reference-note">仅引用所选消息的文字。Agent 回答会标明来源于对话，不代表已核实的外部事实。</small></div>}
       </details>}
-      <textarea id="agent-draft" ref={draftRef} value={draft} readOnly={sending} onChange={event => { setDraft(event.target.value); setContextPreview(null); setContextPreviewOpen(false) }} onKeyDown={event => { if (event.ctrlKey && event.key === 'Enter') { event.preventDefault(); void send() } }} placeholder="提问，或输入「截取 01:20 的画面」" />
+      {slashOpen && <div className="slash-menu" id="composer-slash-menu" role="listbox" aria-label="斜杠命令菜单">
+        <div className="slash-menu-head"><span>操作模式</span><span>↑↓ 选择 · Enter 确认 · Esc 关闭</span></div>
+        {slashOptions.map((entry, index) => <button
+          key={entry.intent}
+          id={`slash-option-${entry.intent}`}
+          type="button"
+          role="option"
+          aria-selected={index === activeSlashIndex}
+          className={`slash-option${index === activeSlashIndex ? ' is-active' : ''}`}
+          onMouseDown={event => event.preventDefault()}
+          onMouseEnter={() => setSlashIndex(index)}
+          onClick={() => applySlashIntent(entry.intent)}
+        >
+          <IntentIcon intent={entry.intent} />
+          <strong>{entry.label}</strong>
+          <code>{entry.slash}</code>
+          <span>{entry.shortHint}</span>
+        </button>)}
+      </div>}
+      <textarea
+        id="agent-draft"
+        ref={draftRef}
+        value={draft}
+        readOnly={sending}
+        aria-expanded={slashOpen || undefined}
+        aria-controls={slashOpen ? 'composer-slash-menu' : undefined}
+        aria-activedescendant={slashOpen ? `slash-option-${slashOptions[activeSlashIndex].intent}` : undefined}
+        onChange={event => {
+          const next = event.target.value
+          setDraft(next)
+          if (!next.startsWith('/')) setSlashDismissed(false)
+          setSlashIndex(0)
+          setContextPreview(null)
+          setContextPreviewOpen(false)
+        }}
+        onKeyDown={event => {
+          if (event.ctrlKey && event.key === 'Enter') {
+            event.preventDefault()
+            void send()
+            return
+          }
+          if (!slashOpen) return
+          if (event.key === 'ArrowDown') {
+            event.preventDefault()
+            setSlashIndex(current => (current + 1) % slashOptions.length)
+          } else if (event.key === 'ArrowUp') {
+            event.preventDefault()
+            setSlashIndex(current => (current - 1 + slashOptions.length) % slashOptions.length)
+          } else if ((event.key === 'Enter' || event.key === 'Tab') && !event.shiftKey && !event.altKey && !event.metaKey && !event.nativeEvent.isComposing) {
+            event.preventDefault()
+            applySlashIntent(slashOptions[activeSlashIndex].intent)
+          } else if (event.key === 'Escape') {
+            event.preventDefault()
+            setSlashDismissed(true)
+          }
+        }}
+        placeholder="提问、输入 / 选择操作入口，或输入「截取 01:20 的画面」"
+      />
       {streaming?.reading && streaming.requestId && <div className="reading-stop-control"><span role="status">自动读取中，达到任务预算后会回答。停止后保留已读部分。</span><HudButton type="button" disabled={stoppingReading} onClick={() => {
         setStoppingReading(true); setStopReadingError('')
         void stopAgentReading(streaming.requestId!).catch(error => { setStopReadingError(String(error)); setStoppingReading(false) })
@@ -343,7 +440,25 @@ export function ChatPanel({ records, frameToAttach = null, onFrameAttached, pend
         {contextPreview.explorationMode ? <details open><summary>{activeDeepMode ? '深度模式 · 字幕待逐批读取' : '资料目录 · 正文待读取'}</summary><pre>{contextPreview.directoryText}</pre></details> : <details open><summary>资料片段 · {contextPreview.sources.length} 条</summary>{contextPreview.sources.map(source => <div className="context-preview-source" key={source.index}><strong>{source.label} {source.title}{source.atSeconds == null ? '' : ` / ${formatElapsed(source.atSeconds)}`}{source.visual ? ' · 图片' : ''}{source.selectionReason === 'coverage' ? ' · 覆盖式选取' : ''}</strong><small>捕获时间：{source.capturedAt || '未知'} · 来源：{source.sourceUrl || '未记录'}</small><pre>{source.text}</pre></div>)}</details>}
       </div>}
       {error && <p className="chat-error" role="alert">{error}</p>}
-      <div className="composer-foot"><span>{attachedFrame ? '图片已加入本次提问' : selectedMessages.length > 0 ? `${selectedMessages.length} 条对话消息已选中` : referencedRecords.length === 0 ? hasBackground ? '可依据记忆和会话计划提问' : '可直接提问，也可添加参考资料' : `${referencedRecords.length} 条资料已选中`}</span><div>{intentEntries.map(entry => <HudButton key={entry.intent} type="button" className={`intent-toggle${intent === entry.intent ? ' is-active' : ''}`} aria-pressed={intent === entry.intent} title={entry.hint} disabled={sending || !agentAvailable || Boolean(attachedFrame) || selectedMessages.length > 0 || activeDeepMode} onClick={() => { setIntent(current => current === entry.intent ? null : entry.intent); setContextPreview(null); setContextPreviewOpen(false) }}>{entry.label}</HudButton>)}<HudButton type="button" onClick={onShowHistory}>＋ 添加参考</HudButton>{onSummarize && <HudButton type="button" disabled={!agentAvailable || sending || referencedRecords.length === 0} onClick={() => onSummarize?.(activeDeepMode)}>总结</HudButton>}{!agentAvailable && onOpenAgentSetup && <HudButton type="button" onClick={onOpenAgentSetup}>配置 Agent</HudButton>}<HudButton type="button" variant="primary" disabled={!canSend || sending || !draft.trim() || (captureDraft && referencedRecords.length === 0)} onClick={() => { void send() }}>{sending ? streamingCapture ? '截取中' : '生成中' : <><span className="mono-send-plane"><PaperPlaneIcon /></span>发送<span className="hud-send-arrow"> →</span></>}</HudButton></div></div>
+      <div className="composer-foot">
+        <div className="composer-intents" role="group" aria-label="操作入口">
+          {intentEntries.map(entry => <button
+            key={entry.intent}
+            type="button"
+            className={`intent-chip${intent === entry.intent ? ' is-active' : ''}`}
+            aria-pressed={intent === entry.intent}
+            title={`${entry.hint}（输入 ${entry.slash}）`}
+            disabled={intentsDisabled}
+            onClick={() => { setIntent(current => current === entry.intent ? null : entry.intent); setContextPreview(null); setContextPreviewOpen(false) }}
+          ><IntentIcon intent={entry.intent} /><span>{entry.label}</span></button>)}
+        </div>
+        <div className="composer-actions">
+          <HudButton type="button" onClick={onShowHistory}>＋ 添加参考</HudButton>
+          {onSummarize && <HudButton type="button" disabled={!agentAvailable || sending || referencedRecords.length === 0} onClick={() => onSummarize?.(activeDeepMode)}>总结</HudButton>}
+          {!agentAvailable && onOpenAgentSetup && <HudButton type="button" onClick={onOpenAgentSetup}>配置 Agent</HudButton>}
+          <HudButton type="button" variant="primary" disabled={!canSend || sending || !draft.trim() || (captureDraft && referencedRecords.length === 0)} onClick={() => { void send() }}>{sending ? (streaming ? streamingCapture : captureDraft) ? '截取中' : '生成中' : <><span className="mono-send-plane"><PaperPlaneIcon /></span>发送<span className="hud-send-arrow"> →</span></>}</HudButton>
+        </div>
+      </div>
     </div>
   </section>
 }

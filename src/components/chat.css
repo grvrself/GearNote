@@ -160,22 +160,35 @@
 .composer-frame button:hover:not(:disabled) { color: var(--paper); }
 .composer-frame button:disabled { color: var(--muted); }
 .composer-frame button:focus-visible { outline: var(--edge) solid var(--accent); outline-offset: var(--focus-offset); }
-.composer-intent { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); padding: var(--space-2); border: var(--edge) solid var(--accent); color: var(--paper); font-size: var(--fs-11); }
-.composer-intent > span { flex: 1; min-width: 0; }
+.composer-intent { display: flex; align-items: center; gap: var(--space-2); padding: 5px 10px; border: var(--edge) solid var(--accent); background: var(--panel); color: var(--paper); font-size: var(--fs-11); }
+.composer-intent-badge { display: inline-flex; align-items: center; gap: 5px; flex: none; color: var(--accent); font-weight: 600; }
+.composer-intent-hint { flex: 1; min-width: 0; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .composer-intent button { flex: none; border: 0; color: var(--accent); background: transparent; font: var(--fs-11) var(--font-body); cursor: pointer; }
 .composer-intent button:hover:not(:disabled) { color: var(--paper); }
 .composer-intent button:disabled { color: var(--muted); cursor: not-allowed; }
 .composer-intent button:focus-visible { outline: var(--edge) solid var(--accent); outline-offset: var(--focus-offset); }
-.intent-toggle.is-active .hud-button-border { background: var(--accent); }
-.intent-toggle.is-active .hud-button-content { color: var(--accent); }
+.intent-icon { width: 12px; height: 12px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.slash-menu { display: flex; flex-direction: column; gap: 2px; padding: 4px; border: var(--edge) solid var(--line); background: var(--panel); }
+.slash-menu-head { display: flex; justify-content: space-between; gap: var(--space-2); padding: 2px 6px 4px; color: var(--muted); font: var(--fs-11) var(--font-mono); }
+.slash-option { display: flex; align-items: center; gap: var(--space-2); width: 100%; padding: 6px 8px; border: var(--edge) solid transparent; color: var(--paper); background: transparent; text-align: left; font: var(--fs-12) var(--font-body); cursor: pointer; }
+.slash-option strong { flex: none; font-weight: 600; }
+.slash-option code { flex: none; color: var(--muted); font: var(--fs-11) var(--font-mono); }
+.slash-option span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: var(--fs-11); }
+.slash-option.is-active, .slash-option:hover { border-color: var(--accent); background: var(--panel-2); }
+.slash-option.is-active .intent-icon { color: var(--accent); }
 .chat-composer textarea::placeholder { color: var(--muted); }
 .deep-mode-toggle { display:flex; align-items:center; gap:var(--space-2); width:fit-content; color:var(--paper); font-size:var(--fs-11); cursor:pointer; }
 .deep-mode-toggle input { margin:0; accent-color:var(--accent); }
 .deep-mode-toggle small { color:var(--muted); font-size:var(--fs-11); }
 .deep-mode-toggle:focus-within { outline:var(--edge) solid var(--accent); outline-offset:var(--focus-offset); }
-.composer-foot { display: flex; justify-content: space-between; align-items: center; gap: var(--space-2); }
-.composer-foot > span { color: var(--muted); font-size: var(--fs-11); }
-.composer-foot > div { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-2); }
+.composer-foot { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: var(--space-2); }
+.composer-intents { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 3px; padding: 3px; border: var(--edge) solid var(--line); background: var(--bg); }
+.intent-chip { display: inline-flex; align-items: center; gap: 5px; min-height: 24px; padding: 0 9px; border: var(--edge) solid transparent; color: var(--muted); background: transparent; font: 500 var(--fs-11) var(--font-body); white-space: nowrap; cursor: pointer; transition: color var(--dur) var(--ease), background-color var(--dur) var(--ease), border-color var(--dur) var(--ease); }
+.intent-chip:hover:not(:disabled) { color: var(--paper); background: var(--panel); }
+.intent-chip[aria-pressed='true'], .intent-chip.is-active { border-color: var(--accent); color: var(--accent); background: var(--panel-2); }
+.intent-chip:disabled { opacity: .45; cursor: not-allowed; }
+.intent-chip:focus-visible { outline: var(--edge) solid var(--accent); outline-offset: 1px; }
+.composer-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--space-2); margin-left: auto; }
 
 @media (max-width: 1250px) {
   .message-card { max-width: var(--message-narrow-max-width); }
@@ -187,8 +200,7 @@
   .message-flow { padding: var(--space-3); }
   .message-card { max-width: var(--message-mobile-max-width); }
   .chat-composer { margin-right: var(--space-2); margin-bottom: var(--space-2); margin-left: var(--space-2); }
-  .composer-foot > span { display: none; }
-  .composer-foot > div { margin-left: auto; }
+  .slash-menu-head span:last-child { display: none; }
 }
 
 .reading-stop-control { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:var(--space-3); margin:var(--space-3) 0; color:var(--muted); font-size:var(--fs-12); }

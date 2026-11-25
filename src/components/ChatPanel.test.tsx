@@ -148,6 +148,42 @@ describe('ChatPanel 关键交互', () => {
     expect(screen.queryByRole('button', { name: /生成中/ })).not.toBeInTheDocument()
   })
 
+  it('输入 / 唤起斜杠命令菜单，支持键盘选择、过滤、Esc 关闭与互斥隐藏', async () => {
+    const onSend = vi.fn().mockResolvedValue(true)
+    const videoRecord = { id: 'vid-1', type: 'video' as const, title: '测试视频', site: 'example.com', savedAt: '2026-11-25T00:00:00Z', status: 'ready' as const, sourceUrl: 'https://example.com/v', contentText: '', excerpt: [] }
+    render(<ChatPanel {...panelProps({ onSend, records: [videoRecord], referencedIds: ['vid-1'] })} />)
+
+    const input = screen.getByLabelText('向 Agent 提问')
+    fireEvent.change(input, { target: { value: '/' } })
+    const listbox = screen.getByRole('listbox', { name: '斜杠命令菜单' })
+    expect(within(listbox).getAllByRole('option')).toHaveLength(3)
+
+    fireEvent.keyDown(input, { key: 'ArrowDown' })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(input).toHaveValue('')
+    expect(screen.queryByRole('listbox', { name: '斜杠命令菜单' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '改笔记' })).toHaveAttribute('aria-pressed', 'true')
+
+    fireEvent.change(input, { target: { value: '/cmd' } })
+    expect(within(screen.getByRole('listbox', { name: '斜杠命令菜单' })).getAllByRole('option')).toHaveLength(1)
+    fireEvent.click(screen.getByRole('option', { name: /运行命令/ }))
+    expect(input).toHaveValue('')
+    expect(screen.getByRole('button', { name: '运行命令' })).toHaveAttribute('aria-pressed', 'true')
+
+    fireEvent.change(input, { target: { value: '/etc' } })
+    expect(screen.queryByRole('listbox', { name: '斜杠命令菜单' })).not.toBeInTheDocument()
+    fireEvent.change(input, { target: { value: '/s' } })
+    expect(screen.getByRole('listbox', { name: '斜杠命令菜单' })).toBeInTheDocument()
+    fireEvent.keyDown(input, { key: 'Escape' })
+    expect(screen.queryByRole('listbox', { name: '斜杠命令菜单' })).not.toBeInTheDocument()
+    expect(input).toHaveValue('/s')
+
+    fireEvent.change(input, { target: { value: '' } })
+    fireEvent.click(screen.getByLabelText(/深度模式/))
+    fireEvent.change(input, { target: { value: '/' } })
+    expect(screen.queryByRole('listbox', { name: '斜杠命令菜单' })).not.toBeInTheDocument()
+  })
+
   it('结构化提醒按 code 渲染，修改展示文案不影响显示', () => {
     const message: ChatMessage = { ...reply, toolSteps: ['随便改写的步骤文案'], outcome: {
       kind: 'answer', answer: 'partial',

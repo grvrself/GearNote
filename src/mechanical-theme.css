@@ -104,6 +104,13 @@ body[data-theme='hud'] .chat-composer::after { content: 'INPUT DRIVE / 03'; posi
 body[data-theme='hud'] .composer-head label { display: inline-flex; align-items: center; gap: 7px; color: var(--accent); }
 body[data-theme='hud'] .mech-inline-gear { width: 15px; height: 15px; }
 body[data-theme='hud'] .reference-review { border-color: rgba(255,212,0,.18); }
+body[data-theme='hud'] .composer-intents { border-radius: 5px; background: #090C10; }
+body[data-theme='hud'] .intent-chip { border-radius: 3px; }
+body[data-theme='hud'] .intent-chip[aria-pressed='true'],
+body[data-theme='hud'] .intent-chip.is-active { border-color: rgba(255,212,0,.55); color: var(--accent); background: rgba(255,212,0,.1); }
+body[data-theme='hud'] .composer-intent { border-color: rgba(255,212,0,.45); border-radius: 4px; background: rgba(255,212,0,.07); }
+body[data-theme='hud'] .slash-menu { border-color: rgba(255,212,0,.25); border-radius: 5px; background: #090C10; }
+body[data-theme='hud'] .slash-option { border-radius: 3px; }
 
 /* 资料栏 */
 body[data-theme='hud'] .history-head { position: relative; }
