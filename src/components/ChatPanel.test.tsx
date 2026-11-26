@@ -196,4 +196,37 @@ describe('ChatPanel 关键交互', () => {
     expect(screen.queryByRole('note', { name: '随便改写的步骤文案' })).not.toBeInTheDocument()
     expect(screen.getAllByRole('note')).toHaveLength(2)
   })
+
+  it('有草稿时采用建议先弹应用内确认，取消保留原草稿，确认才替换', async () => {
+    const message: ChatMessage = { ...reply, suggestions: [{ label: '继续深入', prompt: '请继续深入分析' }] }
+    render(<ChatPanel {...panelProps({ messages: [message] })} />)
+    const input = screen.getByLabelText('向 Agent 提问')
+    fireEvent.change(input, { target: { value: '我的原有草稿' } })
+    fireEvent.click(screen.getByRole('button', { name: '继续深入 ↗' }))
+
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog).toHaveAttribute('aria-modal', 'true')
+    expect(within(dialog).getByText('用这条建议替换当前输入内容？')).toBeInTheDocument()
+    fireEvent.click(within(dialog).getByRole('button', { name: '取消' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(input).toHaveValue('我的原有草稿')
+
+    fireEvent.click(screen.getByRole('button', { name: '继续深入 ↗' }))
+    const again = await screen.findByRole('dialog')
+    fireEvent.click(within(again).getByRole('button', { name: '替换' }))
+    await waitFor(() => expect(input).toHaveValue('请继续深入分析'))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('草稿为空或与建议相同时采用建议不弹确认', async () => {
+    const message: ChatMessage = { ...reply, suggestions: [{ label: '继续深入', prompt: '请继续深入分析' }] }
+    render(<ChatPanel {...panelProps({ messages: [message] })} />)
+    const input = screen.getByLabelText('向 Agent 提问')
+    fireEvent.click(screen.getByRole('button', { name: '继续深入 ↗' }))
+    await waitFor(() => expect(input).toHaveValue('请继续深入分析'))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '继续深入 ↗' }))
+    await waitFor(() => expect(input).toHaveValue('请继续深入分析'))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
 })

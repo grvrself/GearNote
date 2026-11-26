@@ -6,6 +6,10 @@ export type BridgeStatus = { pairCode: string; connected: boolean; error: string
 export type RecordPage = { items: KnowledgeRecord[]; total: number; offset: number; limit: number }
 export type RecordSegment = { ordinal: number; atSeconds: number | null; text: string }
 export type CaptureJob = { id: string; type: RecordType; title: string; site: string; status: ProcessStatus; faultReason?: string | null; startedAtMs: number }
+export type CaptureResult = { record: KnowledgeRecord; alreadySaved: boolean; updated: boolean }
+
+export const captureFromUrl = (url: string, cookiesText?: string) =>
+  invoke<CaptureResult>('capture_from_url', { url, cookiesText: cookiesText?.trim() ? cookiesText : null })
 
 export const listCaptureJobs = (): Promise<CaptureJob[]> => invoke<CaptureJob[]>('list_capture_jobs')
 export const dismissCaptureJob = (id: string): Promise<boolean> => invoke<boolean>('dismiss_capture_job', { id })

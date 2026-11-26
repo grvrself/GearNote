@@ -15,6 +15,7 @@ type Props = {
   onBrowserChange: (browser: BrowserChoice) => void
   extensionConnected: boolean
   onOpenExtensionSetup: () => void
+  onOpenUrlImport?: () => void
 }
 
 function WindowGlyph({ kind }: { kind: 'minimize' | 'maximize' | 'close' }) {
@@ -23,7 +24,7 @@ function WindowGlyph({ kind }: { kind: 'minimize' | 'maximize' | 'close' }) {
   return <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 3.5l9 9m0-9l-9 9" /></svg>
 }
 
-export function Topbar({ sectionId, browser, onBrowserChange, extensionConnected, onOpenExtensionSetup }: Props) {
+export function Topbar({ sectionId, browser, onBrowserChange, extensionConnected, onOpenExtensionSetup, onOpenUrlImport }: Props) {
   const desktop = isTauri()
   const window = desktop ? getCurrentWindow() : null
   const [motion, setMotion] = useState<MotionPreference>(readMotion)
@@ -57,6 +58,7 @@ export function Topbar({ sectionId, browser, onBrowserChange, extensionConnected
     </div>
 
     <div className="hud-command-strip">
+      {onOpenUrlImport && <HudButton className="hud-url-import-entry" type="button" onClick={onOpenUrlImport}>＋ 导入链接</HudButton>}
       <label className="hud-browser-control"><span>浏览器</span><select value={browser} onChange={event => onBrowserChange(event.target.value as BrowserChoice)}><option value="Chrome">Chrome</option><option value="Edge">Edge</option></select></label>
       <div className="hud-extension-state" data-connected={extensionConnected} role="status"><span className="hud-extension-mark" aria-hidden="true" /><span>{extensionConnected ? '扩展已连接' : '扩展未连接'}</span></div>
       <div className="mech-command-gears" aria-hidden="true"><MechanicalGear teeth={12} speed="12s" /><i /><MechanicalGear teeth={16} speed="12s" reverse /><i /><MechanicalGear teeth={12} speed="12s" /></div>

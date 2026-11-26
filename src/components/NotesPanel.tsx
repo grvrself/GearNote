@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { KnowledgeRecord } from '../data'
 import type { Note, NoteDraft, NoteFolder, NoteSourceInput } from '../notes'
 import { composeNoteFromSources } from '../notes'
+import { useConfirm } from '../hooks/useConfirm'
 import { HudButton } from './HudButton'
 import { GearIcon } from './GearIcon'
 import { PanelHeading } from './PanelHeading'
@@ -46,6 +47,7 @@ const noteDraft = (note: Note): NoteDraft => ({ title: note.title, body: note.bo
 const notePreview = (note: Note) => note.body.split('\n').map(line => line.trim())
   .find(line => line && !line.startsWith('#') && !line.startsWith('['))?.replace(/^[-*>]\s*/, '').slice(0, 90) ?? '打开笔记查看内容'
 export function NotesPanel({ notes, folders, records, incomingDraft, onDraftConsumed, onSave, onDelete, onExport, onRevealRecord, onApplyEdit, onUndoEdit, onRejectEdit, onCreateFolder, onRenameFolder, onDeleteFolder, designOpen: controlledDesignOpen, onDesignOpenChange, composeRequest, onComposeRequestConsumed, requestedNoteId }: Props) {
+  const { confirm, confirmDialog } = useConfirm()
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [draft, setDraft] = useState<NoteDraft>(emptyDraft)
   const [viewMode, setViewMode] = useState<'read' | 'edit'>('edit')
@@ -59,7 +61,6 @@ export function NotesPanel({ notes, folders, records, incomingDraft, onDraftCons
   const [notice, setNotice] = useState('')
   const [exportPath, setExportPath] = useState('')
   const [designOpenState, setDesignOpenState] = useState(false)
-  const designOpen = controlledDesignOpen ?? designOpenState
   const setDesignOpen = (open: boolean) => {
     setDesignOpenState(open)
     onDesignOpenChange?.(open)
@@ -90,35 +91,48 @@ export function NotesPanel({ notes, folders, records, incomingDraft, onDraftCons
     if (saved && viewMode === 'read') setDraft(noteDraft(saved))
   }, [saved, viewMode])
 
-  const confirmDiscard = () => !hasUnsavedChanges && !hasNewDraft || window.confirm('当前笔记有未保存的内容，确定放弃并切换吗？')
+  const confirmDiscard = async () => {
+    if (!hasUnsavedChanges && !hasNewDraft) return true
+    return confirm({ title: '放弃未保存内容', message: '当前笔记有未保存的内容，确定放弃并切换吗？', confirmLabel: '放弃并切换', danger: true })
+  }
   useEffect(() => {
     if (controlledDesignOpen === undefined) return
-    if (controlledDesignOpen && !designOpenState && !confirmDiscard()) {
-      onDesignOpenChange?.(false)
-      return
-    }
-    setDesignOpenState(controlledDesignOpen)
+    let cancelled = false
+    void (async () => {
+      if (controlledDesignOpen && !designOpenState && !await confirmDiscard()) {
+        if (!cancelled) onDesignOpenChange?.(false)
+        return
+      }
+      if (!cancelled) setDesignOpenState(controlledDesignOpen)
+    })()
+    return () => { cancelled = true }
   }, [controlledDesignOpen])
   useEffect(() => {
     if (!composeRequest) return
-    if (!confirmDiscard()) { onComposeRequestConsumed?.(); return }
-    initiallySelected.current = true
-    setDesignOpen(false)
-    setComposeOpen(true)
-    setComposeIds(composeRequest.ids.slice(0, 3))
-    setComposeFocus(''); setComposeCoverage(''); setOpenDesignAfterSave(false)
-    setSelectedId(null); setDraft(emptyDraft(folderForFilter(folderFilter)))
-    setViewMode('edit'); setError(''); setNotice('')
-    onComposeRequestConsumed?.()
+    let cancelled = false
+    void (async () => {
+      if (!await confirmDiscard()) { if (!cancelled) onComposeRequestConsumed?.(); return }
+      if (cancelled) return
+      initiallySelected.current = true
+      setDesignOpen(false)
+      setComposeOpen(true)
+      setComposeIds(composeRequest.ids.slice(0, 3))
+      setComposeFocus(''); setComposeCoverage(''); setOpenDesignAfterSave(false)
+      setSelectedId(null); setDraft(emptyDraft(folderForFilter(folderFilter)))
+      setViewMode('edit'); setError(''); setNotice('')
+      onComposeRequestConsumed?.()
+    })()
+    return () => { cancelled = true }
   }, [composeRequest])
+  // 只在 designOpenState（放弃确认通过后）才定位外部请求的笔记，避免确认前覆盖未保存草稿。
   useEffect(() => {
-    if (!controlledDesignOpen || !requestedNoteId) return
+    if (!designOpenState || !requestedNoteId) return
     const note = notes.find(item => item.id === requestedNoteId)
     if (!note) return
     setSelectedId(note.id); setDraft(noteDraft(note)); setViewMode('read')
-  }, [controlledDesignOpen, requestedNoteId, notes])
-  const changeFolderFilter = (filter: string) => {
-    if (filter === folderFilter || !confirmDiscard()) return
+  }, [designOpenState, requestedNoteId, notes])
+  const changeFolderFilter = async (filter: string) => {
+    if (filter === folderFilter || !await confirmDiscard()) return
     setDesignOpen(false)
     setComposeOpen(false); setComposeCoverage(''); setOpenDesignAfterSave(false)
     setFolderFilter(filter)
@@ -129,8 +143,8 @@ export function NotesPanel({ notes, folders, records, incomingDraft, onDraftCons
     setError(''); setNotice(''); setExportPath('')
     setFolderMode(null); setFolderError('')
   }
-  const newNote = () => {
-    if (!confirmDiscard()) return
+  const newNote = async () => {
+    if (!await confirmDiscard()) return
     initiallySelected.current = true
     setDesignOpen(false)
     setComposeOpen(false)
@@ -140,8 +154,8 @@ export function NotesPanel({ notes, folders, records, incomingDraft, onDraftCons
     setViewMode('edit')
     setError(''); setNotice(''); setExportPath('')
   }
-  const startCompose = () => {
-    if (!confirmDiscard()) return
+  const startCompose = async () => {
+    if (!await confirmDiscard()) return
     initiallySelected.current = true
     setDesignOpen(false); setComposeOpen(true); setComposeIds([]); setComposeFocus(''); setComposeCoverage('')
     setOpenDesignAfterSave(false)
@@ -149,8 +163,8 @@ export function NotesPanel({ notes, folders, records, incomingDraft, onDraftCons
     setViewMode('edit')
     setError(''); setNotice('')
   }
-  const openStudio = () => {
-    if (!confirmDiscard()) return
+  const openStudio = async () => {
+    if (!await confirmDiscard()) return
     setComposeOpen(false); setComposeCoverage(''); setOpenDesignAfterSave(false)
     setDesignOpen(true); setError(''); setNotice(''); setExportPath('')
   }
@@ -176,7 +190,7 @@ export function NotesPanel({ notes, folders, records, incomingDraft, onDraftCons
   const removeFolder = async () => {
     if (!selectedFolder || hasUnsavedChanges || hasNewDraft) return
     const count = notes.filter(note => note.folderId === selectedFolder.id).length
-    if (!window.confirm(`删除文件夹“${selectedFolder.name}”？其中 ${count} 篇笔记会移到“未分类”，笔记内容不会删除。`)) return
+    if (!await confirm({ title: '删除文件夹', message: `删除文件夹“${selectedFolder.name}”？其中 ${count} 篇笔记会移到“未分类”，笔记内容不会删除。`, confirmLabel: '删除', danger: true })) return
     setBusy(true); setFolderError('')
     try {
       const moved = await onDeleteFolder(selectedFolder.id)
@@ -200,8 +214,8 @@ export function NotesPanel({ notes, folders, records, incomingDraft, onDraftCons
     onDraftConsumed()
   }, [incomingDraft, onDraftConsumed, folderFilter])
 
-  const selectNote = (note: Note) => {
-    if ((selectedId !== note.id || hasUnsavedChanges) && !confirmDiscard()) return
+  const selectNote = async (note: Note) => {
+    if ((selectedId !== note.id || hasUnsavedChanges) && !await confirmDiscard()) return
     setDesignOpen(false)
     setComposeOpen(false)
     setComposeCoverage(''); setOpenDesignAfterSave(false)
@@ -243,7 +257,7 @@ export function NotesPanel({ notes, folders, records, incomingDraft, onDraftCons
   }
   const removeCurrent = async () => {
     if (!saved || busy) return
-    if (!window.confirm(`确定删除笔记《${saved.title}》？这会同时删除它的高级版和笔记截图，且无法撤销。`)) return
+    if (!await confirm({ title: '删除笔记', message: `确定删除笔记《${saved.title}》？这会同时删除它的高级版和笔记截图，且无法撤销。`, confirmLabel: '删除', danger: true })) return
     setBusy(true); setError(''); setNotice('')
     try {
       await onDelete(saved.id)
@@ -257,12 +271,13 @@ export function NotesPanel({ notes, folders, records, incomingDraft, onDraftCons
   const sourceTitle = (source: NoteSourceInput) => records.find(record => record.id === source.recordId)?.title
     ?? notes.flatMap(note => note.sources).find(item => keyOf(item) === keyOf(source))?.title ?? '来源已移除'
 
-  if (designOpen) return <section className="notes-panel" aria-label="高级笔记工作台"><AdvancedNoteStudio
+  // 渲染只看 designOpenState：受控打开须先通过放弃确认，确认前保持编辑器与草稿可见。
+  if (designOpenState) return <section className="notes-panel" aria-label="高级笔记工作台"><AdvancedNoteStudio
     notes={notes} records={records} initialNoteId={selectedId} onClose={() => setDesignOpen(false)}
     onSelectNote={note => { setSelectedId(note.id); setDraft(noteDraft(note)); setViewMode('read') }}
-    onCreateFromSources={startCompose} onRevealRecord={onRevealRecord}
+    onCreateFromSources={() => { void startCompose() }} onRevealRecord={onRevealRecord}
     onApplyEdit={onApplyEdit} onRejectEdit={onRejectEdit} onUndoEdit={onUndoEdit}
-    onNoteChanged={updated => setDraft(noteDraft(updated))} /></section>
+    onNoteChanged={updated => setDraft(noteDraft(updated))} />{confirmDialog}</section>
 
   return <section className="notes-panel" aria-label="资料库笔记">
     <div className="notes-layout">
@@ -271,24 +286,24 @@ export function NotesPanel({ notes, folders, records, incomingDraft, onDraftCons
         <div className="notes-index-scroll">
         <div className="notes-folder-head"><span>文件夹</span><button type="button" disabled={busy} onClick={() => { setFolderMode('create'); setFolderName(''); setFolderError('') }}>＋ 新建</button></div>
         <nav className="notes-folder-list" aria-label="笔记文件夹">
-          <button type="button" disabled={busy} aria-current={folderFilter === 'all' ? 'page' : undefined} onClick={() => changeFolderFilter('all')}><span>全部笔记</span><small>{notes.length}</small></button>
-          <button type="button" disabled={busy} aria-current={folderFilter === 'uncategorized' ? 'page' : undefined} onClick={() => changeFolderFilter('uncategorized')}><span>未分类</span><small>{notes.filter(note => !note.folderId).length}</small></button>
-          {folders.map(folder => <button type="button" key={folder.id} disabled={busy} aria-current={folderFilter === folder.id ? 'page' : undefined} onClick={() => changeFolderFilter(folder.id)}><span>{folder.name}</span><small>{notes.filter(note => note.folderId === folder.id).length}</small></button>)}
+          <button type="button" disabled={busy} aria-current={folderFilter === 'all' ? 'page' : undefined} onClick={() => { void changeFolderFilter('all') }}><span>全部笔记</span><small>{notes.length}</small></button>
+          <button type="button" disabled={busy} aria-current={folderFilter === 'uncategorized' ? 'page' : undefined} onClick={() => { void changeFolderFilter('uncategorized') }}><span>未分类</span><small>{notes.filter(note => !note.folderId).length}</small></button>
+          {folders.map(folder => <button type="button" key={folder.id} disabled={busy} aria-current={folderFilter === folder.id ? 'page' : undefined} onClick={() => { void changeFolderFilter(folder.id) }}><span>{folder.name}</span><small>{notes.filter(note => note.folderId === folder.id).length}</small></button>)}
         </nav>
         {selectedFolder && <div className="notes-folder-actions"><button type="button" disabled={busy} onClick={() => { setFolderMode('rename'); setFolderName(selectedFolder.name); setFolderError('') }}>重命名</button><button type="button" disabled={busy || hasUnsavedChanges || hasNewDraft} onClick={() => { void removeFolder() }}>删除文件夹</button></div>}
         {folderMode && <form className="notes-folder-form" onSubmit={event => { event.preventDefault(); void submitFolder() }}><label htmlFor="note-folder-name">{folderMode === 'create' ? '新文件夹名称' : '重命名文件夹'}</label><input id="note-folder-name" autoFocus value={folderName} maxLength={60} onChange={event => setFolderName(event.target.value)} /><div><button type="submit" disabled={busy || !folderName.trim()}>保存</button><button type="button" disabled={busy} onClick={() => { setFolderMode(null); setFolderError('') }}>取消</button></div></form>}
         {folderError && <p className="notes-folder-error" role="alert">{folderError}</p>}
         <div className="notes-index-head"><span>笔记 <small>{visibleNotes.length}</small></span></div>
         {visibleNotes.length === 0 && <p className="notes-empty">{notes.length === 0 ? '暂无笔记。可新建笔记或从资料生成草稿。' : '这里还没有笔记。'}</p>}
-        {visibleNotes.map(note => <button className="notes-index-item" type="button" key={note.id} disabled={busy} data-selected={selectedId === note.id} onClick={() => selectNote(note)}>
+        {visibleNotes.map(note => <button className="notes-index-item" type="button" key={note.id} disabled={busy} data-selected={selectedId === note.id} onClick={() => { void selectNote(note) }}>
           <span className="notes-index-item-title"><strong>{note.title}</strong><span className="notes-index-item-state"><GearIcon kind="brand" size={20} /><small>{selectedId === note.id && hasUnsavedChanges ? '草稿' : '已保存'}</small></span></span>
           <span className="notes-index-item-preview">{notePreview(note)}</span>
           <small>{new Date(note.updatedAt).toLocaleString('zh-CN')} · {note.sources.length} 个来源</small>
         </button>)}
         </div>
         <div className="notes-index-footer">
-          <button className="notes-compose-entry" type="button" disabled={busy} onClick={openStudio}><span>从资料生成高级笔记</span><GearIcon kind="brand" size={16} /></button>
-          <button className="notes-new-entry" type="button" disabled={busy} onClick={newNote}>＋ 新建笔记</button>
+          <button className="notes-compose-entry" type="button" disabled={busy} onClick={() => { void openStudio() }}><span>从资料生成高级笔记</span><GearIcon kind="brand" size={16} /></button>
+          <button className="notes-new-entry" type="button" disabled={busy} onClick={() => { void newNote() }}>＋ 新建笔记</button>
         </div>
       </aside>
       <div className="notes-workspace">
@@ -321,16 +336,17 @@ export function NotesPanel({ notes, folders, records, incomingDraft, onDraftCons
         </>}
         </div>
         {(error || notice || exportPath) && <div className="notes-workspace-feedback">{error && <p className="notes-error" role="alert">{error}</p>}{notice && <p className="notes-notice" role="status">{notice}</p>}{exportPath && <div className="notes-export"><span>导出文件：{exportPath}</span><button type="button" onClick={() => { void navigator.clipboard.writeText(exportPath).then(() => setNotice('路径已复制。')).catch(() => setError('复制路径失败，请手动选择路径。')) }}>复制路径</button></div>}</div>}
-        {!designOpen && <div className="notes-workspace-actions">{saved && viewMode === 'read' ? <>
+        {!designOpenState && <div className="notes-workspace-actions">{saved && viewMode === 'read' ? <>
           <HudButton type="button" disabled={busy} onClick={() => setViewMode('edit')}>编辑笔记</HudButton>
           <HudButton type="button" disabled={busy} onClick={() => { void exportCurrent() }}>导出 Markdown</HudButton>
           <HudButton type="button" variant="primary" disabled={busy} onClick={() => setDesignOpen(true)}>生成高级版</HudButton>
           <HudButton type="button" disabled={busy} onClick={() => { void removeCurrent() }}>删除笔记</HudButton>
         </> : <>
           <HudButton type="button" variant="primary" disabled={busy || !draft.title.trim() || !draft.body.trim()} onClick={() => { void save() }}>{busy ? '处理中' : '保存笔记'}</HudButton>
-          {saved && <HudButton type="button" disabled={busy} onClick={() => { if (!confirmDiscard()) return; setDraft(noteDraft(saved)); setViewMode('read'); setError(''); setNotice('') }}>返回阅读</HudButton>}
+          {saved && <HudButton type="button" disabled={busy} onClick={() => { void (async () => { if (!await confirmDiscard()) return; setDraft(noteDraft(saved)); setViewMode('read'); setError(''); setNotice('') })() }}>返回阅读</HudButton>}
         </>}</div>}
       </div>
     </div>
+    {confirmDialog}
   </section>
 }

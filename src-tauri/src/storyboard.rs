@@ -12,7 +12,7 @@ pub(crate) fn cleanup_credentials_on_startup(video_cache_dir: &Path) {
     let _ = crate::credentials::cleanup_legacy(video_cache_dir);
 }
 
-fn validate_bilibili_cookies(content: &str) -> Result<(), String> {
+pub(crate) fn validate_bilibili_cookies(content: &str) -> Result<(), String> {
     if content.len() > 512_000 || content.contains('\0') {
         return Err("cookies.txt 超过 500 KB 或包含无效字符。".into());
     }

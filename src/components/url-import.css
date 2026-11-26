@@ -1,0 +1,25 @@
+/* URL 直采弹窗：沿用 HUD / Mono 主题 token，窄屏收紧留白避免横向溢出。 */
+.url-import-backdrop { position: fixed; z-index: 1000; inset: 0; display: grid; place-items: center; padding: 24px; background: rgba(0,0,0,.72); }
+.url-import-modal { width: min(560px,100%); max-height: 90vh; overflow: auto; padding: 22px; border: var(--edge) solid var(--accent); border-radius: var(--r); color: var(--paper); background: var(--rail,var(--panel)); box-shadow: var(--shadow-hard); }
+.url-import-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+.url-import-head span { color: var(--muted); font: 10px var(--font-mono); letter-spacing: .12em; }
+.url-import-head h2 { margin: 6px 0 0; font-size: 20px; font-weight: 600; }
+.url-import-head > button { border: 0; color: var(--muted); background: transparent; font-size: 24px; line-height: 1; }
+.url-import-head > button:disabled { cursor: not-allowed; opacity: .5; }
+.url-import-modal form { display: grid; gap: 8px; }
+.url-import-modal label { color: var(--muted); font-size: 12px; }
+.url-import-modal textarea { width: 100%; min-width: 0; padding: 9px 10px; border: var(--edge) solid var(--line); border-radius: var(--r); outline: 0; color: var(--paper); background: var(--bg); font: 12px/1.6 var(--font-mono); resize: vertical; }
+.url-import-modal textarea:focus { border-color: var(--accent); }
+.url-import-hint { margin: 0; color: var(--weak); font-size: 11px; line-height: 1.6; }
+.url-import-cookies-toggle { justify-self: start; padding: 4px 0; border: 0; color: var(--muted); background: transparent; font-size: 12px; }
+.url-import-cookies-toggle:hover { color: var(--accent); }
+.url-import-cookies { display: grid; gap: 7px; padding: 12px; border: var(--edge) solid var(--line); background: var(--bg); }
+.url-import-error { margin: 4px 0 0; color: var(--fault); font-size: 12px; line-height: 1.65; overflow-wrap: anywhere; }
+.url-import-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 8px; padding-top: 13px; border-top: var(--edge) solid var(--line); }
+
+@media (max-width: 720px) {
+  .url-import-backdrop { padding: 12px; }
+  .url-import-modal { max-height: 86vh; padding: 16px; }
+  .url-import-actions .hud-button-wrapper { flex: 1 1 auto; }
+  .url-import-actions .hud-button-content { width: 100%; min-height: 40px; }
+}

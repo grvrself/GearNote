@@ -22,7 +22,7 @@
 .hud-capture-actions { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
 
 @media (max-width: 1150px) {
-  .hud-command-strip { gap: var(--space-2); }
+  .hud-command-strip { flex-wrap: wrap; gap: var(--space-2); }
   .hud-browser-control > span { display: none; }
   .hud-extension-state { padding: 0 var(--space-2); }
 }

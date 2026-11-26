@@ -15,6 +15,7 @@ mod process_status;
 mod secret;
 mod storage;
 mod storyboard;
+mod url_capture;
 mod notes;
 mod note_design;
 mod note_compose;
@@ -57,6 +58,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![open_extension_folder, plugins::get_toolchain_status, plugins::get_workspace_info, plugins::open_workspace_path,
             skills::install_skill_from_github, skills::list_installed_skills, skills::get_skill_prompt, skills::uninstall_skill, storage::list_records, storage::delete_record, storage::list_capture_jobs, storage::dismiss_capture_job, storage::query_record_page, storage::get_record, storage::query_record_segments, storage::get_bridge_status,
             storyboard::analyze_video_storyboard, storyboard::get_storyboard_image, storyboard::open_video_at,
+            url_capture::capture_from_url,
             agent::get_agent_status, agent::save_agent_config, agent::save_explore_references, agent::save_context_tier, agent::save_reading_budget, agent::stop_agent_reading, agent::save_semantic_retrieval, agent::test_semantic_retrieval, agent::test_agent_tools, agent::list_chat_messages, agent::get_chat_state,
             agent::create_chat_session, agent::switch_chat_session, agent::rename_chat_session,
             agent::delete_chat_session, agent::set_chat_references, agent::resolve_library_search, agent::resolve_command_proposal, agent::save_working_context, agent::confirm_project_memory, agent::revoke_project_memory, agent::compact_chat_context, agent::preview_agent_context, agent::ask_agent,

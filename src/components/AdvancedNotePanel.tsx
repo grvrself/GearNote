@@ -6,6 +6,7 @@ import type { Note, NoteEditProposal } from '../notes'
 import type { KnowledgeRecord } from '../data'
 import { getPendingNoteEdit, proposeNoteRestructure, reviseNoteRestructure } from '../notes'
 import { captureNoteFrame, deleteNoteDesign, exportNoteDesign, getNoteDesign, getNoteFrameImage, listNoteFrames, previewNoteDesign, saveNoteDesign, type NoteDesign, type NoteFrameOption, type NoteImage, type NoteTheme } from '../note-design'
+import { useConfirm } from '../hooks/useConfirm'
 import { HudButton } from './HudButton'
 import './advanced-note.css'
 
@@ -46,6 +47,7 @@ function FramePickerItem({ noteId, frame, title, selected, onToggle }: { noteId:
 }
 
 export function AdvancedNotePanel({ note, records, onClose, returnLabel = '返回笔记', onRevealRecord, onApplyEdit, onRejectEdit, onUndoEdit, onNoteChanged }: Props) {
+  const { confirm, confirmDialog } = useConfirm()
   const [theme, setTheme] = useState<NoteTheme>('mono')
   const [html, setHtml] = useState('')
   const [saved, setSaved] = useState<NoteDesign | null>(null)
@@ -217,7 +219,7 @@ export function AdvancedNotePanel({ note, records, onClose, returnLabel = '返�
     catch (cause) { setError(String(cause)) } finally { setBusy(false) }
   }
   const deleteDesign = async () => {
-    if (!saved || !window.confirm('删除这篇笔记的高级展示版？普通笔记正文和已保存图片会保留。')) return
+    if (!saved || !await confirm({ title: '删除高级版', message: '删除这篇笔记的高级展示版？普通笔记正文和已保存图片会保留。', confirmLabel: '删除', danger: true })) return
     setBusy(true); setError(''); setNotice(''); setExportPath('')
     try {
       await deleteNoteDesign(note.id)
@@ -286,5 +288,6 @@ export function AdvancedNotePanel({ note, records, onClose, returnLabel = '返�
       <iframe ref={focusFrame} className="advanced-note-focus-frame" sandbox="allow-same-origin" srcDoc={html} title={'《' + note.title + '》专注阅读'} onLoad={event => focusFrameLoaded(event.currentTarget)} />
       <footer className="advanced-note-focus-bottom"><span>字数 {Array.from(note.body).filter(char => !/\s|[，。！？、；：,.!?;:]/u.test(char)).length.toLocaleString('zh-CN')} · 来源 {note.sources.length}</span><span>{focusError ? '系统全屏未启用 · 窗口内阅读' : '本地阅读'} · {savedCurrentTheme ? '已保存' : '待保存'}</span></footer>
     </div>, document.body)}
+    {confirmDialog}
   </section>
 }

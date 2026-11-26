@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { recordFixtures, type KnowledgeRecord, type RecordType } from '../data'
 import { isTauri } from '@tauri-apps/api/core'
 import { getRecord, queryRecordPage, queryRecordSegments, type CaptureJob, type RecordPage, type RecordSegment } from '../records'
+import { useConfirm } from '../hooks/useConfirm'
 import { ChamferCard } from './ChamferCard'
 import { HudButton } from './HudButton'
 import { PanelHeading } from './PanelHeading'
@@ -57,9 +58,10 @@ type Props = {
   onAskFrame: (recordId: string, atSeconds: number) => Promise<void>
   onDeleteRecord: (record: KnowledgeRecord) => Promise<void>
   onDismissCaptureJob?: (id: string) => Promise<void>
+  onOpenUrlImport?: () => void
 }
 
-export function HistoryPanel({ records = recordFixtures, captureJobs = [], selectedId, referencedIds, focusRequest, onSelect, onReference, onRemoveReference, onCollapse, miniAvailable, onOpenMini, searchRef, onRecordsChanged, onAskFrame, onDeleteRecord, onDismissCaptureJob }: Props) {
+export function HistoryPanel({ records = recordFixtures, captureJobs = [], selectedId, referencedIds, focusRequest, onSelect, onReference, onRemoveReference, onCollapse, miniAvailable, onOpenMini, searchRef, onRecordsChanged, onAskFrame, onDeleteRecord, onDismissCaptureJob, onOpenUrlImport }: Props) {
   const [filter, setFilter] = useState<Filter>('all')
   const [query, setQuery] = useState('')
   const [activeMoment, setActiveMoment] = useState<number | null>(null)
@@ -134,6 +136,7 @@ export function HistoryPanel({ records = recordFixtures, captureJobs = [], selec
             <button key={id} type="button" aria-pressed={filter === id} onClick={() => { setFilter(id); setPageOffset(0) }}>{filter === id && <span aria-hidden="true">⌜</span>}{label}</button>)}
         </div>
         <HudButton type="button" disabled={!miniAvailable} onClick={onOpenMini}>□ 小窗模式</HudButton>
+        {onOpenUrlImport && <HudButton type="button" onClick={onOpenUrlImport}>＋ 导入链接</HudButton>}
       </div>
       <label className="history-search">
         <span className="history-search-label">搜索</span>
@@ -193,6 +196,7 @@ type CardProps = {
 }
 
 function RecordCard({ record, expanded, referenced, activeMoment, onToggle, onMoment, onReference, onRecordsChanged, onAskFrame, onDeleteRecord }: CardProps) {
+  const { confirm, confirmDialog } = useConfirm()
   const [sourceMessage, setSourceMessage] = useState('')
   const [deleting, setDeleting] = useState(false)
   const [fullRecord, setFullRecord] = useState<KnowledgeRecord | null>(null)
@@ -227,7 +231,7 @@ function RecordCard({ record, expanded, referenced, activeMoment, onToggle, onMo
     }
   }
   const deleteSavedRecord = async () => {
-    if (!window.confirm(`确定删除《${record.title}》吗？资料正文和字幕将从资料库移除，已有笔记或对话中的来源链接可能失效。`)) return
+    if (!await confirm({ title: '删除资料', message: `确定删除《${record.title}》吗？资料正文和字幕将从资料库移除，已有笔记或对话中的来源链接可能失效。`, confirmLabel: '删除', danger: true })) return
     setDeleting(true)
     setSourceMessage('')
     try { await onDeleteRecord() }
@@ -275,5 +279,6 @@ function RecordCard({ record, expanded, referenced, activeMoment, onToggle, onMo
       {record.status === 'fault' && record.type === 'video' && !record.demo && <p className="record-source-message">请返回视频页面，再次点击扩展图标重试。</p>}
       {sourceMessage && <p className="record-source-message" role="status">{sourceMessage}</p>}
     </div>
+    {confirmDialog}
   </ChamferCard>
 }

@@ -4,6 +4,7 @@ import type { KnowledgeRecord } from '../data'
 import type { Note } from '../notes'
 import { analyzeVideoStoryboard } from '../records'
 import { getSkillPrompt, installSkillFromGithub, listInstalledSkills, uninstallSkill, type SkillManifest } from '../extensions'
+import { useConfirm } from '../hooks/useConfirm'
 import { GearIcon } from './GearIcon'
 import { MechanicalGear } from './MechanicalGear'
 import { HudButton } from './HudButton'
@@ -32,6 +33,7 @@ const officialSkills: OfficialSkill[] = [
 ]
 
 export function SkillsPanel({ records, notes, agentAvailable, onRunQuestion, onCompose, onOpenStudio, onRecordsChanged, onRevealRecord, onOpenAgentSetup }: Props) {
+  const { confirm, confirmDialog } = useConfirm()
   const desktop = isTauri()
   const [active, setActive] = useState('official:summary')
   const [filter, setFilter] = useState<'all' | 'official' | 'community'>('all')
@@ -135,7 +137,7 @@ export function SkillsPanel({ records, notes, agentAvailable, onRunQuestion, onC
   }
 
   const remove = async (skill: SkillManifest) => {
-    if (!window.confirm(`卸载《${skill.name}》${skill.version}？不会删除它产生的对话或笔记。`)) return
+    if (!await confirm({ title: '卸载技能包', message: `卸载《${skill.name}》${skill.version}？不会删除它产生的对话或笔记。`, confirmLabel: '卸载', danger: true })) return
     setBusy(true); setError('')
     try {
       await uninstallSkill(skill.id, skill.version)
@@ -179,6 +181,7 @@ export function SkillsPanel({ records, notes, agentAvailable, onRunQuestion, onC
       {installError && <p className="extension-error" role="alert">{installError}</p>}
       <div className="extension-modal-actions"><HudButton type="button" disabled={installing} onClick={() => setInstallOpen(false)}>取消</HudButton><HudButton variant="primary" type="button" disabled={installing || !installUrl.trim()} onClick={() => { void install() }}>{installing ? '正在下载与校验…' : '校验并安装'}</HudButton></div>
     </section></div>}
+    {confirmDialog}
   </section>
 }
 

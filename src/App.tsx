@@ -9,9 +9,10 @@ import { SkillsPanel } from './components/SkillsPanel'
 import { SettingsPanel } from './components/SettingsPanel'
 import { Sidebar, type SettingsSection, type View } from './components/Sidebar'
 import { Topbar, type BrowserChoice } from './components/Topbar'
+import { UrlImportModal } from './components/UrlImportModal'
 import { recordFixtures } from './data'
 import type { ChatFrame } from './chat-data'
-import { deleteRecord, dismissCaptureJob, listCaptureJobs, loadSavedRecords } from './records'
+import { deleteRecord, dismissCaptureJob, listCaptureJobs, loadSavedRecords, type CaptureResult } from './records'
 import { useRecords } from './hooks/useRecords'
 import { exportNote, rejectNoteEdit } from './notes'
 import { useNotes } from './hooks/useNotes'
@@ -30,6 +31,8 @@ export default function App() {
   const [composeRequest, setComposeRequest] = useState<{ ids: string[]; nonce: number } | null>(null)
   const [studioNoteId, setStudioNoteId] = useState<string | null>(null)
   const [miniError, setMiniError] = useState('')
+  const [urlImportOpen, setUrlImportOpen] = useState(false)
+  const [importNotice, setImportNotice] = useState('')
   const searchRef = useRef<HTMLInputElement>(null)
   const { savedRecords, setSavedRecords, captureJobs, setCaptureJobs, bridgeStatus } = useRecords(setMiniError, id => {
     setView('chat')
@@ -79,6 +82,15 @@ export default function App() {
     setRightOpen(true)
     setFocusRequest({ id, atSeconds })
   }, [])
+
+  const handleUrlImported = async (result: CaptureResult) => {
+    setSavedRecords(await loadSavedRecords())
+    setView('chat')
+    setSelectedId(result.record.id)
+    setRightOpen(true)
+    setFocusRequest({ id: result.record.id })
+    setImportNotice(result.alreadySaved ? '资料库已有相同内容，已定位到该记录' : `已导入《${result.record.title}》`)
+  }
   const { miniOpening, handleOpenMini } = useMiniWindow(referencedIds, setReferencedIds, revealRecord, setMiniError)
   const miniAvailable = isTauri() && !miniOpening
 
@@ -102,8 +114,10 @@ export default function App() {
   }, [openSearch])
 
   return <div className="app-shell">
-    <Topbar sectionId="sec-01" browser={browser} onBrowserChange={setBrowser} extensionConnected={extensionConnected} onOpenExtensionSetup={() => setView('plugins')} />
+    <Topbar sectionId="sec-01" browser={browser} onBrowserChange={setBrowser} extensionConnected={extensionConnected} onOpenExtensionSetup={() => setView('plugins')} onOpenUrlImport={() => setUrlImportOpen(true)} />
     {miniError && <div className="app-error" role="alert"><span>{miniError}</span><button type="button" aria-label="关闭错误提示" onClick={() => setMiniError('')}>×</button></div>}
+    {importNotice && <div className="app-notice" role="status"><span>{importNotice}</span><button type="button" aria-label="关闭导入提示" onClick={() => setImportNotice('')}>×</button></div>}
+    {urlImportOpen && <UrlImportModal onClose={() => setUrlImportOpen(false)} onImported={handleUrlImported} />}
 
     <div className={`workspace ${showHistory ? '' : 'without-history'}`}>
       <Sidebar view={view} sessions={sessions} activeSessionId={activeSessionId} sessionBusy={sending} sessionError={sessionError} onViewChange={changeView} onCreateSession={() => { void manageSession(createChatSession) }} onSwitchSession={id => { void manageSession(() => switchChatSession(id)) }} onDeleteSession={id => { void manageSession(() => deleteChatSession(id)) }} />
@@ -113,7 +127,7 @@ export default function App() {
         <div className="notes-host" hidden={view !== 'library' && view !== 'studio'}><NotesPanel designOpen={view === 'studio'} onDesignOpenChange={open => setView(open ? 'studio' : 'library')} composeRequest={composeRequest} onComposeRequestConsumed={() => setComposeRequest(null)} requestedNoteId={studioNoteId} notes={notes} folders={noteFolders} onCreateFolder={addNoteFolder} onRenameFolder={changeNoteFolderName} onDeleteFolder={removeNoteFolder} records={records} incomingDraft={noteDraft} onDraftConsumed={() => setNoteDraft(null)} onSave={persistNote} onDelete={removeNote} onExport={exportNote} onRevealRecord={revealRecord} onApplyEdit={applyNoteEditAndRefresh} onUndoEdit={undoNoteEditAndRefresh} onRejectEdit={rejectNoteEdit} /></div>
       </main>
 
-      {showHistory && <HistoryPanel records={records} onAskFrame={askStoryboardFrame} captureJobs={captureJobs} selectedId={selectedId} referencedIds={referencedIds} focusRequest={focusRequest} onSelect={id => setSelectedId(current => current === id ? null : id)} onReference={id => setReferencedIds(current => current.includes(id) ? current : [...current, id])} onRemoveReference={id => setReferencedIds(current => current.filter(value => value !== id))} onCollapse={() => setRightOpen(false)} miniAvailable={miniAvailable} onOpenMini={() => { void handleOpenMini() }} searchRef={searchRef} onRecordsChanged={async () => setSavedRecords(await loadSavedRecords())} onDeleteRecord={async record => { await deleteRecord(record.id); setSavedRecords(current => current.filter(item => item.id !== record.id)); setSelectedId(current => current === record.id ? null : current); setReferencedIds(current => current.filter(id => id !== record.id)) }} onDismissCaptureJob={async id => { try { await dismissCaptureJob(id); setCaptureJobs(await listCaptureJobs()) } catch { setMiniError('关闭采集错误失败。') } }} />}
+      {showHistory && <HistoryPanel records={records} onAskFrame={askStoryboardFrame} captureJobs={captureJobs} selectedId={selectedId} referencedIds={referencedIds} focusRequest={focusRequest} onSelect={id => setSelectedId(current => current === id ? null : id)} onReference={id => setReferencedIds(current => current.includes(id) ? current : [...current, id])} onRemoveReference={id => setReferencedIds(current => current.filter(value => value !== id))} onCollapse={() => setRightOpen(false)} miniAvailable={miniAvailable} onOpenUrlImport={() => setUrlImportOpen(true)} onOpenMini={() => { void handleOpenMini() }} searchRef={searchRef} onRecordsChanged={async () => setSavedRecords(await loadSavedRecords())} onDeleteRecord={async record => { await deleteRecord(record.id); setSavedRecords(current => current.filter(item => item.id !== record.id)); setSelectedId(current => current === record.id ? null : current); setReferencedIds(current => current.filter(id => id !== record.id)) }} onDismissCaptureJob={async id => { try { await dismissCaptureJob(id); setCaptureJobs(await listCaptureJobs()) } catch { setMiniError('关闭采集错误失败。') } }} />}
     </div>
   </div>
 }

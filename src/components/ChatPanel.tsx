@@ -4,6 +4,7 @@ import type { KnowledgeRecord } from '../data'
 import type { ChatIntent, ContextPreview, PendingChoice, PendingLibrarySearch, PendingChatNoteEdit, PendingCommand, ProjectMemory, WorkingContext, ReadContinuationSummary } from '../agent'
 import { getChatFrameImage, stopAgentReading } from '../agent'
 import { isCaptureCommand } from '../capture-command'
+import { useConfirm } from '../hooks/useConfirm'
 import { CapturedFrame } from './CapturedFrame'
 import { ChamferCard } from './ChamferCard'
 import { GearDivider, GearIcon, PaperPlaneIcon } from './GearIcon'
@@ -112,6 +113,7 @@ function StreamingRun({ streaming }: { streaming: ChatStreaming }) {
 
 export function ChatPanel({ records, frameToAttach = null, onFrameAttached, pendingChoice = null, pendingLibrarySearch = null, onResolveLibrarySearch, pendingChatNoteEdit = null, onResolveChatNoteEdit, pendingCommand = null, onResolveCommand, sessionId, referencedIds, workingContext = { goal: '', completed: '', nextStep: '', updatedAt: '' }, projectMemory = [], compactedSummary = '', compactedCount = 0, historyOpen, agentAvailable, sending = false, streaming = null, suggestingMessageId = null, suggestionErrorId = null, error = '', onContinueReading, onSend, onPreviewContext, onOpenAgentSetup, onSummarize, onRemoveReference, onRevealRecord, onToggleHistory, onShowHistory, onCreateNoteDraft, messages = [], compact = false, readContinuation = null }: Props) {
   const [draft, setDraft] = useState('')
+  const { confirm, confirmDialog } = useConfirm()
   const [stoppingReading, setStoppingReading] = useState(false)
   const [stopReadingError, setStopReadingError] = useState('')
   useEffect(() => { if (!streaming?.reading) { setStoppingReading(false); setStopReadingError('') } }, [streaming?.reading])
@@ -228,8 +230,8 @@ export function ChatPanel({ records, frameToAttach = null, onFrameAttached, pend
     if (!sent && sessionIdRef.current === sendingSessionId) setDraft(question)
   }
 
-  const chooseSuggestion = (prompt: string) => {
-    if (draft.trim() && draft.trim() !== prompt && !window.confirm('用这条建议替换当前输入内容？')) return
+  const chooseSuggestion = async (prompt: string) => {
+    if (draft.trim() && draft.trim() !== prompt && !await confirm({ title: '替换输入内容', message: '用这条建议替换当前输入内容？', confirmLabel: '替换' })) return
     setDraft(prompt)
     setContextPreview(null)
     setContextPreviewOpen(false)
@@ -299,7 +301,7 @@ export function ChatPanel({ records, frameToAttach = null, onFrameAttached, pend
           })}</div></div>}
           {message.id === latestAgentId && suggestingMessageId === message.id && <p className="chat-suggestion-status" role="status">正在准备下一步建议…</p>}
           {message.id === latestAgentId && suggestionErrorId === message.id && <p className="chat-suggestion-status">本轮建议暂未生成，回答不受影响。</p>}
-          {message.id === latestAgentId && Boolean(message.suggestions?.length) && <div className="chat-suggestions"><span>接下来可以</span><div>{message.suggestions?.map(suggestion => <button type="button" key={suggestion.prompt} disabled={sending} title={suggestion.prompt} onClick={() => chooseSuggestion(suggestion.prompt)}>{suggestion.label} ↗</button>)}</div></div>}
+          {message.id === latestAgentId && Boolean(message.suggestions?.length) && <div className="chat-suggestions"><span>接下来可以</span><div>{message.suggestions?.map(suggestion => <button type="button" key={suggestion.prompt} disabled={sending} title={suggestion.prompt} onClick={() => { void chooseSuggestion(suggestion.prompt) }}>{suggestion.label} ↗</button>)}</div></div>}
           {pendingChoice?.status === 'open' && pendingChoice.messageId === message.id && <div className="chat-choice" role="group" aria-label={pendingChoice.prompt}>
             {pendingChoice.options.map(option => <button type="button" key={option.id} disabled={sending || Boolean(streaming) || choiceSubmitting || !agentAvailable} onClick={() => { void selectChoice(option.label) }}><strong>{option.label}{pendingChoice.recommended === option.id && <span className="chat-choice-recommended">推荐</span>}</strong>{option.detail && <span>{option.detail}</span>}</button>)}
             <small>也可以在下方输入自己的选择；发送后会按你的回答继续。</small>
@@ -460,5 +462,6 @@ export function ChatPanel({ records, frameToAttach = null, onFrameAttached, pend
         </div>
       </div>
     </div>
+    {confirmDialog}
   </section>
 }

@@ -1,5 +1,6 @@
 import { useState, type ButtonHTMLAttributes, type ReactNode } from 'react'
 import type { ChatSessionSummary } from '../agent'
+import { useConfirm } from '../hooks/useConfirm'
 import { GearIcon } from './GearIcon'
 import './sidebar.css'
 
@@ -70,6 +71,7 @@ type Props = {
 }
 
 export function Sidebar({ view, sessions, activeSessionId, sessionBusy, sessionError, onViewChange, onCreateSession, onSwitchSession, onDeleteSession }: Props) {
+  const { confirm, confirmDialog } = useConfirm()
   const [query, setQuery] = useState('')
   const [sessionListOpen, setSessionListOpen] = useState(false)
   const visibleSessions = sessions.filter(session => session.title.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()))
@@ -96,10 +98,10 @@ export function Sidebar({ view, sessions, activeSessionId, sessionBusy, sessionE
           </li>)}
           {visibleSessions.length === 0 && <li className="session-empty">{sessions.length ? '没有匹配会话' : '暂无会话'}</li>}
         </ul>
-        {activeSession && <div className="session-actions"><button type="button" disabled={sessionBusy} onClick={() => { if (window.confirm(`删除会话“${activeSession.title}”？此操作会删除该会话的对话记录。`)) onDeleteSession(activeSession.id) }}>删除</button></div>}
+        {activeSession && <div className="session-actions"><button type="button" disabled={sessionBusy} onClick={() => { void (async () => { if (await confirm({ title: '删除会话', message: `删除会话“${activeSession.title}”？此操作会删除该会话的对话记录。`, confirmLabel: '删除', danger: true })) onDeleteSession(activeSession.id) })() }}>删除</button></div>}
         {sessionError && <p className="session-error" role="alert">{sessionError}</p>}
       </div>
     </section>
-
+    {confirmDialog}
   </aside>
 }
