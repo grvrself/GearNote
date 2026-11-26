@@ -46,6 +46,7 @@ type Props = {
   onToggleHistory: () => void
   onShowHistory: () => void
   onCreateNoteDraft?: (message: ChatMessage) => void
+  onOpenUrlImport?: () => void
   messages?: ChatMessage[]
   compact?: boolean
   /** 后端续读摘要；按钮须同时满足 hasProgress 与消息匹配，最终有效性仍由后端校验。 */
@@ -54,17 +55,29 @@ type Props = {
 
 const timeFormatter = new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })
 
+type SlashActionId = ChatIntent | 'url_import'
+type SlashEntry = { id: SlashActionId; slash: string; label: string; shortHint: string; aliases: string[] }
+
 const intentEntries: { intent: ChatIntent; slash: string; label: string; shortHint: string; hint: string; aliases: string[] }[] = [
   { intent: 'library_search', slash: '/search', label: '搜资料库', shortHint: '全库搜索标题，确认后加入参考', hint: '在整个资料库搜索标题；结果确认后才加入本轮参考', aliases: ['search', 'library', 'lib', 'sou', 's', '搜', '资料', '搜资料库'] },
   { intent: 'note_edit', slash: '/note', label: '改笔记', shortHint: '生成修改建议，需写明笔记标题', hint: '生成笔记修改建议；确认后才写入。请在问题中写明笔记标题', aliases: ['note', 'edit', 'gai', 'n', '改', '笔记', '改笔记'] },
   { intent: 'command', slash: '/cmd', label: '运行命令', shortHint: '提出 ffmpeg / ffprobe / yt-dlp 提案', hint: '提出 ffmpeg / ffprobe / yt-dlp 命令；确认后才执行', aliases: ['cmd', 'command', 'run', 'ffmpeg', 'ffprobe', 'yt-dlp', 'c', '命令', '运行', '运行命令'] },
 ]
 
-function IntentIcon({ intent }: { intent: ChatIntent }) {
+const urlImportSlashEntry: SlashEntry = {
+  id: 'url_import',
+  slash: '/url',
+  label: '导入链接',
+  shortHint: '链接直采：抓取网页文章或视频字幕并导入资料库',
+  aliases: ['url', 'import', 'link', 'capture', 'web', 'lianjie', 'daoru', 'zhicai', '链接', '导入', '导入链接', '直采', '链接直采'],
+}
+
+function IntentIcon({ intent }: { intent: SlashActionId }) {
   return <svg className="intent-icon" viewBox="0 0 16 16" aria-hidden="true">
     {intent === 'library_search' && <><circle cx="7" cy="7" r="4.2" /><path d="m10.2 10.2 3.3 3.3" /></>}
     {intent === 'note_edit' && <path d="M3 13h10M4.5 10.2 10.8 3.9l1.8 1.8-6.3 6.3-2.2.4z" />}
     {intent === 'command' && <path d="M3 4.5 6.5 8 3 11.5M8 11.5h5" />}
+    {intent === 'url_import' && <path d="M8 2.5v7m-2.5-2.5L8 9.5l2.5-2.5M3.5 11.5v1.5h9v-1.5" />}
   </svg>
 }
 
@@ -111,7 +124,7 @@ function StreamingRun({ streaming }: { streaming: ChatStreaming }) {
   </div>
 }
 
-export function ChatPanel({ records, frameToAttach = null, onFrameAttached, pendingChoice = null, pendingLibrarySearch = null, onResolveLibrarySearch, pendingChatNoteEdit = null, onResolveChatNoteEdit, pendingCommand = null, onResolveCommand, sessionId, referencedIds, workingContext = { goal: '', completed: '', nextStep: '', updatedAt: '' }, projectMemory = [], compactedSummary = '', compactedCount = 0, historyOpen, agentAvailable, sending = false, streaming = null, suggestingMessageId = null, suggestionErrorId = null, error = '', onContinueReading, onSend, onPreviewContext, onOpenAgentSetup, onSummarize, onRemoveReference, onRevealRecord, onToggleHistory, onShowHistory, onCreateNoteDraft, messages = [], compact = false, readContinuation = null }: Props) {
+export function ChatPanel({ records, frameToAttach = null, onFrameAttached, pendingChoice = null, pendingLibrarySearch = null, onResolveLibrarySearch, pendingChatNoteEdit = null, onResolveChatNoteEdit, pendingCommand = null, onResolveCommand, sessionId, referencedIds, workingContext = { goal: '', completed: '', nextStep: '', updatedAt: '' }, projectMemory = [], compactedSummary = '', compactedCount = 0, historyOpen, agentAvailable, sending = false, streaming = null, suggestingMessageId = null, suggestionErrorId = null, error = '', onContinueReading, onSend, onPreviewContext, onOpenAgentSetup, onSummarize, onRemoveReference, onRevealRecord, onToggleHistory, onShowHistory, onCreateNoteDraft, onOpenUrlImport, messages = [], compact = false, readContinuation = null }: Props) {
   const [draft, setDraft] = useState('')
   const { confirm, confirmDialog } = useConfirm()
   const [stoppingReading, setStoppingReading] = useState(false)
@@ -151,10 +164,14 @@ export function ChatPanel({ records, frameToAttach = null, onFrameAttached, pend
   const canSend = agentAvailable || captureDraft
   const streamingCapture = streaming ? (streaming.capture ?? isCaptureCommand(streaming.question)) : false
   const intentsDisabled = sending || !agentAvailable || Boolean(attachedFrame) || selectedMessageIds.length > 0 || activeDeepMode
-  const slashMatch = !intentsDisabled ? draft.match(/^\/([^\s]*)$/) : null
+  const availableSlashEntries: SlashEntry[] = [
+    ...(!intentsDisabled ? intentEntries.map(entry => ({ id: entry.intent, slash: entry.slash, label: entry.label, shortHint: entry.shortHint, aliases: entry.aliases })) : []),
+    ...(!sending && onOpenUrlImport ? [urlImportSlashEntry] : []),
+  ]
+  const slashMatch = availableSlashEntries.length > 0 ? draft.match(/^\/([^\s]*)$/) : null
   const slashQuery = slashMatch?.[1].toLowerCase() ?? ''
   const slashOptions = slashMatch
-    ? intentEntries.filter(entry =>
+    ? availableSlashEntries.filter(entry =>
         !slashQuery
         || entry.slash.slice(1).includes(slashQuery)
         || entry.label.toLowerCase().includes(slashQuery)
@@ -176,13 +193,17 @@ export function ChatPanel({ records, frameToAttach = null, onFrameAttached, pend
     draftRef.current?.focus()
   }
 
-  const applySlashIntent = (chosen: ChatIntent) => {
-    setIntent(chosen)
+  const applySlashAction = (chosen: SlashActionId) => {
     setDraft('')
     setSlashDismissed(false)
     setSlashIndex(0)
     setContextPreview(null)
     setContextPreviewOpen(false)
+    if (chosen === 'url_import') {
+      onOpenUrlImport?.()
+      return
+    }
+    setIntent(chosen)
     draftRef.current?.focus()
   }
 
@@ -367,17 +388,17 @@ export function ChatPanel({ records, frameToAttach = null, onFrameAttached, pend
       {slashOpen && <div className="slash-menu" id="composer-slash-menu" role="listbox" aria-label="斜杠命令菜单">
         <div className="slash-menu-head"><span>操作模式</span><span>↑↓ 选择 · Enter 确认 · Esc 关闭</span></div>
         {slashOptions.map((entry, index) => <button
-          key={entry.intent}
-          id={`slash-option-${entry.intent}`}
+          key={entry.id}
+          id={`slash-option-${entry.id}`}
           type="button"
           role="option"
           aria-selected={index === activeSlashIndex}
           className={`slash-option${index === activeSlashIndex ? ' is-active' : ''}`}
           onMouseDown={event => event.preventDefault()}
           onMouseEnter={() => setSlashIndex(index)}
-          onClick={() => applySlashIntent(entry.intent)}
+          onClick={() => applySlashAction(entry.id)}
         >
-          <IntentIcon intent={entry.intent} />
+          <IntentIcon intent={entry.id} />
           <strong>{entry.label}</strong>
           <code>{entry.slash}</code>
           <span>{entry.shortHint}</span>
@@ -390,7 +411,7 @@ export function ChatPanel({ records, frameToAttach = null, onFrameAttached, pend
         readOnly={sending}
         aria-expanded={slashOpen || undefined}
         aria-controls={slashOpen ? 'composer-slash-menu' : undefined}
-        aria-activedescendant={slashOpen ? `slash-option-${slashOptions[activeSlashIndex].intent}` : undefined}
+        aria-activedescendant={slashOpen ? `slash-option-${slashOptions[activeSlashIndex].id}` : undefined}
         onChange={event => {
           const next = event.target.value
           setDraft(next)
@@ -414,7 +435,7 @@ export function ChatPanel({ records, frameToAttach = null, onFrameAttached, pend
             setSlashIndex(current => (current - 1 + slashOptions.length) % slashOptions.length)
           } else if ((event.key === 'Enter' || event.key === 'Tab') && !event.shiftKey && !event.altKey && !event.metaKey && !event.nativeEvent.isComposing) {
             event.preventDefault()
-            applySlashIntent(slashOptions[activeSlashIndex].intent)
+            applySlashAction(slashOptions[activeSlashIndex].id)
           } else if (event.key === 'Escape') {
             event.preventDefault()
             setSlashDismissed(true)

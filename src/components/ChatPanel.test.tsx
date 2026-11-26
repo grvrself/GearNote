@@ -184,6 +184,45 @@ describe('ChatPanel 关键交互', () => {
     expect(screen.queryByRole('listbox', { name: '斜杠命令菜单' })).not.toBeInTheDocument()
   })
 
+  it('传入 onOpenUrlImport 时斜杠菜单包含链接直采并直接触发导入弹窗', () => {
+    const onSend = vi.fn().mockResolvedValue(true)
+    const onOpenUrlImport = vi.fn()
+    render(<ChatPanel {...panelProps({ onSend, onOpenUrlImport })} />)
+
+    const input = screen.getByLabelText('向 Agent 提问')
+    fireEvent.change(input, { target: { value: '/' } })
+    const listbox = screen.getByRole('listbox', { name: '斜杠命令菜单' })
+    expect(within(listbox).getAllByRole('option')).toHaveLength(4)
+
+    fireEvent.change(input, { target: { value: '/直采' } })
+    const filtered = screen.getByRole('listbox', { name: '斜杠命令菜单' })
+    expect(within(filtered).getAllByRole('option')).toHaveLength(1)
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(onOpenUrlImport).toHaveBeenCalledTimes(1)
+    expect(onSend).not.toHaveBeenCalled()
+    expect(input).toHaveValue('')
+
+    fireEvent.change(input, { target: { value: '/url' } })
+    fireEvent.click(screen.getByRole('option', { name: /导入链接/ }))
+    expect(onOpenUrlImport).toHaveBeenCalledTimes(2)
+    expect(input).toHaveValue('')
+  })
+
+  it('未配置 Agent 时输入 / 仍可通过斜杠菜单触发链接直采', () => {
+    const onOpenUrlImport = vi.fn()
+    render(<ChatPanel {...panelProps({ agentAvailable: false, onOpenUrlImport })} />)
+
+    const input = screen.getByLabelText('向 Agent 提问')
+    fireEvent.change(input, { target: { value: '/' } })
+    const listbox = screen.getByRole('listbox', { name: '斜杠命令菜单' })
+    const options = within(listbox).getAllByRole('option')
+    expect(options).toHaveLength(1)
+    expect(options[0]).toHaveTextContent('导入链接')
+    fireEvent.click(options[0])
+    expect(onOpenUrlImport).toHaveBeenCalledTimes(1)
+    expect(input).toHaveValue('')
+  })
+
   it('结构化提醒按 code 渲染，修改展示文案不影响显示', () => {
     const message: ChatMessage = { ...reply, toolSteps: ['随便改写的步骤文案'], outcome: {
       kind: 'answer', answer: 'partial',
