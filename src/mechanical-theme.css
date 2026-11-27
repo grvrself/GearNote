@@ -14,8 +14,6 @@ body[data-theme='hud'] {
   --accent-ink: #0B0C0E;
 }
 body[data-theme='hud'][data-window='main'] {
-  --titlebar-height: 46px;
-  --commandbar-height: 62px;
   background: var(--bg);
 }
 body[data-theme='hud'][data-window='main']::before {
@@ -28,23 +26,22 @@ body[data-theme='hud'] .left-sidebar,
 body[data-theme='hud'] .history-panel { background: linear-gradient(180deg,#0B0E12,#090C10); }
 body[data-theme='hud'] .main-panel { background: var(--bg); }
 
-/* 顶栏与品牌 */
+/* 顶栏与品牌：单行 46px */
 body[data-theme='hud'] .mono-brand-gear { display: inline-flex; margin-left: 0; color: var(--accent); filter: drop-shadow(0 0 5px rgba(255,212,0,.25)); }
-body[data-theme='hud'] .hud-title-strip { position: relative; border-bottom-color: rgba(255,212,0,.24); background: #07090C; }
-body[data-theme='hud'] .hud-title-strip::after { content: ''; position: absolute; bottom: -1px; left: 0; width: 180px; height: 1px; background: var(--accent); box-shadow: 0 0 10px rgba(255,212,0,.35); }
-body[data-theme='hud'] .hud-title-name { font: 600 16px var(--font-label); letter-spacing: .12em; }
-body[data-theme='hud'] .hud-title-serial { padding-left: 14px; border-left: 1px solid var(--line); color: var(--muted); font: 10px var(--font-mono); }
+body[data-theme='hud'] .hud-topbar { position: relative; border-bottom-color: rgba(255,212,0,.24); background: linear-gradient(90deg,#0B0E12,#0E1217 55%,#0B0E12); }
+body[data-theme='hud'] .hud-topbar::after { content: ''; position: absolute; bottom: -1px; left: 0; width: 180px; height: 1px; background: var(--accent); box-shadow: 0 0 10px rgba(255,212,0,.35); }
+body[data-theme='hud'] .hud-title-name { font: 600 14px var(--font-label); letter-spacing: .12em; }
+body[data-theme='hud'] .hud-title-serial { padding-left: 12px; border-left: 1px solid var(--line); color: var(--muted); font: 10px var(--font-mono); }
 body[data-theme='hud'] .hud-title-section { color: var(--weak); }
-body[data-theme='hud'] .hud-command-strip { background: linear-gradient(90deg,#0B0E12,#0E1217 55%,#0B0E12); }
-body[data-theme='hud'] .hud-extension-mark { background: var(--accent); box-shadow: 0 0 8px rgba(255,212,0,.35); }
-body[data-theme='hud'] .hud-browser-control select,
-body[data-theme='hud'] .hud-extension-state { background: #090C10; }
+body[data-theme='hud'] .hud-bridge-pill[data-connected='true'] .hud-extension-mark { background: var(--accent); border-color: var(--accent); box-shadow: 0 0 8px rgba(255,212,0,.35); }
+body[data-theme='hud'] .hud-browser-control select { background: #090C10; }
+body[data-theme='hud'] .hud-bridge-pill { background: #090C10; }
 
 /* 独立机械元素，mono 下不显示 */
 .mech-gear, .mech-command-gears, .mech-motion-toggle, .mech-train { display: none; }
 body[data-theme='hud'] .mech-gear { display: inline-flex; align-items: center; justify-content: center; flex: none; pointer-events: none; }
 body[data-theme='hud'] .mech-gear > svg { display: block; width: 100%; height: 100%; transform-origin: center; }
-body[data-theme='hud'] .mech-command-gears { display: flex; align-items: center; flex: 1; gap: 9px; max-width: 270px; margin: 0 20px; color: #53606B; }
+body[data-theme='hud'] .mech-command-gears { display: flex; align-items: center; flex: 1; gap: 9px; max-width: 270px; margin: 0 20px; color: #53606B; pointer-events: none; }
 body[data-theme='hud'] .mech-command-gears .mech-gear { width: 16px; height: 16px; }
 body[data-theme='hud'] .mech-command-gears .mech-gear:nth-of-type(2) { color: var(--accent); }
 body[data-theme='hud'] .mech-command-gears > i { height: 1px; flex: 1; background: repeating-linear-gradient(90deg,#35404A 0 5px,transparent 5px 9px); }
@@ -61,7 +58,14 @@ body[data-theme='hud'] .mono-workspace-gear { display: flex; align-items: center
 body[data-theme='hud'] .mono-workspace-gear::before,
 body[data-theme='hud'] .mono-workspace-gear::after { content: ''; flex: 1; height: 1px; background: linear-gradient(90deg,transparent,rgba(255,212,0,.3),transparent); }
 body[data-theme='hud'] .mono-workspace-gear .gear-icon { margin: 0 8px; }
-body[data-theme='hud'] .side-button-wrapper[data-active='true'] .side-button-content { background: linear-gradient(90deg,rgba(255,212,0,.12),rgba(255,212,0,.025) 68%,transparent); }
+body[data-theme='hud'] .side-button-wrapper[data-active='true'] { filter: drop-shadow(0 0 10px rgba(252,238,10,.28)); }
+body[data-theme='hud'] .side-button-wrapper[data-active='true'] .side-button-border,
+body[data-theme='hud'] .side-button-wrapper[data-active='true'] .side-button-content { -webkit-clip-path: polygon(10px 0, calc(100% - 10px) 0, 100% 10px, 100% calc(100% - 10px), calc(100% - 10px) 100%, 10px 100%, 0 calc(100% - 10px), 0 10px); clip-path: polygon(10px 0, calc(100% - 10px) 0, 100% 10px, 100% calc(100% - 10px), calc(100% - 10px) 100%, 10px 100%, 0 calc(100% - 10px), 0 10px); }
+body[data-theme='hud'] .side-button-wrapper[data-active='true'] .side-button-border { background: #FCEE0A; }
+body[data-theme='hud'] .side-button-wrapper[data-active='true'] .side-button-content { color: #07080A; background: #FCEE0A; font-weight: 700; }
+body[data-theme='hud'] .side-button-wrapper[data-active='true'] .sidebar-icon,
+body[data-theme='hud'] .side-button-wrapper[data-active='true'] .side-active-corner { color: #07080A; }
+body[data-theme='hud'] .side-button-wrapper[data-active='true']:not([data-disabled]):hover .side-button-content { color: #07080A; background: #FFF44F; }
 body[data-theme='hud'] .session-row[data-active='true'] .session-select { background: linear-gradient(90deg,rgba(255,212,0,.08),#12161B); }
 body[data-theme='hud'] .side-foot .dot { color: var(--accent); }
 
@@ -137,49 +141,44 @@ body[data-theme='hud'] .note-reader-quote { border-left-color: var(--accent); }
 body[data-theme='hud'] .notes-index-item[data-selected='true'] { border-color: rgba(255,212,0,.18); background: linear-gradient(90deg,rgba(255,212,0,.08),#12171C); }
 body[data-theme='hud'] .notes-index-item[data-selected='true'] { border-left-color: var(--accent); }
 
-/* 高级笔记：五齿轮联动 */
-body[data-theme='hud'] .advanced-studio { background: var(--bg); }
-body[data-theme='hud'] .studio-canvas { background-color: #07090C; background-image: linear-gradient(rgba(139,163,181,.035) 1px,transparent 1px),linear-gradient(90deg,rgba(139,163,181,.035) 1px,transparent 1px),radial-gradient(circle at 50% 45%,rgba(255,212,0,.04),transparent 42%); background-size: 32px 32px,32px 32px,100% 100%; box-shadow: none; }
-body[data-theme='hud'] .studio-canvas::after { content: ''; position: absolute; inset: 0; pointer-events: none; background: radial-gradient(ellipse at 50% 43%,transparent 0,rgba(7,9,12,.12) 48%,rgba(7,9,12,.75) 100%); }
-body[data-theme='hud'] .studio-header { z-index: 3; min-height: 60px; padding: 0 22px; border-bottom-color: rgba(255,212,0,.16); background: rgba(8,11,14,.94); }
+/* 高级笔记：赛博全息表盘舞台（StudioHudDial + U 型警示边界 + 单组切角按钮） */
+body[data-theme='hud'] .advanced-studio { background: #07080A; }
+body[data-theme='hud'] .studio-canvas { background-color: #07080A; background-image: linear-gradient(rgba(255,255,255,.035) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.035) 1px,transparent 1px); background-size: 32px 32px,32px 32px; box-shadow: none; }
+body[data-theme='hud'] .studio-canvas::after { content: ''; position: absolute; inset: 0; pointer-events: none; background: radial-gradient(ellipse at 50% 48%,transparent 48%,rgba(7,8,10,.42) 82%,rgba(7,8,10,.76) 100%); }
+body[data-theme='hud'] .studio-header { z-index: 3; min-height: 60px; padding: 0 22px; border-bottom-color: rgba(252,238,10,.16); background: rgba(7,8,10,.94); }
 body[data-theme='hud'] .studio-header .gear-icon,
-body[data-theme='hud'] .studio-rail > header .gear-icon { color: var(--accent); }
-body[data-theme='hud'] .mech-train { position: absolute; z-index: 1; inset: 60px 0 0; pointer-events: none; }
-body[data-theme='hud'] .mech-train-gear { position: absolute; }
-body[data-theme='hud'] .mech-train-gear.g0 { top: 47%; left: 50%; width: 370px; height: 370px; color: var(--accent); opacity: .16; transform: translate(-50%,-50%); filter: drop-shadow(0 0 14px rgba(255,212,0,.12)); }
-body[data-theme='hud'] .mech-train-gear.g1 { top: 16%; left: 11%; width: 175px; height: 175px; color: #B4C0C9; opacity: .20; }
-body[data-theme='hud'] .mech-train-gear.g2 { top: 21%; right: 7%; width: 205px; height: 205px; color: var(--accent); opacity: .18; }
-body[data-theme='hud'] .mech-train-gear.g3 { bottom: 5%; left: 16%; width: 125px; height: 125px; color: #B4C0C9; opacity: .19; }
-body[data-theme='hud'] .mech-train-gear.g4 { right: 16%; bottom: 6%; width: 105px; height: 105px; color: #B4C0C9; opacity: .16; }
-body[data-theme='hud'] .mech-core-ring { position: absolute; top: 47%; left: 50%; width: 440px; height: 440px; border: 1px dashed rgba(255,212,0,.26); border-radius: 50%; transform: translate(-50%,-50%); }
-body[data-theme='hud'] .mech-core-ring::before,
-body[data-theme='hud'] .mech-core-ring::after { content: ''; position: absolute; border: 1px solid rgba(196,211,224,.08); border-radius: 50%; }
-body[data-theme='hud'] .mech-core-ring::before { inset: 44px; }
-body[data-theme='hud'] .mech-core-ring::after { inset: -45px; border-style: dotted; }
-body[data-theme='hud'] .mech-rpm { position: absolute; top: 18px; right: 22px; color: rgba(255,212,0,.48); font: 9px var(--font-mono); letter-spacing: .14em; }
-body[data-theme='hud'] .mech-rpm::before { content: '●'; margin-right: 7px; }
-body[data-theme='hud'] .studio-center { inset: auto; top: 48%; left: 50%; z-index: 2; display: flex; width: min(570px,80%); gap: 0; transform: translate(-50%,-50%); }
-body[data-theme='hud'] .studio-center > .gear-icon { width: 38px; height: 38px; margin-bottom: 22px; color: var(--accent); filter: drop-shadow(0 0 8px rgba(255,212,0,.25)); }
-body[data-theme='hud'] .studio-center > span { color: var(--accent); font: 10px var(--font-mono); letter-spacing: .18em; }
-body[data-theme='hud'] .studio-center h1 { margin: 14px 0; color: #F2F2ED; font-size: 32px; font-weight: 600; line-height: 1.4; letter-spacing: -.02em; text-shadow: 0 3px 22px #000,0 0 40px rgba(0,0,0,.75); }
-body[data-theme='hud'] .studio-center p { max-width: 440px; margin: 0; color: #A3ABB2; font-size: 13px; line-height: 1.85; text-shadow: 0 2px 8px #000; }
-body[data-theme='hud'] .studio-center-actions { display: flex; justify-content: center; gap: 10px; margin-top: 28px; }
-body[data-theme='hud'] .studio-center-actions button { min-height: 40px; padding: 0 18px; border: 1px solid var(--line-secondary); border-radius: 3px; color: var(--paper); background: #0D1116; font-size: 12px; }
-body[data-theme='hud'] .studio-center-actions button:hover:not(:disabled) { border-color: var(--accent); }
-body[data-theme='hud'] .studio-center-actions .studio-generate { border-color: var(--accent); color: var(--accent-ink); background: var(--accent); box-shadow: 3px 3px 0 #000; clip-path: polygon(0 0,calc(100% - 9px) 0,100% 9px,100% 100%,0 100%); }
-body[data-theme='hud'] .studio-center-actions button:disabled { opacity: .45; cursor: not-allowed; }
-body[data-theme='hud'] .studio-canvas-caption { z-index: 2; left: 26px; bottom: 25px; max-width: 430px; padding-left: 13px; border-left: 2px solid var(--accent); text-shadow: none; }
-body[data-theme='hud'] .studio-canvas-caption > span { color: var(--accent); font: 9px var(--font-mono); letter-spacing: .12em; }
+body[data-theme='hud'] .studio-rail > header .gear-icon { color: #FCEE0A; }
+body[data-theme='hud'] .advanced-studio .mech-train,
+body[data-theme='hud'] .advanced-studio .studio-center > .gear-icon { display: none; }
+body[data-theme='hud'] .studio-center { inset: auto; top: 49%; left: 50%; z-index: 2; display: flex; width: min(680px,84%); gap: 0; padding: 0; background: none; transform: translate(-50%,-50%); }
+body[data-theme='hud'] .studio-center > .gn-eyebrow { padding: 0; border: 0; border-radius: 0; background: transparent; color: rgba(252,238,10,.78); font: 11px var(--font-mono); letter-spacing: .18em; text-transform: uppercase; }
+body[data-theme='hud'] .studio-center h1 { margin: 14px 0 12px; color: #FFFFFF; font-size: 32px; font-weight: 700; line-height: 1.25; letter-spacing: -.02em; text-shadow: none; }
+body[data-theme='hud'] .studio-center p { max-width: 440px; margin: 0; color: #8A8A93; font-size: 12.5px; line-height: 1.75; }
+body[data-theme='hud'] .studio-center-actions { display: flex; justify-content: center; gap: 12px; margin-top: 22px; }
+body[data-theme='hud'] .studio-center-actions button { position: relative; isolation: isolate; min-height: 40px; padding: 0 20px; border: 0; border-radius: 0; background: transparent; font-size: 12px; font-weight: 600; cursor: pointer; transition: filter 160ms ease, color 160ms ease; }
+body[data-theme='hud'] .studio-center-actions .gn-btn-secondary { color: #E4E4E7; filter: none; }
+body[data-theme='hud'] .studio-center-actions button::before,
+body[data-theme='hud'] .studio-center-actions .gn-btn-secondary::after { content: ''; position: absolute; pointer-events: none; z-index: -1; -webkit-clip-path: polygon(10px 0, calc(100% - 10px) 0, 100% 10px, 100% calc(100% - 10px), calc(100% - 10px) 100%, 10px 100%, 0 calc(100% - 10px), 0 10px); clip-path: polygon(10px 0, calc(100% - 10px) 0, 100% 10px, 100% calc(100% - 10px), calc(100% - 10px) 100%, 10px 100%, 0 calc(100% - 10px), 0 10px); transition: background-color 160ms ease; }
+body[data-theme='hud'] .studio-center-actions .gn-btn-secondary::before { inset: 0; background: rgba(252,238,10,.38); }
+body[data-theme='hud'] .studio-center-actions .gn-btn-secondary::after { inset: 1px; background: #101319; box-shadow: none; }
+body[data-theme='hud'] .studio-center-actions .gn-btn-secondary:hover:not(:disabled) { color: #FCEE0A; }
+body[data-theme='hud'] .studio-center-actions .gn-btn-secondary:hover:not(:disabled)::before { background: rgba(252,238,10,.78); }
+body[data-theme='hud'] .studio-center-actions .studio-generate { color: #07080A; font-weight: 700; filter: drop-shadow(0 2px 6px rgba(252,238,10,.16)); }
+body[data-theme='hud'] .studio-center-actions .studio-generate::before { inset: 0; background: #FCEE0A; }
+body[data-theme='hud'] .studio-center-actions .studio-generate:hover:not(:disabled) { filter: drop-shadow(0 2px 10px rgba(252,238,10,.28)); }
+body[data-theme='hud'] .studio-center-actions .studio-generate:hover:not(:disabled)::before { background: #FFF65C; }
+body[data-theme='hud'] .studio-center-actions button:disabled { opacity: .45; cursor: not-allowed; filter: none; }
+body[data-theme='hud'] .studio-canvas-caption { z-index: 2; left: 26px; bottom: 20px; max-width: 430px; padding-left: 13px; border-left: 2px solid #FCEE0A; text-shadow: none; }
+body[data-theme='hud'] .studio-canvas-caption > span { color: #FCEE0A; font: 9px var(--font-mono); letter-spacing: .12em; }
 body[data-theme='hud'] .studio-canvas-caption strong { display: block; overflow: hidden; margin-top: 7px; color: #E5E5E2; font-size: 12px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
 body[data-theme='hud'] .studio-canvas-caption small { display: block; margin-top: 5px; color: var(--weak); font: 9px var(--font-mono); }
-body[data-theme='hud'] .studio-status { position: absolute; z-index: 2; right: 24px; bottom: 27px; display: flex; align-items: center; gap: 7px; color: var(--muted); font: 9px var(--font-mono); }
-body[data-theme='hud'] .studio-status i { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
-body[data-theme='hud'] .studio-note-option[data-selected='true'] { border-color: rgba(255,212,0,.3); background: linear-gradient(90deg,rgba(255,212,0,.08),#13191F); }
-body[data-theme='hud'] .studio-note-option[data-selected='true']::before { background: var(--accent); }
+body[data-theme='hud'] .studio-status { position: absolute; z-index: 2; right: 24px; bottom: 22px; display: flex; align-items: center; gap: 7px; color: var(--muted); font: 9px var(--font-mono); }
+body[data-theme='hud'] .studio-status i { width: 5px; height: 5px; border-radius: 50%; background: #FCEE0A; }
+body[data-theme='hud'] .studio-note-option.gn-card[data-selected='true'] { position: relative; border: 1px solid rgba(252,238,10,.55); border-left: 3px solid #FCEE0A; background: linear-gradient(90deg,rgba(252,238,10,.11),#13161D 65%); color: #FFFFFF; }
+body[data-theme='hud'] .studio-note-option.gn-card[data-selected='true']:hover:not(:disabled) { border-color: #FCEE0A; background: linear-gradient(90deg,rgba(252,238,10,.16),#171B24 65%); }
 body[data-theme='hud'] .studio-preview-label,
-body[data-theme='hud'] .studio-preview-sources strong { color: var(--accent); }
+body[data-theme='hud'] .studio-preview-sources strong { color: #FCEE0A; }
 body[data-theme='hud'] .studio-rail footer small { flex-basis: 100%; margin-top: 4px; color: var(--weak); font: 8px var(--font-mono); text-align: center; }
-body[data-theme='hud'] .advanced-studio[data-working='true'] .mech-train-gear.g0 { opacity: .28; }
 
 /* 扩展工作区：连接总线、诊断与执行状态的机械语言 */
 body[data-theme='hud'] .connection-bus { display: flex; align-items: center; gap: 10px; height: 30px; margin: -4px 0 10px; color: var(--weak); }
@@ -188,15 +187,12 @@ body[data-theme='hud'] .connection-bus > i { height: 1px; flex: 1; background: r
 body[data-theme='hud'] .connection-bus > span { color: var(--accent); font: 10px var(--font-mono); letter-spacing: .12em; }
 body[data-theme='hud'] .extension-stats { position: relative; overflow: hidden; }
 body[data-theme='hud'] .skill-card { background: linear-gradient(140deg,var(--panel),#0f1419); }
-body[data-theme='hud'] .overview-status-item { background: linear-gradient(145deg,rgba(255,212,0,.035),var(--panel) 62%); }
-body[data-theme='hud'] .overview-status-item .status-dot.ok { box-shadow: 0 0 7px rgba(255,212,0,.24); }
-body[data-theme='hud'] .quick-settings > button:hover { background: linear-gradient(90deg,rgba(255,212,0,.07),var(--panel-2)); }
-body[data-theme='hud'] .diagnostics-card { border-color: rgba(255,212,0,.16); }
+body[data-theme='hud'] .overview-status-item .status-dot.ok { box-shadow: none; }
+body[data-theme='hud'] .quick-settings > button:hover { background: rgba(255,255,255,.03); }
 body[data-theme='hud'] .current-config > span { color: var(--accent); }
 body[data-theme='hud'] .diagnostic-actions .hud-button-wrapper[data-variant='primary'] { z-index: 1; }
 body[data-theme='hud'] .settings-nav button.active { background: linear-gradient(90deg,rgba(255,212,0,.09),var(--panel)); }
-body[data-theme='hud'] .mech-detail-watermark,
-body[data-theme='hud'] .mech-diagnostics-gear { filter: drop-shadow(0 0 10px rgba(255,212,0,.08)); }
+body[data-theme='hud'] .mech-detail-watermark { filter: drop-shadow(0 0 10px rgba(255,212,0,.08)); }
 
 /* 完整动效 */
 body[data-theme='hud'][data-motion='full'] .mech-gear > svg { animation: mech-rotate var(--mech-speed,12s) linear infinite; }
@@ -218,17 +214,21 @@ body[data-theme='hud'][data-motion='full'] .status-unit[data-status='extracting'
 body[data-theme='hud'][data-motion='full'] .status-unit[data-status='summarizing'] .gear-icon { transform-origin: center; animation: mech-rotate 4s linear infinite; }
 
 body[data-theme='hud'][data-motion='full'] .extension-page-heading > .gear-icon { transform-origin: center; animation: mech-rotate 22s linear infinite; }
-body[data-theme='hud'][data-motion='full'] .extension-stats::before { content: ''; position: absolute; top: 0; left: 0; width: 20%; height: 1px; background: var(--accent); animation: mech-scan-x 8s ease-in-out infinite; }
+body[data-theme='hud'][data-motion='full'] .extension-stats:not(.skills-page .extension-stats)::before { content: ''; position: absolute; top: 0; left: 0; width: 20%; height: 1px; background: var(--accent); animation: mech-scan-x 8s ease-in-out infinite; }
+body[data-theme='hud'][data-motion='full'] .skills-page .extension-stats::before { animation: none !important; }
 body[data-theme='hud'][data-motion='full'] .skill-card.selected::after { content: ''; position: absolute; top: 0; left: 0; width: 24%; height: 1px; background: var(--accent); box-shadow: 0 0 8px rgba(255,212,0,.45); animation: mech-scan-x 5s ease-in-out infinite; }
 body[data-theme='hud'][data-motion='full'] .connection-bus .mech-gear:nth-of-type(odd) > svg { animation-duration: 9s; }
 body[data-theme='hud'][data-motion='full'] .status-pill.ok,
 body[data-theme='hud'][data-motion='full'] .health-card.ok .health-icon { animation: mech-status-glow 2.8s ease-in-out infinite; }
 body[data-theme='hud'][data-motion='full'] .pair-box { position: relative; overflow: hidden; }
 body[data-theme='hud'][data-motion='full'] .pair-box::before { content: ''; position: absolute; top: 0; bottom: 0; left: 0; width: 1px; background: linear-gradient(transparent,var(--accent),transparent); animation: mech-scan-y 6s linear infinite; }
-body[data-theme='hud'][data-motion='full'] .diagnostics-card::before { content: ''; position: absolute; top: 0; bottom: 0; left: 0; width: 1px; background: linear-gradient(transparent,var(--accent),transparent); animation: mech-scan-y 6s linear infinite; }
 body[data-theme='hud'][data-motion='full'] .settings-nav button.active { animation: mech-nav-glow 4s ease-in-out infinite; }
 body[data-theme='hud'][data-motion='full'] .extension-page[data-busy='true'] .detail-actions::after { content: 'EXECUTING'; align-self: center; margin-left: 4px; color: var(--accent); font: 10px var(--font-mono); letter-spacing: .1em; animation: mech-pulse 1.4s ease-in-out infinite; }
 body[data-theme='hud'][data-motion='full'] .extension-page[data-busy='true'] .extension-detail { border-color: rgba(255,212,0,.38); }
+body[data-theme='hud'] .plugins-page .connection-bus[data-live='false'] .mech-gear > svg { animation: none !important; }
+body[data-theme='hud'][data-motion='reduced'] .plugins-page .connection-bus .mech-gear > svg,
+body[data-theme='hud'][data-motion='reduced'] .plugins-page .connection-bus .bus-cyan-pulse { animation: none !important; }
+body[data-theme='hud'] .plugins-page .extension-detail[data-busy='true'] { border-color: transparent; }
 body[data-theme='hud'][data-motion='full'] .storage-meter > i > b { animation: mech-storage-pulse 4s ease-in-out infinite; }
 
 /* 减弱动效：仅品牌和工作状态 */
@@ -255,8 +255,7 @@ body[data-motion='off'] *, body[data-motion='off'] *::before, body[data-motion='
 @keyframes mech-storage-pulse { 50% { opacity: .65; } }
 
 @media (max-width: 1250px) {
-  body[data-theme='hud'] .mech-command-gears,
-  body[data-theme='hud'] .connection-bus { display: none; }
+  body[data-theme='hud'] .mech-command-gears { display: none; }
   body[data-theme='hud'] .mech-train-gear.g0 { width: 320px; height: 320px; }
   body[data-theme='hud'] .mech-core-ring { width: 380px; height: 380px; }
 }

@@ -1,0 +1,1509 @@
+/* 精密机械基础组件：GearWatermark / VernierGauge / CrosshairFrame / HeroDialStage */
+
+.gn-watermark {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 120px;
+  width: clamp(460px, 56%, 660px);
+  color: rgba(255, 255, 255, 0.46);
+  pointer-events: none;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(to right, transparent 0%, rgba(0, 0, 0, 0.35) 14%, #000 30%, #000 78%, transparent 98%);
+  mask-image: linear-gradient(to right, transparent 0%, rgba(0, 0, 0, 0.35) 14%, #000 30%, #000 78%, transparent 98%);
+}
+
+.gn-watermark svg { display: block; width: 100%; height: 100%; }
+
+.gn-watermark-gear { transform-box: fill-box; transform-origin: center; }
+
+body[data-motion='full'] .gn-watermark .gn-watermark-gear--center { animation: gn-gear-cw 60s linear infinite; }
+body[data-motion='full'] .gn-watermark .gn-watermark-gear--top-left,
+body[data-motion='full'] .gn-watermark .gn-watermark-gear--bottom-left,
+body[data-motion='full'] .gn-watermark .gn-watermark-gear--right { animation: gn-gear-ccw 60s linear infinite; }
+body[data-motion='full'] .gn-watermark[data-active='true'] { color: rgba(255, 255, 255, 0.68); filter: drop-shadow(0 0 6px rgba(255, 255, 255, 0.16)); }
+
+/* 减弱动效：平时静止，仅在后台任务运行中转动 */
+body[data-motion='reduced'] .gn-watermark[data-active='true'] .gn-watermark-gear--center { animation: gn-gear-cw 60s linear infinite; }
+body[data-motion='reduced'] .gn-watermark[data-active='true'] .gn-watermark-gear--top-left,
+body[data-motion='reduced'] .gn-watermark[data-active='true'] .gn-watermark-gear--bottom-left,
+body[data-motion='reduced'] .gn-watermark[data-active='true'] .gn-watermark-gear--right { animation: gn-gear-ccw 60s linear infinite; }
+
+@keyframes gn-gear-cw { to { transform: rotate(360deg); } }
+@keyframes gn-gear-ccw { to { transform: rotate(-360deg); } }
+
+body[data-motion='off'] .gn-watermark-gear,
+body[data-motion='reduced'] .gn-watermark[data-active='false'] .gn-watermark-gear { animation: none !important; }
+
+/* 游标刻度进度条 */
+.gn-vernier { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.gn-vernier-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; color: var(--gn-text-secondary); font-size: 12px; }
+.gn-vernier-head .gn-tabular { color: var(--gn-text-primary); font-size: 11px; }
+.gn-vernier-track { position: relative; height: 12px; }
+.gn-vernier-track .gn-ruler-divider { position: absolute; right: 0; bottom: 0; left: 0; }
+.gn-vernier-fill { position: absolute; bottom: 5px; left: 0; height: 2px; background: #FFFFFF; transition: width 160ms ease; }
+.gn-vernier-cursor { position: absolute; top: -3px; right: 0; width: 1px; height: 8px; background: #FFFFFF; }
+.gn-vernier-hint { color: var(--gn-text-muted); font-size: 10px; }
+
+body[data-motion='off'] .gn-vernier-fill,
+body[data-motion='reduced'] .gn-vernier-fill { transition: none; }
+
+/* 画布四角十字准星（父容器需 position: relative） */
+.gn-crosshair-frame { position: absolute; inset: 0; pointer-events: none; }
+.gn-crosshair-frame i { position: absolute; width: 12px; height: 12px; }
+.gn-crosshair-frame i::before,
+.gn-crosshair-frame i::after { content: ''; position: absolute; background: rgba(255, 255, 255, 0.22); }
+.gn-crosshair-frame i::before { top: 5.5px; right: 0; left: 0; height: 1px; }
+.gn-crosshair-frame i::after { top: 0; bottom: 0; left: 5.5px; width: 1px; }
+.gn-crosshair-frame i[data-corner='tl'] { top: 16px; left: 16px; }
+.gn-crosshair-frame i[data-corner='tr'] { top: 16px; right: 16px; }
+.gn-crosshair-frame i[data-corner='bl'] { bottom: 16px; left: 16px; }
+.gn-crosshair-frame i[data-corner='br'] { right: 16px; bottom: 16px; }
+
+/* 高级笔记工作台精密表盘舞台 */
+.hero-dial-stage {
+  display: none;
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  user-select: none;
+  background-color: #070708;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.08) 1px, transparent 1px);
+  background-size: 18px 18px;
+}
+
+body[data-theme='mono'][data-window='main'] .hero-dial-stage {
+  display: block;
+}
+
+body[data-theme='hud'] .hero-dial-stage {
+  display: none !important;
+}
+
+.hero-dial-crosshairs {
+  position: absolute;
+  inset: 60px 0 70px;
+  pointer-events: none;
+}
+
+.hero-dial-svg-wrap {
+  position: absolute;
+  inset: 48px 14px 54px;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+
+.hero-dial-svg {
+  width: 100%;
+  height: 100%;
+  max-width: 680px;
+  max-height: 680px;
+  overflow: visible;
+}
+
+.hero-dial-labels {
+  font-family: var(--gn-font-mono);
+}
+
+.hero-dial-gear {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.hero-dial-bezel-outer {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.hero-dial-crystal-sheen {
+  opacity: 0.68;
+  transition: opacity 300ms ease, stroke-width 300ms ease;
+}
+
+.hero-dial-stage[data-highlighted='true'] .hero-dial-crystal-sheen {
+  opacity: 0.98;
+  stroke-width: 2.4;
+}
+
+body[data-motion='full'] .hero-dial-stage .hero-dial-gear--a {
+  animation: gn-gear-cw 60s linear infinite;
+}
+
+body[data-motion='full'] .hero-dial-stage .hero-dial-gear--b,
+body[data-motion='full'] .hero-dial-stage .hero-dial-gear--c {
+  animation: gn-gear-ccw 60s linear infinite;
+}
+
+body[data-motion='full'] .hero-dial-stage .hero-dial-bezel-outer {
+  animation: gn-gear-cw 180s linear infinite;
+}
+
+body[data-motion='full'] .hero-dial-stage[data-active='true'] .hero-dial-gear--a,
+body[data-motion='full'] .hero-dial-stage[data-active='true'] .hero-dial-gear--b,
+body[data-motion='full'] .hero-dial-stage[data-active='true'] .hero-dial-gear--c {
+  filter: drop-shadow(0 0 6px rgba(255, 255, 255, 0.2));
+}
+
+body[data-motion='off'] .hero-dial-gear,
+body[data-motion='reduced'] .hero-dial-gear,
+body[data-motion='off'] .hero-dial-bezel-outer,
+body[data-motion='reduced'] .hero-dial-bezel-outer {
+  animation: none !important;
+}
+
+body[data-motion='off'] .hero-dial-crystal-sheen,
+body[data-motion='reduced'] .hero-dial-crystal-sheen {
+  transition: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gn-watermark-gear,
+  .hero-dial-gear,
+  .hero-dial-bezel-outer,
+  .agent-blueprint-gear,
+  .agent-vernier-pointer,
+  .agent-header-telemetry[data-active='true'] .chat-agent-status i.gn-led,
+  .settings-gear-idle,
+  .circuit-trace-pulse,
+  .extruded-gear-3d-rotator { animation: none !important; }
+  .settings-gear-ratchet,
+  .blueprint-cad-inner,
+  .studio-hud-vernier-cog { transition: none !important; transform: none !important; }
+  .gn-vernier-fill,
+  .hero-dial-crystal-sheen,
+  .studio-hud-charge-arcs { transition: none; }
+}
+
+/* ==========================================================================
+   AgentHeaderStatus：Agent 对话页眉右上角精密状态区（底层啮合蓝图 + 前景游标）
+   ========================================================================== */
+
+.agent-header-blueprint {
+  position: absolute;
+  right: 16px;
+  top: -36px;
+  width: 320px;
+  height: 150px;
+  z-index: 1;
+  pointer-events: none;
+  user-select: none;
+  -webkit-mask-image: linear-gradient(to right, transparent 0%, rgba(0, 0, 0, 0.9) 42%, black 85%, transparent 100%);
+  mask-image: linear-gradient(to right, transparent 0%, rgba(0, 0, 0, 0.9) 42%, black 85%, transparent 100%);
+}
+
+.agent-header-blueprint svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.agent-blueprint-gear {
+  transform-box: fill-box;
+  transform-origin: center;
+  will-change: transform;
+}
+
+.agent-header-blueprint[data-active='true'] .agent-blueprint-gear--a {
+  animation: gn-gear-cw 24s linear infinite;
+}
+
+.agent-header-blueprint[data-active='true'] .agent-blueprint-gear--b {
+  animation: gn-gear-ccw 14.77s linear infinite;
+}
+
+.agent-header-telemetry {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 6px;
+  flex: none;
+}
+
+.agent-vernier-ruler {
+  position: relative;
+  width: 108px;
+  height: 12px;
+  flex: none;
+  pointer-events: none;
+  user-select: none;
+}
+
+.agent-vernier-ruler svg {
+  display: block;
+  width: 108px;
+  height: 12px;
+}
+
+.agent-vernier-pointer {
+  position: absolute;
+  top: 1px;
+  left: 50%;
+  width: 1px;
+  height: 10px;
+  background: #FFFFFF;
+  box-shadow: 0 0 6px rgba(255, 255, 255, 0.72);
+  transform: translateX(-50%);
+}
+
+.agent-header-telemetry[data-active='true'] .agent-vernier-pointer {
+  animation: agent-vernier-scan 2.4s ease-in-out infinite alternate;
+}
+
+.agent-header-telemetry[data-active='true'] .chat-agent-status i.gn-led {
+  animation: agent-led-pulse 1.4s ease-in-out infinite alternate;
+}
+
+@keyframes agent-vernier-scan {
+  0% {
+    left: 12%;
+  }
+  100% {
+    left: 88%;
+  }
+}
+
+@keyframes agent-led-pulse {
+  0% {
+    opacity: 0.45;
+    transform: scale(0.9);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1.12);
+  }
+}
+
+body[data-motion='off'] .agent-blueprint-gear,
+body[data-motion='off'] .agent-vernier-pointer,
+body[data-motion='off'] .agent-header-telemetry[data-active='true'] .chat-agent-status i.gn-led {
+  animation: none !important;
+}
+
+/* ==========================================================================
+   SettingsGearBackdrop：设置页右上角跨层景深三齿轮蓝图 + 棘轮步进联动
+   ========================================================================== */
+
+.settings-gear-backdrop {
+  position: absolute;
+  top: -44px;
+  right: -20px;
+  width: 380px;
+  height: 340px;
+  pointer-events: none;
+  user-select: none;
+  z-index: 0;
+  -webkit-mask-image: radial-gradient(circle at 65% 35%, black 32%, rgba(0, 0, 0, 0.5) 62%, transparent 86%);
+  mask-image: radial-gradient(circle at 65% 35%, black 32%, rgba(0, 0, 0, 0.5) 62%, transparent 86%);
+}
+
+.settings-gear-backdrop svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.settings-gear-ratchet,
+.settings-gear-idle {
+  transform-box: fill-box;
+  transform-origin: center;
+  will-change: transform;
+}
+
+.settings-gear-ratchet {
+  transform: rotate(var(--ratchet-angle, 0deg));
+  transition: transform 650ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.settings-gear-idle--cw {
+  animation: gn-gear-cw 180s linear infinite;
+}
+
+.settings-gear-idle--ccw {
+  animation: gn-gear-ccw 128s linear infinite;
+}
+
+.settings-gear-backdrop[data-motion='reduced'] .settings-gear-idle,
+body[data-motion='reduced'] .settings-gear-idle {
+  animation: none !important;
+}
+
+.settings-gear-backdrop[data-motion='off'] .settings-gear-idle,
+body[data-motion='off'] .settings-gear-idle {
+  animation: none !important;
+}
+
+.settings-gear-backdrop[data-motion='off'] .settings-gear-ratchet,
+body[data-motion='off'] .settings-gear-ratchet {
+  transition: none !important;
+  transform: none !important;
+}
+
+/* ==========================================================================
+   PluginHudBackdrop：HUD 主题「连接与插件」页眉右上角赛博黄暗纹啮合齿轮
+   ========================================================================== */
+
+.plugin-hud-backdrop {
+  display: none;
+}
+
+body[data-theme='hud'] .plugin-hud-backdrop {
+  display: block;
+  position: absolute;
+  top: -12px;
+  right: 88px;
+  width: 360px;
+  height: 118px;
+  opacity: 0.85;
+  pointer-events: none;
+  user-select: none;
+  z-index: 0;
+  -webkit-mask-image: radial-gradient(circle at 58% 48%, black 34%, rgba(0, 0, 0, 0.48) 70%, transparent 94%);
+  mask-image: radial-gradient(circle at 58% 48%, black 34%, rgba(0, 0, 0, 0.48) 70%, transparent 94%);
+}
+
+body[data-theme='hud'] .plugin-hud-backdrop svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.plugin-hud-gear {
+  transform-box: fill-box;
+  transform-origin: center;
+  will-change: transform;
+}
+
+body[data-theme='hud'][data-motion='full'] .plugin-hud-gear--cw {
+  animation: gn-gear-cw 48s linear infinite;
+}
+
+body[data-theme='hud'][data-motion='full'] .plugin-hud-gear--ccw {
+  animation: gn-gear-ccw 30.86s linear infinite;
+}
+
+body[data-motion='reduced'] .plugin-hud-gear,
+body[data-motion='off'] .plugin-hud-gear {
+  animation: none !important;
+}
+
+@media (max-width: 980px) {
+  body[data-theme='hud'] .plugin-hud-backdrop {
+    display: none;
+  }
+}
+
+/* ==========================================================================
+   PocketWatchBackdrop：简约黑白「连接与插件」页眉复古精密怀表循环动画
+   ========================================================================== */
+
+.pocket-watch-backdrop {
+  display: none;
+}
+
+body[data-theme='mono'] .pocket-watch-backdrop {
+  display: block;
+  position: absolute;
+  right: 165px;
+  top: -54px;
+  width: 340px;
+  height: 220px;
+  pointer-events: none;
+  user-select: none;
+  z-index: 0;
+  -webkit-mask-image: linear-gradient(to right, transparent 0%, black 18%, black 82%, transparent 100%);
+  mask-image: linear-gradient(to right, transparent 0%, black 18%, black 82%, transparent 100%);
+}
+
+body[data-theme='mono'] .pocket-watch-backdrop svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+body[data-theme='mono'] .pocket-watch-hand {
+  transform-box: view-box;
+  transform-origin: 130px 110px;
+  will-change: transform;
+}
+
+body[data-theme='mono'] .pocket-watch-hand--sub {
+  transform-origin: 94px 128px;
+}
+
+body[data-theme='mono'][data-motion='full'] .pocket-watch-backdrop[data-connected='true'] .pocket-watch-hand--second {
+  animation: watch-spin 30s steps(60, end) infinite;
+}
+
+body[data-theme='mono'][data-motion='full'] .pocket-watch-backdrop[data-connected='true'] .pocket-watch-hand--sub {
+  animation: watch-spin 10s linear infinite;
+}
+
+body[data-theme='mono'][data-motion='full'] .pocket-watch-backdrop[data-connected='true'] .pocket-watch-hand--minute {
+  animation: watch-spin 180s linear infinite;
+}
+
+body[data-theme='mono'][data-motion='full'] .pocket-watch-backdrop[data-connected='true'] .pocket-watch-hand--hour {
+  animation: watch-spin 2160s linear infinite;
+}
+
+body[data-theme='mono'] .pocket-watch-backdrop[data-connected='false'] .pocket-watch-hand,
+body[data-theme='mono'][data-motion='reduced'] .pocket-watch-hand,
+body[data-theme='mono'][data-motion='off'] .pocket-watch-hand,
+body[data-theme='mono'] .pocket-watch-backdrop[data-motion='reduced'] .pocket-watch-hand,
+body[data-theme='mono'] .pocket-watch-backdrop[data-motion='off'] .pocket-watch-hand {
+  animation: none !important;
+}
+
+@keyframes watch-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 980px) {
+  body[data-theme='mono'] .pocket-watch-backdrop {
+    display: none;
+  }
+}
+
+/* ==========================================================================
+   StudioHudDial & StudioHudVernierRail：HUD 方案 B 游标刻度轨 + 单体黄齿轮
+   ========================================================================== */
+
+.studio-hud-stage,
+.studio-hud-vernier-rail {
+  display: none;
+}
+
+body[data-theme='hud'] .studio-hud-stage {
+  display: block;
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  overflow: hidden;
+  pointer-events: none;
+  user-select: none;
+}
+
+.studio-hud-frame {
+  position: absolute;
+  inset: 60px 16px 66px;
+  pointer-events: none;
+}
+
+.studio-hud-corner {
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  border-style: solid;
+  border-color: rgba(255, 255, 255, 0.28);
+}
+
+.studio-hud-corner--tl { top: 18px; left: 18px; border-width: 1.2px 0 0 1.2px; }
+.studio-hud-corner--tr { top: 18px; right: 18px; border-width: 1.2px 1.2px 0 0; }
+.studio-hud-corner--bl { bottom: 18px; left: 18px; border-width: 0 0 1.2px 1.2px; }
+.studio-hud-corner--br { right: 18px; bottom: 18px; border-width: 0 1.2px 1.2px 0; }
+
+.studio-hud-callout-svg {
+  position: absolute;
+  inset: 58px 0 64px;
+  width: 100%;
+  height: calc(100% - 122px);
+  pointer-events: none;
+}
+
+body[data-theme='hud'] .studio-hud-vernier-rail {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  max-width: 680px;
+  height: 52px;
+  margin-bottom: 24px;
+  pointer-events: none;
+  user-select: none;
+}
+
+.studio-hud-vernier-track-wrap {
+  width: 100%;
+  height: 52px;
+  -webkit-mask-image: linear-gradient(to right, transparent 0%, black 18%, black 82%, transparent 100%);
+  mask-image: linear-gradient(to right, transparent 0%, black 18%, black 82%, transparent 100%);
+}
+
+.studio-hud-vernier-svg {
+  display: block;
+  width: 100%;
+  height: 52px;
+}
+
+.studio-hud-cog-center {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.studio-hud-cog-axis {
+  width: 1px;
+  height: 14px;
+  background: rgba(252, 238, 10, 0.28);
+}
+
+.studio-hud-vernier-cog {
+  display: block;
+  width: 34px;
+  height: 34px;
+  margin: 2px 0;
+  transform: rotate(0deg);
+  transition: transform 480ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+body[data-theme='hud'][data-motion='full'] .studio-hud-vernier-rail[data-highlighted='true'] .studio-hud-vernier-cog {
+  transform: rotate(45deg);
+}
+
+body[data-motion='reduced'] .studio-hud-vernier-cog,
+body[data-motion='off'] .studio-hud-vernier-cog {
+  transform: none !important;
+  transition: none !important;
+}
+
+/* ==========================================================================
+   CircuitBoardBackdrop & ExtrudedGear3D：HUD 主题技能工作台组件
+   ========================================================================== */
+
+.circuit-board-backdrop,
+.extruded-gear-3d {
+  display: none;
+}
+
+body[data-theme='hud'] .skills-page .circuit-board-backdrop {
+  display: block;
+  position: absolute;
+  top: 0;
+  right: 72px;
+  bottom: 0;
+  width: 680px;
+  max-width: 68%;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  user-select: none;
+}
+
+@media (max-width: 980px) {
+  body[data-theme='hud'] .skills-page .circuit-board-backdrop {
+    display: none;
+  }
+}
+
+body[data-theme='hud'] .circuit-board-backdrop svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.circuit-trace-pulse {
+  opacity: 0;
+}
+
+body[data-theme='hud'][data-motion='full'] .circuit-trace-pulse {
+  opacity: 1;
+  animation: pcb-trace-flow 7.5s linear infinite;
+}
+
+body[data-theme='hud'][data-motion='full'] .circuit-trace-pulse--cyan {
+  animation-duration: 9.2s;
+  animation-direction: reverse;
+}
+
+@keyframes pcb-trace-flow {
+  from { stroke-dashoffset: 244; }
+  to { stroke-dashoffset: 0; }
+}
+
+body[data-theme='hud'] .skills-page .extension-detail > .extruded-gear-3d {
+  display: block;
+  position: absolute !important;
+  top: -28px;
+  right: -24px;
+  width: 190px;
+  height: 190px;
+  pointer-events: none;
+  user-select: none;
+  z-index: 0 !important;
+  -webkit-mask-image: radial-gradient(circle at 68% 32%, black 38%, rgba(0, 0, 0, 0.45) 68%, transparent 94%);
+  mask-image: radial-gradient(circle at 68% 32%, black 38%, rgba(0, 0, 0, 0.45) 68%, transparent 94%);
+}
+
+body[data-theme='hud'] .extruded-gear-3d-tilt,
+body[data-theme='hud'] .extruded-gear-3d svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+body[data-theme='hud'] .extruded-gear-3d-tilt {
+  transform: perspective(480px) rotateY(-18deg) rotateX(10deg);
+  transform-origin: center;
+}
+
+.extruded-gear-3d-rotator {
+  transform-box: fill-box;
+  transform-origin: center;
+  will-change: transform;
+}
+
+body[data-theme='hud'][data-motion='full'] .skills-page .extension-detail:hover .extruded-gear-3d-rotator,
+body[data-theme='hud'][data-motion='full'] .skills-page[data-busy='true'] .extension-detail .extruded-gear-3d-rotator {
+  animation: gn-gear-cw 45s linear infinite;
+}
+
+body[data-motion='reduced'] .circuit-trace-pulse,
+body[data-motion='off'] .circuit-trace-pulse,
+body[data-motion='reduced'] .extruded-gear-3d-rotator,
+body[data-motion='off'] .extruded-gear-3d-rotator {
+  animation: none !important;
+}
+
+/* ==========================================================================
+   SettingsBlueprintPlate：HUD 主题「设置」左侧导航下方 CAD 精密机械铭牌
+   ========================================================================== */
+
+.settings-blueprint-plate {
+  display: none;
+}
+
+body[data-theme='hud'] .settings-blueprint-plate {
+  display: flex;
+  flex-direction: column;
+  height: 166px;
+  padding: 8px 9px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(11, 14, 18, 0.52);
+  opacity: 0.72;
+  pointer-events: none;
+  user-select: none;
+}
+
+.blueprint-plate-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 5px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.16);
+}
+
+.blueprint-serial {
+  font-family: var(--font-mono), monospace;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  color: rgba(255, 255, 255, 0.38);
+}
+
+.blueprint-serial-sub {
+  font-family: var(--font-mono), monospace;
+  font-size: 7px;
+  letter-spacing: 0.14em;
+  color: rgba(255, 255, 255, 0.24);
+}
+
+.blueprint-chamber {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 54px minmax(0, 1fr);
+  gap: 6px;
+  align-items: center;
+  margin-top: 6px;
+  padding: 8px 6px;
+}
+
+.blueprint-corner {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border-style: solid;
+  border-color: rgba(255, 255, 255, 0.32);
+}
+
+.blueprint-corner--tl { top: 0; left: 0; border-width: 1px 0 0 1px; }
+.blueprint-corner--tr { top: 0; right: 0; border-width: 1px 1px 0 0; }
+.blueprint-corner--bl { bottom: 0; left: 0; border-width: 0 0 1px 1px; }
+.blueprint-corner--br { right: 0; bottom: 0; border-width: 0 1px 1px 0; }
+
+.blueprint-telemetry-col {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.blueprint-telemetry-head {
+  display: grid;
+  gap: 3px;
+}
+
+.blueprint-telemetry-head > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-mono), monospace;
+  font-size: 7.5px;
+  letter-spacing: 0.06em;
+  color: rgba(255, 255, 255, 0.42);
+  white-space: nowrap;
+}
+
+.blueprint-telemetry-head > span > i {
+  width: 3.5px;
+  height: 3.5px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.46);
+}
+
+.blueprint-micro-bars {
+  display: grid;
+  gap: 3px;
+}
+
+.blueprint-micro-progress {
+  display: block;
+  width: 42px;
+  height: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.20);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.blueprint-micro-progress > b {
+  display: block;
+  height: 100%;
+  background: rgba(255, 255, 255, 0.34);
+  transition: width 320ms ease;
+}
+
+.blueprint-micro-dashes {
+  display: flex;
+  gap: 4px;
+}
+
+.blueprint-micro-dashes > i {
+  width: 12px;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.24);
+}
+
+.blueprint-matrix-svg {
+  display: block;
+  width: 42px;
+  height: 74px;
+}
+
+.blueprint-cad-col {
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  height: 100%;
+}
+
+.blueprint-cad-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-width: 130px;
+  max-height: 110px;
+}
+
+.blueprint-cad-inner {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+body[data-theme='hud'][data-motion='full'] .blueprint-cad-inner {
+  transform: rotate(var(--cad-angle, 0deg));
+  transition: transform 500ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+body[data-motion='reduced'] .blueprint-cad-inner,
+body[data-motion='off'] .blueprint-cad-inner {
+  transform: none !important;
+  transition: none !important;
+}
+
+@media (max-width: 980px), (max-height: 760px) {
+  body[data-theme='hud'] .settings-blueprint-plate {
+    display: none;
+  }
+}
+
+/* 设置概览（HUD）：右上角三联扁平航电遥测与通用 L 形细角标（mono 严格隐藏） */
+.settings-overview-telemetry,
+.hud-box-corners,
+.hud-kpi-index,
+.hud-kpi-ruler {
+  display: none;
+}
+
+body[data-theme='hud'] .hud-box-corners {
+  position: absolute;
+  inset: 0;
+  display: block;
+  pointer-events: none;
+  z-index: 2;
+}
+
+body[data-theme='hud'] .hud-box-corners > i {
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  border-style: solid;
+  border-color: rgba(255, 255, 255, 0.24);
+  border-width: 0;
+}
+
+body[data-theme='hud'] .hud-box-corners > i:nth-child(1) {
+  top: 0;
+  left: 0;
+  border-top-width: 1px;
+  border-left-width: 1px;
+}
+
+body[data-theme='hud'] .hud-box-corners > i:nth-child(2) {
+  top: 0;
+  right: 0;
+  border-top-width: 1px;
+  border-right-width: 1px;
+}
+
+body[data-theme='hud'] .hud-box-corners > i:nth-child(3) {
+  bottom: 0;
+  left: 0;
+  border-bottom-width: 1px;
+  border-left-width: 1px;
+}
+
+body[data-theme='hud'] .hud-box-corners > i:nth-child(4) {
+  right: 0;
+  bottom: 0;
+  border-right-width: 1px;
+  border-bottom-width: 1px;
+}
+
+body[data-theme='hud'] .settings-overview-telemetry {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+  height: 68px;
+  flex-shrink: 0;
+  pointer-events: none;
+  user-select: none;
+}
+
+body[data-theme='hud'] .hud-telemetry-unit {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+  height: 68px;
+  padding: 8px 10px;
+  background: #0E1015;
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  box-sizing: border-box;
+}
+
+body[data-theme='hud'] .hud-scope-wrap {
+  display: flex;
+  align-items: stretch;
+  gap: 3px;
+  width: 156px;
+}
+
+body[data-theme='hud'] .hud-scope-screen {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  background-color: #08090C;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+  background-size: 12px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+body[data-theme='hud'] .hud-scope-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+body[data-theme='hud'] .hud-scope-scale {
+  display: block;
+  width: 8px;
+  height: 100%;
+  flex: none;
+}
+
+body[data-theme='hud'] .hud-scope-wave-base {
+  opacity: 0.24;
+}
+
+body[data-theme='hud'][data-motion='full'] .hud-scope-wave {
+  stroke-dasharray: 64 196;
+  animation: hud-scope-scan 2.8s linear infinite;
+}
+
+body[data-theme='hud'][data-motion='reduced'] .hud-scope-wave,
+body[data-theme='hud'][data-motion='off'] .hud-scope-wave {
+  stroke-dasharray: none;
+  animation: none;
+}
+
+body[data-theme='hud'][data-motion='reduced'] .hud-scope-wave-base,
+body[data-theme='hud'][data-motion='off'] .hud-scope-wave-base {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body[data-theme='hud'] .hud-scope-wave {
+    stroke-dasharray: none !important;
+    animation: none !important;
+  }
+
+  body[data-theme='hud'] .hud-scope-wave-base {
+    display: none;
+  }
+}
+
+@keyframes hud-scope-scan {
+  from {
+    stroke-dashoffset: 260;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+body[data-theme='hud'] .hud-dip-bank {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-left: 2px;
+}
+
+body[data-theme='hud'] .hud-dip-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+body[data-theme='hud'] .hud-dip-label {
+  color: #8A8A93;
+  font: 8px/1 var(--font-mono);
+  letter-spacing: 0.04em;
+}
+
+body[data-theme='hud'] .hud-dip-slot {
+  position: relative;
+  width: 12px;
+  height: 24px;
+  background: #08090C;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-sizing: border-box;
+}
+
+body[data-theme='hud'] .hud-dip-cap {
+  position: absolute;
+  left: 1px;
+  right: 1px;
+  height: 9px;
+  box-sizing: border-box;
+  transition: transform 180ms ease, background-color 180ms ease;
+}
+
+body[data-theme='hud'][data-motion='off'] .hud-dip-cap {
+  transition: none;
+}
+
+body[data-theme='hud'] .hud-dip-col[data-state='up'] .hud-dip-cap {
+  transform: translateY(1px);
+  background: #FCEE0A;
+}
+
+body[data-theme='hud'] .hud-dip-col[data-state='mid'] .hud-dip-cap {
+  transform: translateY(6px);
+  background: rgba(252, 238, 10, 0.45);
+}
+
+body[data-theme='hud'] .hud-dip-col[data-state='down'] .hud-dip-cap {
+  transform: translateY(12px);
+  background: #1C2029;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+}
+
+body[data-theme='hud'] .hud-dip-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+}
+
+body[data-theme='hud'] .hud-dip-col[data-state='up'] .hud-dip-dot {
+  background: #FCEE0A;
+}
+
+body[data-theme='hud'] .hud-dip-col[data-state='mid'] .hud-dip-dot {
+  background: rgba(252, 238, 10, 0.45);
+}
+
+body[data-theme='hud'] .hud-dip-col[data-state='down'] .hud-dip-dot {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+body[data-theme='hud'] .hud-barcode-plate {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  width: 116px;
+  height: 68px;
+  padding: 9px 10px 7px;
+  background: #0E1015;
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  box-sizing: border-box;
+}
+
+body[data-theme='hud'] .hud-barcode-svg {
+  display: block;
+  width: 100%;
+  height: 28px;
+}
+
+body[data-theme='hud'] .hud-barcode-code {
+  color: #8A8A93;
+  font: 9px/1 var(--font-mono);
+  letter-spacing: 0.10em;
+  white-space: nowrap;
+}
+
+/* ==========================================================================
+   简约黑白（mono）设置页：ThornRoseBackdrop 铜版画暗纹 + RevolverCylinderWidget 左轮弹仓
+   严格隔离：仅 body[data-theme='mono'] 生效，hud 保持隐藏
+   ========================================================================== */
+
+.thorn-rose-backdrop,
+.revolver-cylinder-widget {
+  display: none;
+}
+
+body[data-theme='mono'] .settings-gear-backdrop {
+  display: none;
+}
+
+body[data-theme='mono'] .thorn-rose-backdrop,
+body[data-theme='mono'] .gn-thorn-rose-backdrop {
+  display: block;
+  position: absolute;
+  top: -38px;
+  right: -36px;
+  width: 340px;
+  height: 340px;
+  object-fit: contain;
+  pointer-events: none;
+  user-select: none;
+  z-index: 0;
+  mix-blend-mode: screen;
+  opacity: 0.24;
+  -webkit-mask-image: radial-gradient(circle at 60% 42%, black 28%, rgba(0, 0, 0, 0.48) 58%, transparent 86%);
+  mask-image: radial-gradient(circle at 60% 42%, black 28%, rgba(0, 0, 0, 0.48) 58%, transparent 86%);
+}
+
+body[data-theme='mono'][data-motion='full'] .gn-thorn-rose-backdrop {
+  animation:
+    thorn-rose-bloom 700ms ease-out 1 both,
+    thorn-rose-breathe 10s ease-in-out 700ms infinite;
+}
+
+body[data-theme='mono'][data-motion='reduced'] .gn-thorn-rose-backdrop,
+body[data-theme='mono'][data-motion='off'] .gn-thorn-rose-backdrop {
+  animation: none !important;
+  opacity: 0.24;
+  transform: none;
+}
+
+@keyframes thorn-rose-bloom {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 0.24;
+    transform: scale(1);
+  }
+}
+
+@keyframes thorn-rose-breathe {
+  0%, 100% {
+    opacity: 0.24;
+  }
+  35% {
+    opacity: 0.27;
+  }
+  70% {
+    opacity: 0.21;
+  }
+}
+
+body[data-theme='mono'] .revolver-cylinder-widget {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 175px;
+  padding: 10px 12px;
+  background: #0B0B0D;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  box-sizing: border-box;
+  cursor: pointer;
+  user-select: none;
+}
+
+body[data-theme='mono'] .revolver-cylinder-widget:hover {
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+body[data-theme='mono'] .revolver-cylinder-widget:focus-visible {
+  outline: 1px solid rgba(255, 255, 255, 0.45);
+  outline-offset: 2px;
+}
+
+body[data-theme='mono'] .revolver-serial {
+  position: relative;
+  z-index: 1;
+  color: rgba(255, 255, 255, 0.40);
+  font: 9px/1 var(--font-mono), monospace;
+  letter-spacing: 0.12em;
+}
+
+body[data-theme='mono'] .revolver-corner {
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  border-style: solid;
+  border-color: rgba(255, 255, 255, 0.26);
+  border-width: 0;
+  pointer-events: none;
+}
+
+body[data-theme='mono'] .revolver-corner--tl {
+  top: 4px;
+  left: 4px;
+  border-top-width: 1px;
+  border-left-width: 1px;
+}
+
+body[data-theme='mono'] .revolver-corner--tr {
+  top: 4px;
+  right: 4px;
+  border-top-width: 1px;
+  border-right-width: 1px;
+}
+
+body[data-theme='mono'] .revolver-corner--bl {
+  bottom: 4px;
+  left: 4px;
+  border-bottom-width: 1px;
+  border-left-width: 1px;
+}
+
+body[data-theme='mono'] .revolver-corner--br {
+  right: 4px;
+  bottom: 4px;
+  border-right-width: 1px;
+  border-bottom-width: 1px;
+}
+
+body[data-theme='mono'] .revolver-stage {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  margin-top: 2px;
+}
+
+body[data-theme='mono'] .revolver-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-width: 142px;
+  max-height: 142px;
+}
+
+body[data-theme='mono'] .revolver-cylinder-rotor {
+  transform-box: view-box;
+  transform-origin: 90px 90px;
+  transform: rotate(var(--cylinder-angle, 0deg));
+  transition: transform 520ms cubic-bezier(0.22, 1.12, 0.36, 1);
+  will-change: transform;
+}
+
+body[data-theme='mono'][data-motion='reduced'] .revolver-cylinder-rotor,
+body[data-theme='mono'][data-motion='off'] .revolver-cylinder-rotor,
+body[data-theme='mono'] .revolver-cylinder-widget[data-motion='reduced'] .revolver-cylinder-rotor,
+body[data-theme='mono'] .revolver-cylinder-widget[data-motion='off'] .revolver-cylinder-rotor {
+  transition: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body[data-theme='mono'] .thorn-rose-backdrop,
+  body[data-theme='mono'] .gn-thorn-rose-backdrop {
+    animation: none !important;
+    opacity: 0.24 !important;
+    transform: none !important;
+  }
+
+  body[data-theme='mono'] .revolver-cylinder-rotor {
+    transition: none !important;
+  }
+
+  body[data-theme='mono'] .pocket-watch-hand {
+    animation: none !important;
+  }
+
+  body[data-theme='mono'] .agent-gothic-halo-svg {
+    animation: none !important;
+    transition: none;
+  }
+}
+
+/* ==========================================================================
+   AgentGothicHeader & SidebarFloralBackdrop：简约黑白「Agent 对话」方案 B 版画氛围
+   ========================================================================== */
+
+.agent-gothic-banner,
+.sidebar-floral-backdrop {
+  display: none;
+}
+
+body[data-theme='mono'] .chat-page-head {
+  position: relative;
+  overflow: hidden;
+}
+
+body[data-theme='mono'] .chat-page-head > div:first-child,
+body[data-theme='mono'] .chat-page-head .agent-header-telemetry {
+  position: relative;
+  z-index: 2;
+}
+
+body[data-theme='mono'] .chat-panel,
+body[data-theme='mono'] .chat-panel .message-flow {
+  background: #09090B;
+}
+
+body[data-theme='mono'] .agent-gothic-banner {
+  display: block;
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 420px;
+  height: 100%;
+  overflow: hidden;
+  pointer-events: none;
+  user-select: none;
+  z-index: 1;
+  mix-blend-mode: screen;
+  -webkit-mask-image: linear-gradient(to right, transparent 0%, black 26%, black 90%, transparent 100%);
+  mask-image: linear-gradient(to right, transparent 0%, black 26%, black 90%, transparent 100%);
+}
+
+body[data-theme='mono'] .agent-gothic-halo {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 230px;
+  height: 230px;
+  transform: translate(-50%, -52%);
+  pointer-events: none;
+  z-index: 1;
+}
+
+body[data-theme='mono'] .agent-gothic-halo-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  transform-origin: center;
+  will-change: transform;
+  transition: opacity 280ms ease;
+}
+
+body[data-theme='mono'][data-motion='full'] .agent-gothic-halo-svg {
+  animation: gn-gear-cw 60s linear infinite;
+}
+
+body[data-theme='mono'][data-motion='full'] .agent-gothic-banner[data-active='true'] .agent-gothic-halo-svg {
+  animation-duration: 18s;
+  opacity: 1;
+}
+
+body[data-theme='mono'][data-motion='reduced'] .agent-gothic-halo-svg,
+body[data-theme='mono'][data-motion='off'] .agent-gothic-halo-svg,
+body[data-theme='mono'] .agent-gothic-banner[data-motion='reduced'] .agent-gothic-halo-svg,
+body[data-theme='mono'] .agent-gothic-banner[data-motion='off'] .agent-gothic-halo-svg {
+  animation: none !important;
+  transition: none;
+}
+
+body[data-theme='mono'] .agent-gothic-skull {
+  position: relative;
+  z-index: 2;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 50% 42%;
+  mix-blend-mode: screen;
+  opacity: 0.36;
+  -webkit-mask-image: radial-gradient(ellipse 26% 64% at 50% 54%, black 52%, rgba(0, 0, 0, 0.35) 78%, transparent 100%);
+  mask-image: radial-gradient(ellipse 26% 64% at 50% 54%, black 52%, rgba(0, 0, 0, 0.35) 78%, transparent 100%);
+}
+
+body[data-theme='mono'] .left-sidebar {
+  position: relative;
+}
+
+body[data-theme='mono'] .left-sidebar > :not(.sidebar-floral-backdrop) {
+  position: relative;
+  z-index: 1;
+}
+
+body[data-theme='mono'] .sidebar-floral-backdrop {
+  display: block;
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: clamp(220px, 44%, 380px);
+  pointer-events: none;
+  user-select: none;
+  z-index: 0;
+  overflow: hidden;
+  mix-blend-mode: screen;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, rgba(0, 0, 0, 0.24) 28%, rgba(0, 0, 0, 0.72) 64%, black 100%);
+  mask-image: linear-gradient(to bottom, transparent 0%, rgba(0, 0, 0, 0.24) 28%, rgba(0, 0, 0, 0.72) 64%, black 100%);
+}
+
+body[data-theme='mono'] .sidebar-floral-backdrop img {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  display: block;
+  width: 1120px;
+  max-width: none;
+  height: auto;
+  opacity: 0.34;
+  filter: contrast(1.18) brightness(0.94);
+}
+
+@media (max-width: 980px) {
+  body[data-theme='mono'] .agent-gothic-banner,
+  body[data-theme='mono'] .sidebar-floral-backdrop {
+    display: none;
+  }
+
+  body[data-theme='mono'] .left-sidebar > :not(.sidebar-floral-backdrop) {
+    position: static;
+    z-index: auto;
+  }
+}
+
+/* ==========================================================================
+   MinimalCyberEye：HUD 主题「设置」页眉右侧极简几何鼠标追踪义眼
+   ========================================================================== */
+
+.minimal-cyber-eye {
+  display: none;
+}
+
+body[data-theme='hud'] .minimal-cyber-eye {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 52px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  user-select: none;
+}
+
+body[data-theme='hud'] .minimal-cyber-eye:focus-visible {
+  outline: 1px solid rgba(252, 238, 10, 0.65);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+body[data-theme='hud'] .minimal-cyber-eye-svg {
+  display: block;
+  width: 52px;
+  height: 44px;
+}
+
+body[data-theme='hud'] .cyber-eye-blink-group {
+  transform-box: view-box;
+  transform-origin: 32px 26px;
+}
+
+body[data-theme='hud'][data-motion='full'] .minimal-cyber-eye[data-blinking='true'] .cyber-eye-blink-group {
+  animation: cyber-eye-blink 180ms ease-in-out 1;
+}
+
+body[data-theme='hud'][data-motion='reduced'] .cyber-eye-blink-group,
+body[data-theme='hud'][data-motion='off'] .cyber-eye-blink-group,
+body[data-theme='hud'] .minimal-cyber-eye[data-motion='reduced'] .cyber-eye-blink-group,
+body[data-theme='hud'] .minimal-cyber-eye[data-motion='off'] .cyber-eye-blink-group {
+  animation: none !important;
+  transform: none !important;
+}
+
+@keyframes cyber-eye-blink {
+  0%, 100% {
+    transform: scaleY(1);
+  }
+  48% {
+    transform: scaleY(0.08);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body[data-theme='hud'] .cyber-eye-blink-group {
+    animation: none !important;
+    transform: none !important;
+  }
+}
+
+@media (max-width: 980px), (max-height: 760px) {
+  body[data-theme='mono'] .revolver-cylinder-widget {
+    display: none;
+  }
+}

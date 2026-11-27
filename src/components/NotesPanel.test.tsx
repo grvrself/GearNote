@@ -98,3 +98,34 @@ describe('NotesPanel 应用内确认', () => {
     expect(onComposeRequestConsumed).toHaveBeenCalledTimes(2)
   })
 })
+
+describe('NotesPanel 阅读排版', () => {
+  const markdownNote: Note = {
+    ...note,
+    body: '# 配置说明\n设置 `Result` 与 `Option` 类型，**加粗**强调。\n未闭合 `code 保持原样',
+  }
+
+  it('行内反引号渲染为 <code>，加粗渲染为 <strong>，未闭合反引号回退纯文本', async () => {
+    render(<NotesPanel {...panelProps({ notes: [markdownNote] })} />)
+    const article = await screen.findByRole('article', { name: '笔记《测试笔记》正文' })
+    expect(article).toHaveClass('gn-prose')
+
+    const result = within(article).getByText('Result')
+    expect(result.tagName).toBe('CODE')
+    const option = within(article).getByText('Option')
+    expect(option.tagName).toBe('CODE')
+    const bold = within(article).getByText('加粗')
+    expect(bold.tagName).toBe('STRONG')
+    expect(article.querySelectorAll('code')).toHaveLength(2)
+    expect(within(article).getByText('未闭合 `code 保持原样')).toBeInTheDocument()
+  })
+
+  it('章节标题使用 01 // 编号且不渲染齿轮图标', async () => {
+    render(<NotesPanel {...panelProps({ notes: [markdownNote] })} />)
+    const article = await screen.findByRole('article', { name: '笔记《测试笔记》正文' })
+    const heading = within(article).getByRole('heading', { name: /配置说明/ })
+    expect(within(heading).getByText('01 //')).toHaveClass('gn-tabular')
+    expect(heading.querySelector('.gear-icon')).toBeNull()
+    expect(heading.textContent).not.toContain('SEC-')
+  })
+})

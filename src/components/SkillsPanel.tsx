@@ -7,6 +7,7 @@ import { getSkillPrompt, installSkillFromGithub, listInstalledSkills, uninstallS
 import { useConfirm } from '../hooks/useConfirm'
 import { GearIcon } from './GearIcon'
 import { MechanicalGear } from './MechanicalGear'
+import { CircuitBoardBackdrop, ExtrudedGear3D, GearWatermark } from './mechanical'
 import { HudButton } from './HudButton'
 import './extension-workspace.css'
 
@@ -69,6 +70,13 @@ export function SkillsPanel({ records, notes, agentAvailable, onRunQuestion, onC
   const required = official?.id === 'compose' ? { min: 1, max: 3 } : official?.id === 'storyboard' ? { min: 1, max: 1 } : official?.id === 'advanced' ? { min: 0, max: 0 } : community?.inputs[0] ?? { min: 1, max: 8 }
   const needsModel = official?.id !== 'storyboard'
   const hasRecords = selectedRecords.length >= required.min && selectedRecords.length <= required.max
+  const skillIndex = (key: string) => {
+    const officialIndex = officialSkills.findIndex(skill => key === `official:${skill.id}`)
+    if (officialIndex >= 0) return String(officialIndex + 1).padStart(2, '0')
+    const communityIndex = installed.findIndex(skill => key === `community:${skill.id}@${skill.version}`)
+    return communityIndex >= 0 ? String(officialSkills.length + communityIndex + 1).padStart(2, '0') : '00'
+  }
+  const canRun = !busy && (!needsModel || agentAvailable) && (official?.id === 'advanced' ? Boolean(selectedNoteId) : hasRecords)
 
   const selectSkill = (key: string) => {
     setActive(key); setSelectedIds([]); setError(''); setMessage('')
@@ -148,29 +156,30 @@ export function SkillsPanel({ records, notes, agentAvailable, onRunQuestion, onC
     finally { setBusy(false) }
   }
 
-  return <section className="extension-page" aria-labelledby="skills-title" data-busy={busy}>
-    <header className="extension-page-heading"><div><span>SKILL-01 / WORKFLOWS</span><h1 id="skills-title">技能工作台</h1><p>把已有能力组合成可复用、可审查的工作流。</p></div><div className="extension-page-actions"><button className="text-action" type="button" onClick={() => window.open('https://github.com/grvrself/GearNote', '_blank', 'noopener')}>发布与贡献</button><HudButton variant="primary" type="button" onClick={() => { setInstallError(''); setInstallOpen(true) }}>从 GitHub 安装</HudButton></div><GearIcon kind="center" size={20} /></header>
-    <div className="extension-stats"><div><span>官方技能</span><strong>{String(officialSkills.length).padStart(2, '0')}</strong></div><div><span>社区技能</span><strong>{String(installed.length).padStart(2, '0')}</strong></div><div><span>运行中</span><strong>{busy ? '01' : '00'}</strong></div><p>所有技能都显示输入与权限；安装包不会自动执行。</p></div>
+  return <section className="extension-page skills-page" aria-labelledby="skills-title" data-busy={busy}>
+    <header className="extension-page-heading"><div><span>SKILL-01 / WORKFLOWS</span><h1 id="skills-title">技能工作台</h1><p>把已有能力组合成可复用、可审查的工作流。</p></div><div className="extension-page-actions"><button className="text-action" type="button" onClick={() => window.open('https://github.com/grvrself/GearNote', '_blank', 'noopener')}>发布与贡献</button><HudButton variant="primary" type="button" onClick={() => { setInstallError(''); setInstallOpen(true) }}>从 GitHub 安装</HudButton></div><GearWatermark active={busy || installing} /><CircuitBoardBackdrop /></header>
+    <div className="extension-stats"><div><span>官方技能</span><strong className="gn-tabular">{String(officialSkills.length).padStart(2, '0')}</strong></div><div><span>社区技能</span><strong className="gn-tabular">{String(installed.length).padStart(2, '0')}</strong></div><div><span>运行中</span><strong className="gn-tabular">{busy ? '01' : '00'}</strong></div><div className="hud-stats-led-cell" data-running={busy} aria-hidden="true"><i className="hud-stats-led" /></div><p>所有技能都显示输入与权限；安装包不会自动执行。</p></div>
     <div className="extension-toolbar"><div className="extension-tabs">{([['all', '内置与已安装'], ['official', '官方'], ['community', '社区']] as const).map(([id, label]) => <button key={id} className={filter === id ? 'active' : ''} type="button" onClick={() => setFilter(id)}>{label}</button>)}</div><label className="extension-search"><input value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索技能或作者" /></label></div>
     <div className="skills-layout">
       <div className="skill-grid">
-        {visibleOfficial.map(skill => <article className={`skill-card${active === `official:${skill.id}` ? ' selected' : ''}`} key={skill.id}>
-          <div className="skill-card-top"><GearIcon kind={skill.id === 'storyboard' ? 'working' : 'brand'} size={16} /><span className="extension-badge">官方</span></div><h3>{skill.name}</h3><p>{skill.description}</p><div className="skill-meta"><span>{skill.input}</span><span>{skill.cost}</span></div><div className="skill-card-foot"><span>{skill.version}</span><button type="button" onClick={() => selectSkill(`official:${skill.id}`)}>使用 →</button></div>
+        {visibleOfficial.map(skill => <article className={`skill-card gn-card${active === `official:${skill.id}` ? ' selected gn-card--active' : ''}`} key={skill.id}>
+          <div className="skill-card-top"><span className="skill-index gn-tabular">{skillIndex(`official:${skill.id}`)}</span><span className="extension-badge">官方</span></div><h3>{skill.name}</h3><p>{skill.description}</p><div className="skill-meta"><span>{skill.input}</span><span>{skill.cost}</span></div><div className="skill-card-foot"><span>{skill.version}</span><button type="button" onClick={() => selectSkill(`official:${skill.id}`)}>使用 →</button></div>
         </article>)}
-        {visibleCommunity.map(skill => <article className={`skill-card${active === `community:${skill.id}@${skill.version}` ? ' selected' : ''}`} key={`${skill.id}@${skill.version}`}>
-          <div className="skill-card-top"><GearIcon kind="brand" size={16} /><span className="extension-badge">GitHub</span></div><h3>{skill.name}</h3><p>{skill.description}</p><div className="skill-meta"><span>{skill.inputs[0] ? `${skill.inputs[0].min}–${skill.inputs[0].max} 份资料` : '直接提问'}</span><span>社区包</span></div><div className="skill-card-foot"><span>v{skill.version} · 已安装</span><button type="button" onClick={() => selectSkill(`community:${skill.id}@${skill.version}`)}>使用 →</button></div>
+        {visibleCommunity.map(skill => <article className={`skill-card gn-card${active === `community:${skill.id}@${skill.version}` ? ' selected gn-card--active' : ''}`} key={`${skill.id}@${skill.version}`}>
+          <div className="skill-card-top"><span className="skill-index gn-tabular">{skillIndex(`community:${skill.id}@${skill.version}`)}</span><span className="extension-badge">GitHub</span></div><h3>{skill.name}</h3><p>{skill.description}</p><div className="skill-meta"><span>{skill.inputs[0] ? `${skill.inputs[0].min}–${skill.inputs[0].max} 份资料` : '直接提问'}</span><span>社区包</span></div><div className="skill-card-foot"><span>v{skill.version} · 已安装</span><button type="button" onClick={() => selectSkill(`community:${skill.id}@${skill.version}`)}>使用 →</button></div>
         </article>)}
         {filter === 'community' && visibleCommunity.length === 0 && <div className="extension-empty"><strong>还没有社区技能</strong><p>从 GitHub 安装一个声明式技能包，或按贡献指南发布自己的技能。</p><HudButton type="button" onClick={() => setInstallOpen(true)}>安装第一个技能</HudButton></div>}
       </div>
-      <aside className="extension-detail">
+      <aside className="extension-detail gn-dot-grid">
+        <ExtrudedGear3D />
         <MechanicalGear className="mech-detail-watermark" teeth={20} speed="32s" reverse />
-        <span className="detail-eyebrow">{community ? 'COMMUNITY PACKAGE' : 'OFFICIAL SKILL'}</span>
-        <div className="detail-title"><GearIcon kind="brand" size={20} /><div><h2>{activeName}</h2><span>{community ? `${community.author} · ${community.homepage}` : '随 GearNote 提供'}</span></div></div>
+        <span className="detail-eyebrow">{skillIndex(active)} // {community ? 'COMMUNITY PACKAGE' : 'OFFICIAL SKILL'}</span>
+        <div className="detail-title"><span className="detail-gear" data-running={busy || undefined}><GearIcon kind="brand" size={20} /></span><div><h2>{activeName}</h2><span>{community ? `${community.author} · ${community.homepage}` : '随 GearNote 提供'}</span></div></div>
         <p className="detail-description">{official?.description ?? community?.description}</p>
         {official?.id === 'advanced' ? <label className="detail-field">选择笔记<select value={selectedNoteId} onChange={event => setSelectedNoteId(event.target.value)}><option value="">请选择</option>{notes.map(note => <option value={note.id} key={note.id}>{note.title}</option>)}</select></label> : <RecordPicker records={availableRecords} selectedIds={selectedIds} onToggle={toggleRecord} max={required.max} />}
         <section className="permission-box"><strong>{community ? '此技能可以' : '执行边界'}</strong>{community ? <ul>{community.permissions.map(permission => <li key={permission}>✓ {permissionLabel(permission)}</li>)}</ul> : <ul><li>✓ 只使用你在上方选择的输入</li><li>{official?.id === 'storyboard' ? '✓ 仅调用本地视频工具' : '✓ 调用现有受控功能'}</li><li>× 不获得额外文件或命令权限</li></ul>}</section>
         {needsModel && !agentAvailable && <p className="extension-warning">该技能需要模型服务。<button type="button" onClick={onOpenAgentSetup}>前往配置 →</button></p>}
-        <div className="detail-actions"><HudButton variant="primary" type="button" disabled={busy} onClick={() => { void run() }}>{busy ? '执行中…' : official?.id === 'advanced' ? '打开高级工作台' : '使用技能'}</HudButton>{community && <HudButton type="button" disabled={busy} onClick={() => { void remove(community) }}>卸载</HudButton>}</div>
+        <div className="detail-actions"><HudButton variant="primary" className={`gn-skill-run${canRun ? ' gn-skill-run--ready' : ''}`} type="button" disabled={busy} onClick={() => { void run() }}><span>{busy ? '执行中…' : official?.id === 'advanced' ? '打开高级工作台' : '使用技能'}</span><span className="hud-switch-cap" aria-hidden="true"><GearIcon kind="brand" size={16} /></span></HudButton>{community && <HudButton type="button" disabled={busy} onClick={() => { void remove(community) }}>卸载</HudButton>}</div>
         {error && <p className="extension-error" role="alert">{error}</p>}{message && <p className="extension-message" role="status">{message}</p>}
       </aside>
     </div>
@@ -186,7 +195,7 @@ export function SkillsPanel({ records, notes, agentAvailable, onRunQuestion, onC
 }
 
 function RecordPicker({ records, selectedIds, onToggle, max }: { records: KnowledgeRecord[]; selectedIds: string[]; onToggle: (record: KnowledgeRecord) => void; max: number }) {
-  return <div className="record-picker"><div className="record-picker-head"><strong>选择输入资料</strong><span>{selectedIds.length} / {max}</span></div>{records.length === 0 ? <p>暂无可用于技能的资料，请先在浏览器中捕获文章或字幕。</p> : <div className="record-picker-list">{records.map(record => <label key={record.id} data-selected={selectedIds.includes(record.id)}><input type="checkbox" checked={selectedIds.includes(record.id)} onChange={() => onToggle(record)} /><span>{record.title}</span></label>)}</div>}</div>
+  return <div className="record-picker"><div className="record-picker-head"><strong>选择输入资料</strong><span className="gn-tabular">{selectedIds.length} / {max}</span></div>{records.length === 0 ? <p>暂无可用于技能的资料，请先在浏览器中捕获文章或字幕。</p> : <div className="record-picker-list">{records.map(record => <label key={record.id} data-selected={selectedIds.includes(record.id)}><input type="checkbox" checked={selectedIds.includes(record.id)} onChange={() => onToggle(record)} /><span>{record.title}</span></label>)}</div>}</div>
 }
 
 function permissionLabel(permission: string) {

@@ -58,4 +58,15 @@ describe('HistoryPanel 删除资料确认', () => {
     fireEvent.click(screen.getByRole('button', { name: '＋ 导入链接' }))
     expect(onOpenUrlImport).toHaveBeenCalledTimes(1)
   })
+
+  it('highlightedRecordId 匹配时资料卡带引用高亮类，不匹配时移除', () => {
+    const view = render(<HistoryPanel {...panelProps()} />)
+    const card = document.getElementById(article.id)
+    expect(card).not.toBeNull()
+    expect(card).not.toHaveClass('is-citation-highlighted')
+    view.rerender(<HistoryPanel {...panelProps({ highlightedRecordId: article.id })} />)
+    expect(document.getElementById(article.id)).toHaveClass('is-citation-highlighted')
+    view.rerender(<HistoryPanel {...panelProps({ highlightedRecordId: null })} />)
+    expect(document.getElementById(article.id)).not.toHaveClass('is-citation-highlighted')
+  })
 })

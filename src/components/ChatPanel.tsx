@@ -8,6 +8,7 @@ import { useConfirm } from '../hooks/useConfirm'
 import { CapturedFrame } from './CapturedFrame'
 import { ChamferCard } from './ChamferCard'
 import { GearDivider, GearIcon, PaperPlaneIcon } from './GearIcon'
+import { AgentGothicHeader, AgentHeaderStatus } from './mechanical'
 import { MechanicalGear } from './MechanicalGear'
 import { HudButton } from './HudButton'
 import './chat.css'
@@ -43,6 +44,7 @@ type Props = {
   onSummarize?: (deepMode?: boolean) => void
   onRemoveReference: (id: string) => void
   onRevealRecord: (id: string, atSeconds?: number) => void
+  onHoverCitation?: (recordId: string | null) => void
   onToggleHistory: () => void
   onShowHistory: () => void
   onCreateNoteDraft?: (message: ChatMessage) => void
@@ -124,7 +126,7 @@ function StreamingRun({ streaming }: { streaming: ChatStreaming }) {
   </div>
 }
 
-export function ChatPanel({ records, frameToAttach = null, onFrameAttached, pendingChoice = null, pendingLibrarySearch = null, onResolveLibrarySearch, pendingChatNoteEdit = null, onResolveChatNoteEdit, pendingCommand = null, onResolveCommand, sessionId, referencedIds, workingContext = { goal: '', completed: '', nextStep: '', updatedAt: '' }, projectMemory = [], compactedSummary = '', compactedCount = 0, historyOpen, agentAvailable, sending = false, streaming = null, suggestingMessageId = null, suggestionErrorId = null, error = '', onContinueReading, onSend, onPreviewContext, onOpenAgentSetup, onSummarize, onRemoveReference, onRevealRecord, onToggleHistory, onShowHistory, onCreateNoteDraft, onOpenUrlImport, messages = [], compact = false, readContinuation = null }: Props) {
+export function ChatPanel({ records, frameToAttach = null, onFrameAttached, pendingChoice = null, pendingLibrarySearch = null, onResolveLibrarySearch, pendingChatNoteEdit = null, onResolveChatNoteEdit, pendingCommand = null, onResolveCommand, sessionId, referencedIds, workingContext = { goal: '', completed: '', nextStep: '', updatedAt: '' }, projectMemory = [], compactedSummary = '', compactedCount = 0, historyOpen, agentAvailable, sending = false, streaming = null, suggestingMessageId = null, suggestionErrorId = null, error = '', onContinueReading, onSend, onPreviewContext, onOpenAgentSetup, onSummarize, onRemoveReference, onRevealRecord, onHoverCitation, onToggleHistory, onShowHistory, onCreateNoteDraft, onOpenUrlImport, messages = [], compact = false, readContinuation = null }: Props) {
   const [draft, setDraft] = useState('')
   const { confirm, confirmDialog } = useConfirm()
   const [stoppingReading, setStoppingReading] = useState(false)
@@ -284,7 +286,7 @@ export function ChatPanel({ records, frameToAttach = null, onFrameAttached, pend
 
   return <section className="chat-panel" aria-label="Agent 对话">
     {!compact && <MechanicalGear className="mech-chat-watermark" teeth={20} speed="42s" reverse />}
-    {!compact && <header className="chat-page-head"><div><span>AGENT / DIALOGUE</span><h1>Agent 对话</h1><p>只依据本轮资料回答，引用可回到原文。</p></div><span className={`chat-agent-status${canSend ? ' is-ready' : ''}`}><i />{canSend ? 'Agent 已就绪' : 'Agent 未配置'}</span><MechanicalGear className="mech-heading-gear" teeth={16} speed="22s" reverse /></header>}
+    {!compact && <header className="chat-page-head"><div><span>AGENT / DIALOGUE</span><h1>Agent 对话</h1><p>只依据本轮资料回答，引用可回到原文。</p></div><AgentGothicHeader active={Boolean(sending || streaming)} /><AgentHeaderStatus ready={canSend} active={Boolean(sending || streaming)} /><MechanicalGear className="mech-heading-gear" teeth={16} speed="22s" reverse /></header>}
     {(compact || referencedRecords.length > 0 || !historyOpen) && <div className="context-bar" id="ctx-01">
       {!compact && <span className="context-bar-label">本轮参考</span>}
       <div className="context-items" aria-label="当前引用资料">
@@ -318,7 +320,7 @@ export function ChatPanel({ records, frameToAttach = null, onFrameAttached, pend
               return cited && <button type="button" key={`${citation.recordId}-${citation.sourceIndex ?? index}`} title={`定位${cited.role === 'agent' ? 'Agent 回答' : '用户消息'}`} onClick={() => document.getElementById(cited.id)?.scrollIntoView({ behavior: 'smooth', block: 'center' })}><span aria-hidden="true">{citation.label ?? (citation.sourceIndex ? `[${citation.sourceIndex}]` : '↗')}</span>{cited.role === 'agent' ? 'Agent 回答' : '用户消息'}</button>
             }
             if (!record) return null
-            return <button type="button" key={`${citation.recordId}-${citation.sourceIndex ?? index}`} title={`查看 ${record.title}`} onClick={() => onRevealRecord(citation.recordId, citation.atSeconds)}><span aria-hidden="true">{citation.label ?? (citation.sourceIndex ? `[${citation.sourceIndex}]` : '↗')}</span>{citation.atSeconds == null ? record.site : `${formatElapsed(citation.atSeconds)} ${citation.kind === 'image' ? '画面' : '字幕'}`}</button>
+            return <button type="button" key={`${citation.recordId}-${citation.sourceIndex ?? index}`} title={`查看 ${record.title}`} onClick={() => onRevealRecord(citation.recordId, citation.atSeconds)} onMouseEnter={() => onHoverCitation?.(citation.recordId)} onMouseLeave={() => onHoverCitation?.(null)} onFocus={() => onHoverCitation?.(citation.recordId)} onBlur={() => onHoverCitation?.(null)}><span aria-hidden="true">{citation.label ?? (citation.sourceIndex ? `[${citation.sourceIndex}]` : '↗')}</span>{citation.atSeconds == null ? record.site : `${formatElapsed(citation.atSeconds)} ${citation.kind === 'image' ? '画面' : '字幕'}`}</button>
           })}</div></div>}
           {message.id === latestAgentId && suggestingMessageId === message.id && <p className="chat-suggestion-status" role="status">正在准备下一步建议…</p>}
           {message.id === latestAgentId && suggestionErrorId === message.id && <p className="chat-suggestion-status">本轮建议暂未生成，回答不受影响。</p>}

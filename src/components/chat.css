@@ -205,3 +205,9 @@
 
 .reading-stop-control { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:var(--space-3); margin:var(--space-3) 0; color:var(--muted); font-size:var(--fs-12); }
 .reading-stop-control p { flex-basis:100%; }
+
+/* === Phase 3：对话页精密仪表层（base + HUD 兼容） === */
+body[data-theme='hud'] .chat-page-head .agent-header-blueprint,
+body[data-theme='hud'] .chat-page-head .agent-vernier-ruler { display: none; }
+body[data-theme='hud'] .chat-agent-status i.gn-led { width: 5px; height: 5px; border: 0; background: var(--weak); box-shadow: none; }
+body[data-theme='hud'] .chat-agent-status.is-ready i.gn-led { background: var(--accent); box-shadow: 0 0 0 3px rgba(255,212,0,.08),0 0 8px rgba(255,212,0,.35); }

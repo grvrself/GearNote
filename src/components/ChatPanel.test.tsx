@@ -1,8 +1,9 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { ComponentProps } from 'react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { getChatFrameImage, stopAgentReading } from '../agent'
 import type { ChatMessage } from '../chat-data'
+import { applyMotion, applyTheme } from '../theme'
 import { ChatPanel } from './ChatPanel'
 
 vi.mock('../agent', async importOriginal => ({
@@ -21,8 +22,17 @@ function panelProps(overrides: Partial<ComponentProps<typeof ChatPanel>> = {}): 
   }
 }
 
+beforeAll(() => {
+  Object.defineProperty(window, 'matchMedia', {
+    writable: true,
+    value: vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn(), addListener: vi.fn(), removeListener: vi.fn() })),
+  })
+})
+
 beforeEach(() => {
   vi.clearAllMocks()
+  applyTheme('mono')
+  applyMotion('full')
   vi.mocked(stopAgentReading).mockResolvedValue(undefined)
 })
 
@@ -223,6 +233,22 @@ describe('ChatPanel 关键交互', () => {
     expect(input).toHaveValue('')
   })
 
+  it('悬停或聚焦资料引用时上报 recordId，离开或失焦时上报 null', () => {
+    const onHoverCitation = vi.fn()
+    const articleRecord = { id: 'art-1', type: 'article' as const, title: '测试文章', site: 'example.com', savedAt: '2026-11-26T00:00:00Z', status: 'ready' as const, sourceUrl: 'https://example.com/post', contentText: '正文', excerpt: ['正文'] }
+    const citedReply: ChatMessage = { ...reply, citations: [{ recordId: 'art-1', sourceIndex: 1 }] }
+    render(<ChatPanel {...panelProps({ records: [articleRecord], messages: [citedReply], onHoverCitation })} />)
+    const citation = screen.getByRole('button', { name: 'example.com' })
+    fireEvent.mouseEnter(citation)
+    expect(onHoverCitation).toHaveBeenLastCalledWith('art-1')
+    fireEvent.mouseLeave(citation)
+    expect(onHoverCitation).toHaveBeenLastCalledWith(null)
+    fireEvent.focus(citation)
+    expect(onHoverCitation).toHaveBeenLastCalledWith('art-1')
+    fireEvent.blur(citation)
+    expect(onHoverCitation).toHaveBeenLastCalledWith(null)
+  })
+
   it('结构化提醒按 code 渲染，修改展示文案不影响显示', () => {
     const message: ChatMessage = { ...reply, toolSteps: ['随便改写的步骤文案'], outcome: {
       kind: 'answer', answer: 'partial',
@@ -267,5 +293,52 @@ describe('ChatPanel 关键交互', () => {
     fireEvent.click(screen.getByRole('button', { name: '继续深入 ↗' }))
     await waitFor(() => expect(input).toHaveValue('请继续深入分析'))
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('mono 主题下页眉渲染静止骷髅与旋转哥特光环 AgentGothicHeader，移除齿轮暗纹并联动三档动效与主题隔离', () => {
+    const view = render(<ChatPanel {...panelProps({ agentAvailable: true, sending: false })} />)
+    expect(screen.getByText('Agent 已就绪')).toBeInTheDocument()
+
+    expect(document.querySelector('.agent-header-blueprint')).toBeNull()
+    const banner = document.querySelector('.agent-gothic-banner')
+    const telemetry = document.querySelector('.agent-header-telemetry')
+    expect(banner).toBeInTheDocument()
+    expect(banner).toHaveAttribute('data-active', 'false')
+    expect(banner).toHaveAttribute('data-motion', 'full')
+    expect(banner).toHaveAttribute('aria-hidden', 'true')
+    expect(telemetry).toHaveAttribute('data-active', 'false')
+    expect(document.querySelector('.agent-vernier-ruler')).toBeInTheDocument()
+    expect(document.querySelector('.agent-vernier-pointer')).toBeInTheDocument()
+
+    const haloSvg = banner?.querySelector('.agent-gothic-halo-svg')
+    expect(haloSvg).toHaveAttribute('viewBox', '0 0 260 260')
+    expect(haloSvg?.querySelector('.agent-gothic-rings circle[r="112"]')).toBeInTheDocument()
+    expect(haloSvg?.querySelector('.agent-gothic-rings circle[r="96"]')).toBeInTheDocument()
+    expect(haloSvg?.querySelector('.agent-gothic-rings circle[r="78"]')).toBeInTheDocument()
+    expect(haloSvg?.querySelectorAll('.agent-gothic-arches > g')).toHaveLength(12)
+    expect(haloSvg?.querySelectorAll('.agent-gothic-rays > g')).toHaveLength(24)
+
+    const skullImg = banner?.querySelector('.agent-gothic-skull') as HTMLImageElement | null
+    expect(skullImg).toBeInTheDocument()
+    expect(skullImg?.tagName).toBe('IMG')
+    expect(skullImg?.getAttribute('src')).toBeTruthy()
+
+    view.rerender(<ChatPanel {...panelProps({ agentAvailable: true, sending: true })} />)
+    expect(screen.getByText('Agent 思考中...')).toBeInTheDocument()
+    expect(document.querySelector('.agent-gothic-banner')).toHaveAttribute('data-active', 'true')
+    expect(document.querySelector('.agent-header-telemetry')).toHaveAttribute('data-active', 'true')
+
+    act(() => { applyMotion('reduced') })
+    expect(document.querySelector('.agent-gothic-banner')).toHaveAttribute('data-motion', 'reduced')
+
+    act(() => { applyMotion('off') })
+    expect(document.querySelector('.agent-gothic-banner')).toHaveAttribute('data-motion', 'off')
+
+    view.rerender(<ChatPanel {...panelProps({ agentAvailable: false, sending: false })} />)
+    expect(screen.getByText('Agent 未配置')).toBeInTheDocument()
+    expect(document.querySelector('.chat-agent-status')).not.toHaveClass('is-ready')
+
+    act(() => { applyTheme('hud') })
+    expect(document.querySelector('.agent-gothic-banner')).not.toBeInTheDocument()
   })
 })

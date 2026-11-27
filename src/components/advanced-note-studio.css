@@ -54,3 +54,21 @@
 .advanced-studio button:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
 @media (max-width:900px) { .advanced-studio { grid-template-columns:minmax(0,1fr) 290px; } .studio-main-gear { top:28%; left:2%; } .studio-gear-1 { top:14%; left:40%; } .studio-gear-2 { top:45%; left:55%; } .studio-gear-3 { top:63%; left:59%; } }
 @media (prefers-reduced-motion:reduce) { .advanced-studio[data-working='true'] .studio-gear { animation:none; } }
+
+/* === Phase 2+：HeroDialStage 精密表盘与去重兼容（mono 主窗口），hud 保留 MechanicalTrain === */
+body[data-theme='mono'][data-window='main'] .studio-canvas .gn-crosshair-frame { z-index:2; }
+body[data-theme='hud'] .studio-canvas .gn-crosshair-frame { display:none; }
+
+/* mono：齿轮去重（眉标/中心孤立齿轮隐藏），hud 保留自有齿轮 */
+body[data-theme='mono'][data-window='main'] .studio-header .gear-icon,
+body[data-theme='mono'][data-window='main'] .studio-center > .gear-icon,
+body[data-theme='mono'][data-window='main'] .studio-rail > header .gear-icon,
+body[data-theme='mono'][data-window='main'] .studio-preview-label .gear-icon { display:none; }
+
+/* HUD 兼容：gn 卡片/按钮表面只在 mono 主窗口生效 */
+body[data-theme='hud'] .studio-note-option.gn-card { background:var(--bg); border:1px solid var(--line); border-radius:0; transition:none; }
+body[data-theme='hud'] .studio-note-option.gn-card:hover { background:var(--bg); border-color:var(--line); }
+body[data-theme='hud'] .studio-note-option.gn-card--active:not([data-selected='true']) { background:var(--panel); border-color:var(--paper); box-shadow:none; }
+body[data-theme='hud'] .studio-rail footer .gn-btn-secondary { border-radius:0; }
+body[data-theme='hud'] .studio-status .gn-led--online { background:var(--accent); box-shadow:none; }
+body[data-theme='hud'] .studio-status .gn-led--idle { border-color:var(--muted); }

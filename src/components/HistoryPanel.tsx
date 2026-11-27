@@ -59,9 +59,10 @@ type Props = {
   onDeleteRecord: (record: KnowledgeRecord) => Promise<void>
   onDismissCaptureJob?: (id: string) => Promise<void>
   onOpenUrlImport?: () => void
+  highlightedRecordId?: string | null
 }
 
-export function HistoryPanel({ records = recordFixtures, captureJobs = [], selectedId, referencedIds, focusRequest, onSelect, onReference, onRemoveReference, onCollapse, miniAvailable, onOpenMini, searchRef, onRecordsChanged, onAskFrame, onDeleteRecord, onDismissCaptureJob, onOpenUrlImport }: Props) {
+export function HistoryPanel({ records = recordFixtures, captureJobs = [], selectedId, referencedIds, focusRequest, onSelect, onReference, onRemoveReference, onCollapse, miniAvailable, onOpenMini, searchRef, onRecordsChanged, onAskFrame, onDeleteRecord, onDismissCaptureJob, onOpenUrlImport, highlightedRecordId = null }: Props) {
   const [filter, setFilter] = useState<Filter>('all')
   const [query, setQuery] = useState('')
   const [activeMoment, setActiveMoment] = useState<number | null>(null)
@@ -168,6 +169,7 @@ export function HistoryPanel({ records = recordFixtures, captureJobs = [], selec
           record={record}
           expanded={selectedId === record.id}
           referenced={referencedIds.includes(record.id)}
+          highlighted={highlightedRecordId === record.id}
           activeMoment={activeMoment}
           onToggle={() => { onSelect(record.id); setActiveMoment(null) }}
           onMoment={setActiveMoment}
@@ -186,6 +188,7 @@ type CardProps = {
   record: KnowledgeRecord
   expanded: boolean
   referenced: boolean
+  highlighted: boolean
   activeMoment: number | null
   onToggle: () => void
   onMoment: (seconds: number) => void
@@ -195,7 +198,7 @@ type CardProps = {
   onDeleteRecord: () => Promise<void>
 }
 
-function RecordCard({ record, expanded, referenced, activeMoment, onToggle, onMoment, onReference, onRecordsChanged, onAskFrame, onDeleteRecord }: CardProps) {
+function RecordCard({ record, expanded, referenced, highlighted, activeMoment, onToggle, onMoment, onReference, onRecordsChanged, onAskFrame, onDeleteRecord }: CardProps) {
   const { confirm, confirmDialog } = useConfirm()
   const [sourceMessage, setSourceMessage] = useState('')
   const [deleting, setDeleting] = useState(false)
@@ -251,12 +254,12 @@ function RecordCard({ record, expanded, referenced, activeMoment, onToggle, onMo
       setSegmentResults(null)
     } finally { setSegmentLoading(false) }
   }
-  return <ChamferCard className={`record-card ${expanded ? 'is-expanded' : ''} ${referenced ? 'is-referenced' : ''}`} id={record.id}>
+  return <ChamferCard className={`record-card ${expanded ? 'is-expanded' : ''} ${referenced ? 'is-referenced' : ''} ${highlighted ? 'is-citation-highlighted' : ''}`} id={record.id}>
     <MechanicalGear className="mech-record-gear" teeth={12} speed="24s" reverse />
     <button className="record-summary" type="button" aria-expanded={expanded} aria-controls={`${record.id}-details`} onClick={onToggle}>
-      <span className="record-topline"><span className="record-kind">{record.type === 'video' ? '■ VIDEO' : '◆ ARTICLE'}</span>{record.demo && <span className="record-demo">DEMO</span>}{record.durationSeconds != null && <time className="record-duration" dateTime={`PT${record.durationSeconds}S`}>{formatElapsed(record.durationSeconds)}</time>}{referenced && <span className="record-reference-flag">本轮参考</span>}<span className="record-expand" aria-hidden="true">{expanded ? '−' : '+'}</span></span>
+      <span className="record-topline"><span className="record-kind">{record.type === 'video' ? '■ VIDEO' : '◆ ARTICLE'}</span>{record.demo && <span className="record-demo">DEMO</span>}{record.durationSeconds != null && <time className="record-duration gn-tabular" dateTime={`PT${record.durationSeconds}S`}>{formatElapsed(record.durationSeconds)}</time>}{referenced && <span className="record-reference-flag gn-tabular">本轮参考</span>}<span className="record-expand gn-tabular" aria-hidden="true">{expanded ? '−' : '+'}</span></span>
       <strong className="record-title">{expanded && <span aria-hidden="true">⌜</span>}{record.title}</strong>
-      <span className="record-origin"><span>{record.site}</span><time dateTime={record.savedAt}>{savedAtFormatter.format(new Date(record.savedAt))}</time></span>
+      <span className="record-origin"><span>{record.site}</span><time className="gn-tabular" dateTime={record.savedAt}>{savedAtFormatter.format(new Date(record.savedAt))}</time></span>
       {record.captionLanguage && <span className="record-caption-language">SUBTITLE / {record.captionLanguage}</span>}
     </button>
     <div className="record-status-row"><StatusBadge status={record.status} progress={record.progress} reason={record.faultReason} /></div>

@@ -5,6 +5,7 @@ import { previewNoteDesign } from '../note-design'
 import { AdvancedNotePanel } from './AdvancedNotePanel'
 import { GearIcon } from './GearIcon'
 import { MechanicalTrain } from './MechanicalGear'
+import { HeroDialStage, StudioHudDial, StudioHudVernierRail } from './mechanical'
 import './advanced-note-studio.css'
 
 type Props = {
@@ -29,6 +30,7 @@ export function AdvancedNoteStudio({ notes, records, initialNoteId, onSelectNote
   const [activeId, setActiveId] = useState(initialNoteId ?? notes[0]?.id ?? '')
   const [editing, setEditing] = useState(false)
   const [working, setWorking] = useState(false)
+  const [ctaHovered, setCtaHovered] = useState(false)
   const [error, setError] = useState('')
   const active = notes.find(note => note.id === activeId) ?? null
 
@@ -56,27 +58,29 @@ export function AdvancedNoteStudio({ notes, records, initialNoteId, onSelectNote
 
   return <section className="advanced-studio" aria-label="高级笔记工作台" data-working={working}>
     <div className="studio-canvas">
-      <header className="studio-header"><span><GearIcon kind="brand" size={16} /> SEC-02 / 高级笔记工作台 <small>{String(notes.length).padStart(2, '0')}</small></span><button type="button" onClick={onClose}>返回资料库</button></header>
+      <header className="studio-header"><span><GearIcon kind="brand" size={16} /> SEC-02 / 高级笔记工作台 <small className="gn-tabular">{String(notes.length).padStart(2, '0')}</small></span><button type="button" onClick={onClose}>返回资料库</button></header>
       <MechanicalTrain />
-      <div className="studio-center"><GearIcon kind="brand" size={20} /><span>{working ? 'GENERATING' : 'READING EDITION / MONO'}</span><h1>让笔记成为<br />可阅读的作品</h1><p>保留正文、引用与事实边界，只重新组织版式。先预览，再保存；原笔记不会被覆盖。</p><div className="studio-center-actions"><button type="button" className="studio-generate" disabled={!active || working} onClick={() => { void generate() }}>{working ? '生成中…' : '生成高级版 →'}</button><button type="button" disabled={!active || working} onClick={() => { if (active) { onSelectNote(active); onClose() } }}>打开原笔记</button></div></div>
-      <div className="studio-canvas-caption"><span>SELECTED NOTE / {String(notes.findIndex(note => note.id === active?.id) + 1).padStart(2, '0')}</span><strong>{active?.title ?? '从右侧选择一篇笔记'}</strong><small>{active ? `${active.sources.length} 个来源 · ${active.body.length.toLocaleString('zh-CN')} 字` : '选择后开始生成'}</small></div>
-      <div className="studio-status"><i />{working ? '正在生成高级版预览' : '本地生成 · 预览未保存'}</div>
+      <HeroDialStage active={working} highlighted={ctaHovered || working} />
+      <StudioHudDial active={working} highlighted={ctaHovered || working} />
+      <div className="studio-center"><GearIcon kind="brand" size={20} /><StudioHudVernierRail highlighted={ctaHovered || working} /><span className="gn-eyebrow">{working ? 'GENERATING' : 'READING EDITION / MONO'}</span><h1>让笔记成为<br />可阅读的作品</h1><p>保留正文、引用与事实边界，只重新组织版式。先预览，再保存；原笔记不会被覆盖。</p><div className="studio-center-actions"><button type="button" className="studio-generate gn-btn-primary" disabled={!active || working} onMouseEnter={() => setCtaHovered(true)} onMouseLeave={() => setCtaHovered(false)} onFocus={() => setCtaHovered(true)} onBlur={() => setCtaHovered(false)} onClick={() => { void generate() }}>{working ? '生成中…' : '生成高级版 →'}</button><button type="button" className="gn-btn-secondary" disabled={!active || working} onClick={() => { if (active) { onSelectNote(active); onClose() } }}>打开原笔记</button></div></div>
+      <div className="studio-canvas-caption"><span className="gn-tabular">SELECTED NOTE / {String(notes.findIndex(note => note.id === active?.id) + 1).padStart(2, '0')}</span><strong>{active?.title ?? '从右侧选择一篇笔记'}</strong><small className="gn-tabular">{active ? `${active.sources.length} 个来源 · ${active.body.length.toLocaleString('zh-CN')} 字` : '选择后开始生成'}</small></div>
+      <div className="studio-status gn-tabular"><i className={`gn-led ${working ? 'gn-led--online' : 'gn-led--idle'}`} />{working ? '正在生成高级版预览' : '本地生成 · 预览未保存'}</div>
     </div>
     <aside className="studio-rail" aria-label="选择笔记与预览">
-      <header><span><GearIcon kind="brand" size={16} /> 笔记选择</span><small>READ ONLY</small></header>
+      <header><span><GearIcon kind="brand" size={16} /> 笔记选择</span><small className="gn-eyebrow">READ ONLY</small></header>
       <div className="studio-rail-scroll">
         {notes.length === 0 && <p className="studio-empty">还没有笔记。先从资料生成草稿，或在资料库新建笔记。</p>}
-        <div className="studio-note-list">{notes.map(note => <button type="button" key={note.id} className="studio-note-option" data-selected={activeId === note.id} disabled={working} onClick={() => selectNote(note)}>
-          <span>{note.title}</span><small>{note.sources.length} 条来源 · {new Date(note.updatedAt).toLocaleDateString('zh-CN')}</small>
+        <div className="studio-note-list">{notes.map(note => <button type="button" key={note.id} className={`studio-note-option gn-card${activeId === note.id ? ' gn-card--active' : ''}`} data-selected={activeId === note.id} disabled={working} onClick={() => selectNote(note)}>
+          <span>{note.title}</span><small className="gn-tabular">{note.sources.length} 条来源 · {new Date(note.updatedAt).toLocaleDateString('zh-CN')}</small>
         </button>)}</div>
         {active && <section className="studio-preview" aria-label="所选笔记预览"><span className="studio-preview-label"><GearIcon kind="brand" size={16} /> 预览</span><h2>{active.title}</h2>
-          <div className="studio-preview-meta"><time>{new Date(active.updatedAt).toLocaleString('zh-CN')}</time><span>{active.sources.length} 个来源</span><span>{active.body.length.toLocaleString('zh-CN')} 字</span></div>
+          <div className="studio-preview-meta gn-tabular"><time>{new Date(active.updatedAt).toLocaleString('zh-CN')}</time><span>{active.sources.length} 个来源</span><span>{active.body.length.toLocaleString('zh-CN')} 字</span></div>
           <p>{previewText(active)}</p>
           {active.sources.length > 0 && <div className="studio-preview-sources"><strong>来源资料</strong>{active.sources.slice(0, 4).map((source, index) => <span key={`${source.recordId}-${index}`}>{source.title}</span>)}{active.sources.length > 4 && <small>另有 {active.sources.length - 4} 条</small>}</div>}
         </section>}
         {error && <p className="studio-error" role="alert">{error}</p>}
       </div>
-      <footer><button type="button" disabled={!active || working} onClick={() => { if (active) { onSelectNote(active); onClose() } }}>打开笔记</button><button type="button" onClick={onCreateFromSources} disabled={working}>从资料生成</button><small>GENERATION DOES NOT MODIFY THE ORIGINAL NOTE</small></footer>
+      <footer><button type="button" className="gn-btn-secondary" disabled={!active || working} onClick={() => { if (active) { onSelectNote(active); onClose() } }}>打开笔记</button><button type="button" className="gn-btn-secondary" onClick={onCreateFromSources} disabled={working}>从资料生成</button><small>GENERATION DOES NOT MODIFY THE ORIGINAL NOTE</small></footer>
     </aside>
   </section>
 }

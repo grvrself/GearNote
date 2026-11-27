@@ -1,11 +1,24 @@
 import type { ReactNode } from 'react'
 import type { Note } from '../notes'
-import { GearIcon } from './GearIcon'
 
-function inlineText(text: string): ReactNode[] {
+function boldSegments(text: string, keyPrefix: string): ReactNode[] {
   const parts = text.split('**')
   if (parts.length % 2 === 0) return [text]
-  return parts.map((part, index) => index % 2 === 1 ? <strong key={index}>{part}</strong> : part)
+  return parts.map((part, index) => index % 2 === 1 ? <strong key={`${keyPrefix}-${index}`}>{part}</strong> : part)
+}
+
+function inlineText(text: string): ReactNode[] {
+  const nodes: ReactNode[] = []
+  const codePattern = /`([^`]+)`/g
+  let cursor = 0
+  let match: RegExpExecArray | null
+  while ((match = codePattern.exec(text)) !== null) {
+    if (match.index > cursor) nodes.push(...boldSegments(text.slice(cursor, match.index), `t-${cursor}`))
+    nodes.push(<code key={`c-${match.index}`}>{match[1]}</code>)
+    cursor = match.index + match[0].length
+  }
+  if (cursor < text.length) nodes.push(...boldSegments(text.slice(cursor), `t-${cursor}`))
+  return nodes
 }
 
 function bodyBlocks(body: string): ReactNode[] {
@@ -26,7 +39,7 @@ function bodyBlocks(body: string): ReactNode[] {
     const claim = /^[-*]\s+(.+?)。「(.+)」\[(\d+)\]$/.exec(line)
     if (heading) {
       flush(); section += 1
-      blocks.push(<h4 className="note-reader-heading" key={`h-${blocks.length}`}><span><GearIcon kind="brand" size={16} /> SEC-{String(section).padStart(2, '0')}</span>{inlineText(heading[2])}</h4>)
+      blocks.push(<h4 className="note-reader-heading" key={`h-${blocks.length}`}><span className="gn-tabular">{String(section).padStart(2, '0')} //</span>{inlineText(heading[2])}</h4>)
     } else if (claim) {
       flush()
       blocks.push(<div className="note-reader-claim" key={`c-${blocks.length}`}><p>{inlineText(claim[1])}</p><blockquote><span>笔记引文 [{claim[3]}]</span>{claim[2]}</blockquote></div>)
@@ -47,5 +60,5 @@ function bodyBlocks(body: string): ReactNode[] {
 }
 
 export function NoteReader({ note }: { note: Note }) {
-  return <article className="note-reader" aria-label={`笔记《${note.title}》正文`}>{bodyBlocks(note.body)}</article>
+  return <article className="note-reader gn-prose" aria-label={`笔记《${note.title}》正文`}>{bodyBlocks(note.body)}</article>
 }

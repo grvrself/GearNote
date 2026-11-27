@@ -2,18 +2,19 @@ import { useState, type ButtonHTMLAttributes, type ReactNode } from 'react'
 import type { ChatSessionSummary } from '../agent'
 import { useConfirm } from '../hooks/useConfirm'
 import { GearIcon } from './GearIcon'
+import { SidebarFloralBackdrop } from './mechanical'
 import './sidebar.css'
 
 export type View = 'chat' | 'library' | 'studio' | 'skills' | 'plugins' | 'settings'
 export type SettingsSection = 'overview' | 'agent' | 'reading' | 'persona' | 'appearance' | 'data' | 'shortcuts' | 'about'
 
-export const navigation: { id: View; label: string; icon: IconName }[] = [
-  { id: 'chat', label: 'Agent 对话', icon: 'chat' },
-  { id: 'library', label: '资料库', icon: 'library' },
-  { id: 'studio', label: '高级笔记', icon: 'studio' },
-  { id: 'skills', label: '技能', icon: 'skills' },
-  { id: 'plugins', label: '插件', icon: 'plugins' },
-  { id: 'settings', label: '设置', icon: 'settings' },
+export const navigation: { id: View; label: string; icon: IconName; index: string }[] = [
+  { id: 'chat', label: 'Agent 对话', icon: 'chat', index: '01' },
+  { id: 'library', label: '资料库', icon: 'library', index: '02' },
+  { id: 'studio', label: '高级笔记', icon: 'studio', index: '03' },
+  { id: 'skills', label: '技能', icon: 'skills', index: '04' },
+  { id: 'plugins', label: '插件', icon: 'plugins', index: '05' },
+  { id: 'settings', label: '设置', icon: 'settings', index: '06' },
 ]
 
 type IconName = 'chat' | 'library' | 'studio' | 'skills' | 'plugins' | 'settings' | 'search' | 'capture' | 'video' | 'summary' | 'mini' | 'shortcut'
@@ -41,14 +42,16 @@ type SideButtonProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'children'>
   label: string
   active?: boolean
   hint?: string
+  index?: string
   kind: 'nav' | 'command'
 }
 
-function SideButton({ icon, label, active = false, hint, kind, disabled, title, ...props }: SideButtonProps) {
+function SideButton({ icon, label, active = false, hint, index, kind, disabled, title, ...props }: SideButtonProps) {
   return <div className="side-button-wrapper" data-kind={kind} data-active={active} data-disabled={disabled || undefined} title={title ?? label}>
     <div className="side-button-border">
       <button className="side-button-content" type="button" disabled={disabled} aria-label={disabled ? `${label}，暂不可用` : label} {...props}>
         {active && <span className="side-active-corner" aria-hidden="true">⌜</span>}
+        {index && <span className="side-button-index" aria-hidden="true">{index}</span>}
         <SidebarIcon name={icon} />
         <span className="side-button-label">{label}</span>
         {active && kind === 'nav' && <span className="mono-active-gear"><GearIcon kind="sidebar" /></span>}
@@ -75,13 +78,18 @@ export function Sidebar({ view, sessions, activeSessionId, sessionBusy, sessionE
   const [query, setQuery] = useState('')
   const [sessionListOpen, setSessionListOpen] = useState(false)
   const visibleSessions = sessions.filter(session => session.title.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()))
-  const activeSession = sessions.find(session => session.id === activeSessionId)
+
+  const requestDelete = (session: ChatSessionSummary) => {
+    void (async () => {
+      if (await confirm({ title: '删除会话', message: `删除会话“${session.title}”？此操作会删除该会话的对话记录。`, confirmLabel: '删除', danger: true })) onDeleteSession(session.id)
+    })()
+  }
 
   return <aside className="left-sidebar" id="nav-01" aria-label="工作区导航与会话列表">
     <div className="sidebar-section-heading"><span>NAV-01 / WORKSPACE</span></div>
     <div className="mono-workspace-gear" aria-hidden="true"><GearIcon kind="sidebar" size={20} /></div>
     <nav className="sidebar-nav" aria-label="主导航">
-      {navigation.map(item => <SideButton key={item.id} kind="nav" icon={item.icon} label={item.label} active={view === item.id} aria-current={view === item.id ? 'page' : undefined} onClick={() => onViewChange(item.id)} />)}
+      {navigation.map(item => <SideButton key={item.id} kind="nav" icon={item.icon} index={item.index} label={item.label} active={view === item.id} aria-current={view === item.id ? 'page' : undefined} onClick={() => onViewChange(item.id)} />)}
     </nav>
 
     <section className="sidebar-sessions" id="ses-01" aria-labelledby="ses-01-label" data-open={sessionListOpen}>
@@ -95,13 +103,16 @@ export function Sidebar({ view, sessions, activeSessionId, sessionBusy, sessionE
               <span>{session.title}</span>
               {session.id === activeSessionId && <span className="mono-active-gear"><GearIcon kind="sidebar" /></span>}
             </button>
+            <button className="session-delete" type="button" disabled={sessionBusy} aria-label={`删除会话 ${session.title}`} title="删除会话" onClick={() => requestDelete(session)}>
+              <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4.5h11M6.5 2.5h3M4 4.5l.7 9h6.6l.7-9M6.5 7v4M9.5 7v4" /></svg>
+            </button>
           </li>)}
           {visibleSessions.length === 0 && <li className="session-empty">{sessions.length ? '没有匹配会话' : '暂无会话'}</li>}
         </ul>
-        {activeSession && <div className="session-actions"><button type="button" disabled={sessionBusy} onClick={() => { void (async () => { if (await confirm({ title: '删除会话', message: `删除会话“${activeSession.title}”？此操作会删除该会话的对话记录。`, confirmLabel: '删除', danger: true })) onDeleteSession(activeSession.id) })() }}>删除</button></div>}
         {sessionError && <p className="session-error" role="alert">{sessionError}</p>}
       </div>
     </section>
+    <SidebarFloralBackdrop />
     {confirmDialog}
   </aside>
 }

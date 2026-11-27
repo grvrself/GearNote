@@ -14,6 +14,7 @@ export function StatusBadge({ status, progress, reason }: Props) {
   return <span className="status-unit" data-status={status} role="status" aria-label={`${labels[status]}${safeProgress == null ? '' : ` ${safeProgress}%`}${reason ? `：${reason}` : ''}`}>
     <span className="status-badge">
       {status === 'fault' && <span className="status-hazard" aria-hidden="true" />}
+      {(status === 'ready' || status === 'fault') && <span className="gn-badge-dot" aria-hidden="true" />}
       <span className="status-label">{labels[status]}</span>
       {status !== 'fault' && <span className="mono-status-gear"><GearIcon kind={status === 'ready' ? 'complete' : 'working'} /></span>}
       {(status === 'extracting' || status === 'summarizing') && <span className="status-ticks" aria-hidden="true">

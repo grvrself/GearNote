@@ -14,7 +14,7 @@
 .notes-folder-list button:hover:not(:disabled), .notes-folder-list button[aria-current='page'] { background:var(--panel-2); }
 .notes-folder-list button[aria-current='page'] { border-color:var(--accent); color:var(--accent); }
 .notes-folder-list button span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.notes-folder-list button small { color:var(--muted); font:var(--fs-11) var(--font-mono); }
+.notes-folder-list button small { color:var(--muted); font:var(--fs-11) var(--font-mono); text-align:right; }
 .notes-folder-actions { display:flex; gap:var(--space-3); padding:0 var(--space-4) var(--space-3); }
 .notes-folder-form { display:grid; gap:var(--space-2); padding:var(--space-3) var(--space-4); border-top:var(--edge) solid var(--line); }
 .notes-folder-form label { color:var(--muted); font-size:var(--fs-11); }
@@ -119,3 +119,10 @@ body[data-theme='mono'] .notes-compose-entry .gear-icon { color:var(--bg); }
 .note-reader-claim blockquote, .note-reader-quote { padding-left:var(--space-3); border-left:2px solid var(--line); color:var(--muted); }
 .note-reader-claim blockquote span { display:block; margin-bottom:var(--space-1); font:var(--fs-11) var(--font-mono); }
 .note-reader hr { width:100%; margin:var(--space-2) 0; border:0; border-top:var(--edge) solid var(--line); }
+.notes-reading > .gn-ruler-divider { display:none; }
+
+/* HUD compatibility: gn-card utilities must not alter the yellow industrial theme. */
+body[data-theme='hud'] .notes-index-item.gn-card { border:var(--edge) solid var(--line); border-radius:0; background:transparent; box-shadow:none; transition:none; }
+body[data-theme='hud'] .notes-index-item.gn-card:hover { border-color:var(--line); background:var(--panel-2); }
+body[data-theme='hud'] .notes-index-item.gn-card[data-selected='true'] { border-left-width:2px; }
+body[data-theme='hud'] .gn-prose code { padding:0; border:0; border-radius:0; color:inherit; background:transparent; font-family:var(--font-mono); }

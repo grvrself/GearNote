@@ -86,4 +86,180 @@
   --setup-max-width: 720px;
   --persona-editor-height: 260px;
   --memory-editor-height: 260px;
+
+  /* === 4-Level Matte Charcoal Luminance Ramp === */
+  --gn-bg-canvas: #070708;
+  --gn-bg-panel: #0E0E11;
+  --gn-bg-card: #151519;
+  --gn-bg-elevated: #1D1D22;
+
+  /* === Borders & Metallic Specular Hairlines === */
+  --gn-border-subtle: rgba(255, 255, 255, 0.06);
+  --gn-border-default: rgba(255, 255, 255, 0.10);
+  --gn-border-specular-top: rgba(255, 255, 255, 0.14);
+  --gn-border-active: rgba(255, 255, 255, 0.55);
+
+  /* === Typography Colors === */
+  --gn-text-hero: #FFFFFF;
+  --gn-text-primary: #E4E4E7;
+  --gn-text-secondary: #8A8A93;
+  --gn-text-muted: #52525B;
+
+  /* === CTA & Semantic Hardware LED === */
+  --gn-cta-bg: #FFFFFF;
+  --gn-cta-text: #09090B;
+  --gn-cta-hover: #E4E4E7;
+  --gn-led-online: #FFFFFF;
+  --gn-led-warn: #D4A359;
+
+  /* === Font Families === */
+  --gn-font-sans: "Inter", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --gn-font-mono: "JetBrains Mono", "IBM Plex Mono", "Geist Mono", ui-monospace, monospace;
+
+  /* === Radii & Layout === */
+  --gn-radius-sm: 4px;
+  --gn-radius-md: 8px;
+  --gn-radius-lg: 10px;
+  --gn-header-height: 46px;
+}
+
+/* 1. 哑光金属卡片（带 1px 顶边微高光） */
+.gn-card {
+  background: var(--gn-bg-card);
+  border: 1px solid var(--gn-border-default);
+  border-top-color: var(--gn-border-specular-top);
+  border-radius: var(--gn-radius-md);
+  transition: background-color 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.gn-card:hover {
+  background: var(--gn-bg-elevated);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+.gn-card--active {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, var(--gn-bg-card) 42%);
+  border-color: var(--gn-border-active);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.16);
+}
+
+/* 2. 等宽数字与技术眉标 */
+.gn-tabular {
+  font-family: var(--gn-font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.gn-eyebrow {
+  font-family: var(--gn-font-mono);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--gn-text-muted);
+}
+
+/* 3. 蓝图点阵背景 */
+.gn-dot-grid {
+  background-color: var(--gn-bg-canvas);
+  background-image: radial-gradient(rgba(255, 255, 255, 0.09) 1px, transparent 1px);
+  background-size: 18px 18px;
+}
+
+/* 4. 毫米刻度尺分割线 */
+.gn-ruler-divider {
+  position: relative;
+  height: 10px;
+  width: 100%;
+  border-bottom: 1px solid var(--gn-border-default);
+  background-image:
+    repeating-linear-gradient(
+      to right,
+      rgba(255, 255, 255, 0.22) 0,
+      rgba(255, 255, 255, 0.22) 1px,
+      transparent 1px,
+      transparent 40px
+    ),
+    repeating-linear-gradient(
+      to right,
+      rgba(255, 255, 255, 0.10) 0,
+      rgba(255, 255, 255, 0.10) 1px,
+      transparent 1px,
+      transparent 8px
+    );
+  background-size: 100% 8px, 100% 4px;
+  background-position: left bottom, left bottom;
+  background-repeat: no-repeat;
+}
+
+/* 5. 硬件三态 LED 指示灯 */
+.gn-led {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 9999px;
+  flex-shrink: 0;
+}
+
+.gn-led--online {
+  background: var(--gn-led-online);
+  box-shadow: 0 0 8px rgba(255, 255, 255, 0.75);
+}
+
+.gn-led--idle {
+  background: transparent;
+  border: 1.5px solid var(--gn-text-secondary);
+}
+
+.gn-led--warn {
+  width: 12px;
+  height: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: repeating-linear-gradient(
+    -45deg,
+    rgba(255, 255, 255, 0.28),
+    rgba(255, 255, 255, 0.28) 2px,
+    transparent 2px,
+    transparent 4px
+  );
+}
+
+/* 6. 按钮层级 */
+.gn-btn-primary {
+  background: var(--gn-cta-bg);
+  color: var(--gn-cta-text);
+  font-weight: 600;
+  border: 1px solid #FFFFFF;
+  border-radius: var(--gn-radius-sm);
+}
+.gn-btn-primary:hover {
+  background: var(--gn-cta-hover);
+}
+
+.gn-btn-secondary {
+  background: var(--gn-bg-card);
+  color: var(--gn-text-primary);
+  border: 1px solid var(--gn-border-default);
+  border-top-color: var(--gn-border-specular-top);
+  border-radius: var(--gn-radius-sm);
+}
+.gn-btn-secondary:hover {
+  background: var(--gn-bg-elevated);
+  border-color: rgba(255, 255, 255, 0.24);
+}
+
+/* 7. 正文行内代码胶囊 */
+.gn-prose code {
+  font-family: var(--gn-font-mono);
+  font-size: 0.875em;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--gn-bg-elevated);
+  border: 1px solid var(--gn-border-default);
+  color: #FFFFFF;
+}
+
+body[data-motion='off'] .gn-card,
+body[data-motion='reduced'] .gn-card { transition: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .gn-card { transition: none; }
 }

@@ -19,8 +19,9 @@
 .extension-tabs { display: flex; gap: 4px; }
 .extension-tabs button { height: 31px; padding: 0 12px; border: var(--edge) solid transparent; border-radius: 4px; color: var(--muted); background: transparent; font-size: 11px; }
 .extension-tabs button.active { border-color: var(--line-secondary); color: var(--accent); background: var(--panel-2); }
-.extension-search { width: 235px; height: 33px; padding: 0 10px; border: var(--edge) solid var(--line); border-radius: 5px; background: var(--bg); }
-.extension-search input { width: 100%; border: 0; outline: 0; color: var(--body); background: transparent; font-size: 11px; }
+.extension-search { display: flex; align-items: center; width: 235px; height: 34px; padding: 0 11px; border: var(--edge) solid var(--line); border-radius: 6px; background: var(--bg); }
+.extension-search:focus-within { border-color: rgba(255, 255, 255, 0.34); }
+.extension-search input { width: 100%; height: 100%; padding: 0; border: 0; outline: 0; color: var(--body); background: transparent; font-size: 12px; }
 .toolbar-note { color: var(--weak); font: 10px var(--font-mono); }
 .skills-layout { display: grid; grid-template-columns: minmax(0,1fr) 334px; gap: 15px; align-items: start; }
 .skill-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; }
@@ -131,6 +132,7 @@
 /* 设置 */
 .save-state { color: var(--muted); font-size: 11px; }
 .settings-layout { display: grid; grid-template-columns: 198px minmax(0,1fr); gap: 20px; align-items: start; }
+.settings-nav-col { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 .settings-nav { display: flex; flex-direction: column; min-height: 460px; padding: 11px 9px; border: var(--edge) solid var(--line); background: var(--rail,var(--panel)); }
 .settings-nav > span { padding: 6px 9px 13px; color: var(--weak); font: 9px var(--font-mono); letter-spacing: .12em; }
 .settings-nav button { display: flex; align-items: center; justify-content: space-between; min-height: 39px; padding: 0 10px; border: 0; border-left: 2px solid transparent; color: var(--muted); background: transparent; text-align: left; font-size: 11px; }
@@ -249,7 +251,7 @@ body[data-theme='mono'] .extension-page-heading > .gear-icon { opacity: .06; }
 .install-rules li { font-size: 12px; }
 .install-rules p { font-size: 12px; }
 .extension-detail { position: relative; overflow: hidden; }
-.extension-detail > :not(.mech-detail-watermark):not(.mech-diagnostics-gear) { position: relative; z-index: 1; }
+.extension-detail > :not(.mech-detail-watermark):not(.mech-diagnostics-gear):not(.extruded-gear-3d) { position: relative; z-index: 1; }
 .mech-detail-watermark, .mech-diagnostics-gear { position: absolute !important; z-index: 0 !important; pointer-events: none; }
 .mech-detail-watermark { right: -40px; bottom: -40px; width: 220px; height: 220px; color: var(--accent); opacity: .05; }
 .mech-diagnostics-gear { right: -25px; bottom: -25px; width: 190px; height: 190px; color: var(--accent); opacity: .07; }
@@ -266,8 +268,8 @@ body[data-theme='mono'] .extension-page-heading > .gear-icon { opacity: .06; }
 .settings-nav-foot { font-size: 11px; }
 .save-state { font-size: 12px; }
 .settings-overview-status { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 12px; margin-bottom: 15px; }
-.overview-status-item { display: grid; grid-template-columns: 9px minmax(0,1fr); column-gap: 8px; padding: 13px 14px; border: var(--edge) solid var(--line); background: var(--panel); }
-.overview-status-item .status-dot { grid-row: 1/4; margin-top: 7px; }
+.overview-status-item { display: grid; grid-template-columns: 12px minmax(0,1fr); column-gap: 8px; padding: 13px 14px; border: var(--edge) solid var(--line); background: var(--panel); }
+.overview-status-item .gn-led { grid-row: 1/4; align-self: start; margin-top: 6px; }
 .overview-status-item span { color: var(--muted); font-size: 12px; }
 .overview-status-item strong { margin-top: 4px; font-size: 18px; font-weight: 500; }
 .overview-status-item small { margin-top: 4px; color: var(--weak); font-size: 11px; overflow-wrap: anywhere; }
@@ -288,15 +290,10 @@ body[data-theme='mono'] .extension-page-heading > .gear-icon { opacity: .06; }
 .current-config span { color: var(--muted); font-size: 12px; }
 .current-config p { margin: 5px 0 0; color: var(--weak); font-size: 11px; line-height: 1.6; }
 .diagnostic-list { display: grid; }
-.diagnostic-list > div { display: grid; grid-template-columns: 8px minmax(0,1fr) auto; align-items: center; gap: 8px; min-height: 37px; border-top: var(--edge) solid var(--line); font-size: 12px; }
+.diagnostic-list > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 37px; border-top: var(--edge) solid var(--line); font-size: 12px; }
 .diagnostic-list span { color: var(--muted); }
 .diagnostic-list strong { color: var(--body); font-weight: 400; }
-.storage-meter { margin-top: 13px; padding-top: 12px; border-top: var(--edge) solid var(--line); }
-.storage-meter > div { display: flex; justify-content: space-between; color: var(--muted); font-size: 12px; }
-.storage-meter strong { color: var(--paper); font-weight: 500; }
-.storage-meter > i { display: block; height: 5px; margin: 10px 0; background: rgba(255,255,255,.07); }
-.storage-meter > i > b { display: block; height: 100%; background: var(--accent); }
-.storage-meter small { color: var(--weak); font-size: 11px; line-height: 1.5; }
+.diagnostics-cache { margin-top: 13px; padding-top: 12px; border-top: var(--edge) solid var(--line); }
 .diagnostic-actions { display: flex; gap: 8px; margin-top: 15px; }
 .overview-footer { display: flex; justify-content: space-between; gap: 15px; margin-top: 15px; padding: 12px 2px; color: var(--weak); font-size: 11px; }
 .overview-footer span:first-child { display: flex; align-items: center; gap: 7px; }
@@ -314,4 +311,1202 @@ body[data-theme='mono'] .mech-diagnostics-gear { opacity: .035; }
   .overview-grid { grid-template-columns: 1fr; }
   .overview-footer { flex-direction: column; }
   .settings-overview-status { grid-template-columns: repeat(2,minmax(0,1fr)); }
+}
+
+/* === Phase 2：设置 / 技能工作台 精密仪表层 === */
+/* 诊断行防溢出布局：全主题生效，修复 ffmpeg/ffprobe 长版本串与标签重叠 */
+.gn-diag-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; }
+.gn-diag-label { display: inline-flex; align-items: center; gap: 8px; flex-shrink: 0; color: var(--gn-text-secondary); }
+.gn-diag-value { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; color: var(--gn-text-primary); font-weight: 400; }
+.tool-row.gn-diag-row { align-items: center; padding: 10px 0; }
+.tool-row .gn-diag-label { display: inline-flex; margin-top: 0; font-size: 12px; }
+
+/* 页眉与设置主舞台暗纹：mono 精密线稿，hud 隐藏保留自有结构 */
+body[data-theme='hud'] .extension-page-heading .gn-watermark,
+body[data-theme='hud'] .settings-gear-backdrop { display: none; }
+body[data-theme='mono'] .settings-page { position: relative; overflow-x: hidden; overflow-y: auto; }
+body[data-theme='mono'] .settings-page > :not(.settings-gear-backdrop):not(.thorn-rose-backdrop):not(.gn-thorn-rose-backdrop) { position: relative; z-index: 1; }
+body[data-theme='mono'][data-window='main'] .extension-page-heading { overflow: hidden; margin-top: -20px; padding-top: 18px; min-height: 98px; }
+body[data-theme='mono'][data-window='main'] .settings-page .extension-page-heading { border-bottom-color: rgba(255, 255, 255, 0.08); }
+body[data-theme='mono'][data-window='main'] .settings-page .save-state { color: rgba(255, 255, 255, 0.42); }
+body[data-theme='mono'][data-window='main'] .settings-page .settings-section-head { position: relative; z-index: 1; }
+
+/* HUD 兼容：gn 表面只在 mono 主窗口生效，hud 保留原有卡片与指示灯 */
+body[data-theme='hud'] .overview-status-item.gn-card { background: transparent; border: none; border-radius: 0; transition: none; }
+body[data-theme='hud'] .quick-settings.gn-card,
+body[data-theme='hud'] .diagnostics-card.gn-card { background: #0E1015; border: 1px solid rgba(255, 255, 255, 0.10); border-radius: 0; transition: none; }
+body[data-theme='hud'] .overview-status-item.gn-card:hover { background: transparent; border-color: transparent; }
+body[data-theme='hud'] .quick-settings.gn-card:hover,
+body[data-theme='hud'] .diagnostics-card.gn-card:hover { background: #0E1015; border-color: rgba(255, 255, 255, 0.10); }
+body[data-theme='hud'] .skill-card.gn-card { background: linear-gradient(140deg,var(--panel),#0f1419); border: var(--edge) solid var(--line); border-radius: 5px; transition: none; }
+body[data-theme='hud'] .skill-card.gn-card:hover { background: linear-gradient(140deg,var(--panel),#0f1419); border-color: var(--line-secondary); }
+body[data-theme='hud'] .skill-card.selected.gn-card--active { background: linear-gradient(140deg,var(--panel),#0f1419); border-color: var(--accent); box-shadow: inset 2px 0 var(--accent); }
+body[data-theme='hud'] .extension-detail.gn-dot-grid { background: var(--panel); background-image: none; }
+body[data-theme='hud'] .extension-page .gn-led--online { background: var(--accent); box-shadow: 0 0 7px rgba(255,212,0,.45); }
+body[data-theme='hud'] .extension-page .gn-led--idle { border-color: var(--muted); }
+body[data-theme='hud'] .extension-stats-ruler { display: none; }
+body[data-theme='hud'] .gn-vernier-fill,
+body[data-theme='hud'] .gn-vernier-cursor { background: var(--accent); }
+body[data-theme='hud'][data-motion='full'] .gn-vernier-fill { animation: mech-storage-pulse 4s ease-in-out infinite; }
+body[data-theme='hud'] .skill-index { color: var(--muted); }
+body[data-theme='hud'] .detail-index { border-color: var(--line-secondary); border-radius: 0; color: var(--accent); }
+
+/* mono 主窗口：不透明哑光炭灰卡片（#141417 + z-index: 1），形成与底层齿轮蓝图的分层景深 */
+body[data-theme='mono'][data-window='main'] .overview-status-item.gn-card,
+body[data-theme='mono'][data-window='main'] .quick-settings.gn-card,
+body[data-theme='mono'][data-window='main'] .diagnostics-card.gn-card { position: relative; z-index: 1; background: #141417; border: 1px solid var(--gn-border-default); border-top-color: var(--gn-border-specular-top); border-radius: var(--gn-radius-md); }
+body[data-theme='mono'][data-window='main'] .overview-status-item.gn-card:hover,
+body[data-theme='mono'][data-window='main'] .quick-settings.gn-card:hover,
+body[data-theme='mono'][data-window='main'] .diagnostics-card.gn-card:hover { background: #141417; border-color: var(--gn-border-default); border-top-color: var(--gn-border-specular-top); }
+body[data-theme='mono'][data-window='main'] .settings-page .form-card,
+body[data-theme='mono'][data-window='main'] .settings-page .settings-status-card,
+body[data-theme='mono'][data-window='main'] .settings-page .install-rules,
+body[data-theme='mono'][data-window='main'] .settings-page .theme-settings,
+body[data-theme='mono'][data-window='main'] .settings-page .agent-setup-card,
+body[data-theme='mono'][data-window='main'] .settings-page .persona-setup-card { position: relative; z-index: 1; }
+body[data-theme='mono'][data-window='main'] .settings-page .form-card,
+body[data-theme='mono'][data-window='main'] .settings-page .settings-status-card,
+body[data-theme='mono'][data-window='main'] .settings-page .theme-settings { background: #141417; border-color: var(--gn-border-default); }
+body[data-theme='mono'][data-window='main'] .settings-page .agent-setup-card .chamfer-content,
+body[data-theme='mono'][data-window='main'] .settings-page .persona-setup-card .chamfer-content { background: #141417; }
+body[data-theme='mono'][data-window='main'] .overview-status-item strong { color: var(--gn-text-hero); }
+body[data-theme='mono'][data-window='main'] .quick-settings .quick-index { color: var(--gn-text-muted); }
+body[data-theme='mono'][data-window='main'] .diagnostics-card .mech-diagnostics-gear { display: none; }
+
+/* 技能概览栏 + ::after 毫米游标刻度底边 */
+body[data-theme='mono'][data-window='main'] .skills-page .extension-page-heading .gn-watermark { right: 140px; top: 0; bottom: 0; }
+body[data-theme='mono'][data-window='main'] .extension-stats { position: relative; min-height: 78px; padding: 14px 20px 21px; border: 1px solid rgba(255,255,255,0.10); border-top-color: rgba(255,255,255,0.15); border-radius: 8px; background: #101013; overflow: hidden; }
+body[data-theme='mono'][data-window='main'] .extension-stats::after { content: ''; position: absolute; right: 0; bottom: 0; left: 0; height: 8px; pointer-events: none; background-image: repeating-linear-gradient(to right, rgba(255,255,255,0.20) 0 1px, transparent 1px 40px), repeating-linear-gradient(to right, rgba(255,255,255,0.09) 0 1px, transparent 1px 8px); background-size: 100% 7px, 100% 4px; background-position: left bottom, left bottom; background-repeat: no-repeat; }
+body[data-theme='mono'][data-window='main'] .extension-stats > div { min-width: 108px; padding: 0 22px; border-right: 1px solid rgba(255,255,255,0.08); }
+body[data-theme='mono'][data-window='main'] .extension-stats > div:first-child { padding-left: 0; }
+body[data-theme='mono'][data-window='main'] .extension-stats span { color: #8A8A93; font-size: 11px; }
+body[data-theme='mono'][data-window='main'] .extension-stats strong { color: #FFFFFF; font: 600 22px/1.15 var(--gn-font-mono); font-variant-numeric: tabular-nums; }
+body[data-theme='mono'][data-window='main'] .extension-stats p { margin: 0 0 0 auto; padding: 0 0 0 16px; color: #8A8A93; font-size: 12px; white-space: nowrap; }
+
+/* 工具栏筛选胶囊与垂直居中搜索框 */
+body[data-theme='mono'][data-window='main'] .extension-tabs button { border-radius: 6px; color: #8A8A93; }
+body[data-theme='mono'][data-window='main'] .extension-tabs button:hover { color: #E4E4E7; }
+body[data-theme='mono'][data-window='main'] .extension-tabs button.active { background: #1F1F25; border-color: rgba(255,255,255,0.14); border-top-color: rgba(255,255,255,0.24); color: #FFFFFF; }
+body[data-theme='mono'][data-window='main'] .skills-page .extension-search { background: #0B0B0D; border-color: rgba(255,255,255,0.10); }
+body[data-theme='mono'][data-window='main'] .skills-page .extension-search:focus-within { border-color: rgba(255,255,255,0.34); }
+
+/* 技能卡片：等宽序号 + 选中态纯白高亮外框 + 柔白外发光 */
+.skill-index { font-size: 13px; color: #71717A; }
+body[data-theme='mono'][data-window='main'] .skill-card.gn-card { min-height: 154px; padding: 15px 16px 13px; background: #141417; border: 1px solid rgba(255,255,255,0.09); border-top-color: rgba(255,255,255,0.14); border-radius: 10px; }
+body[data-theme='mono'][data-window='main'] .skill-card.gn-card:hover { background: #1A1A1F; border-color: rgba(255,255,255,0.22); }
+body[data-theme='mono'][data-window='main'] .skill-card.gn-card--active,
+body[data-theme='mono'][data-window='main'] .skill-card.gn-card--active:hover { background: linear-gradient(180deg, rgba(255,255,255,0.09) 0%, #141417 48%); border: 1px solid rgba(255,255,255,0.82); box-shadow: 0 0 22px rgba(255,255,255,0.14), inset 0 1px 0 rgba(255,255,255,0.25); }
+body[data-theme='mono'][data-window='main'] .skill-card h3 { color: #FFFFFF; font-size: 16px; }
+body[data-theme='mono'][data-window='main'] .skill-card p { color: #A1A1AA; font-size: 13px; }
+body[data-theme='mono'][data-window='main'] .skill-meta,
+body[data-theme='mono'][data-window='main'] .skill-card-foot { color: #71717A; }
+body[data-theme='mono'][data-window='main'] .skill-card.gn-card--active .skill-index { color: #E4E4E7; }
+
+/* 右侧技能检视面板：14px 细点阵 + 精致单一标题齿轮 + 内凹权限框 */
+body[data-theme='mono'][data-window='main'] .extension-detail.gn-dot-grid { background-color: #111114; background-image: radial-gradient(rgba(255,255,255,0.07) 1px, transparent 1px); background-size: 14px 14px; border: 1px solid rgba(255,255,255,0.10); border-radius: 10px; }
+.detail-index { display: inline-flex; align-items: center; justify-content: center; flex: none; min-width: 30px; height: 30px; border: 1px solid var(--gn-border-default); border-radius: var(--gn-radius-sm); color: var(--gn-text-secondary); font-size: 12px; }
+.detail-index .gn-led { width: 6px; height: 6px; }
+.detail-gear { display: inline-flex; align-items: center; justify-content: center; flex: none; color: var(--paper); }
+body[data-theme='hud'] .detail-gear { color: var(--accent); }
+body[data-motion='full'] .detail-gear[data-running='true'] .gear-icon { animation: mono-gear-turn 2.4s linear infinite; }
+body[data-motion='off'] .detail-gear .gear-icon,
+body[data-motion='reduced'] .detail-gear .gear-icon { animation: none !important; }
+body[data-theme='mono'][data-window='main'] .skills-page .permission-box { background: rgba(9,9,11,0.72); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; padding: 12px 14px; }
+
+/* 自定义方形复选框（mono）：14px 暗底细框，选中白底黑勾 */
+body[data-theme='mono'][data-window='main'] .record-picker-list input[type='checkbox'] { appearance: none; -webkit-appearance: none; display: inline-grid; place-items: center; width: 14px; height: 14px; margin: 0; border: 1px solid rgba(255,255,255,0.24); border-radius: 3px; background: #0B0B0D; cursor: pointer; }
+body[data-theme='mono'][data-window='main'] .record-picker-list input[type='checkbox']:checked { border-color: #FFFFFF; background: #FFFFFF; }
+body[data-theme='mono'][data-window='main'] .record-picker-list input[type='checkbox']:checked::after { content: ''; width: 7px; height: 4px; border-left: 1.5px solid #09090B; border-bottom: 1.5px solid #09090B; transform: rotate(-45deg) translateY(-1px); }
+body[data-theme='mono'][data-window='main'] .record-picker-list input[type='checkbox']:focus-visible { outline: 2px solid var(--gn-border-active); outline-offset: 2px; }
+
+/* 使用技能：未就绪时厚实深灰金属工业键，就绪时提升边界对比，全页唯一纯白留给「从 GitHub 安装」 */
+body[data-theme='mono'][data-window='main'] .extension-page .gn-skill-run[data-variant='primary'] .hud-button-border { border-radius: 6px; background: linear-gradient(180deg, rgba(255,255,255,0.18), rgba(255,255,255,0.08) 55%); }
+body[data-theme='mono'][data-window='main'] .extension-page .gn-skill-run[data-variant='primary'] .hud-button-content { min-height: 36px; padding: 0 18px; border-radius: 5px; background: #1E1E24; color: #D4D4D8; font-weight: 500; }
+body[data-theme='mono'][data-window='main'] .extension-page .gn-skill-run[data-variant='primary']:not([data-disabled]):hover .hud-button-border { background: rgba(255,255,255,0.28); }
+body[data-theme='mono'][data-window='main'] .extension-page .gn-skill-run[data-variant='primary']:not([data-disabled]):hover .hud-button-content { background: #26262E; color: #FFFFFF; }
+body[data-theme='mono'][data-window='main'] .extension-page .gn-skill-run--ready[data-variant='primary'] .hud-button-border { background: rgba(255,255,255,0.48); }
+body[data-theme='mono'][data-window='main'] .extension-page .gn-skill-run--ready[data-variant='primary'] .hud-button-content { background: #2A2A33; color: #FFFFFF; font-weight: 600; }
+
+@media (max-width: 1120px) {
+  body[data-theme='mono'][data-window='main'] .extension-stats p { white-space: normal; }
+}
+
+@media (max-width: 980px) {
+  body[data-theme='mono'][data-window='main'] .extension-page-heading .gn-watermark { display: none; }
+}
+
+/* === Phase 3：连接与插件 精密仪表层 === */
+/* 页眉暗纹裁切（插件页与设置/技能页一致） */
+body[data-theme='mono'][data-window='main'] .extension-page-heading { overflow: hidden; }
+body[data-theme='mono'] .plugins-page .extension-page-heading { position: relative; overflow: hidden; }
+body[data-theme='mono'] .plugins-page .extension-page-heading > div:first-child,
+body[data-theme='mono'] .plugins-page .extension-page-heading > .extension-page-actions { position: relative; z-index: 1; }
+
+/* 连接器序号：等宽编号替代重复小齿轮 */
+.plugin-index { flex: none; min-width: 20px; color: var(--gn-text-muted); font-size: 12px; }
+body[data-theme='hud'] .plugin-index { color: var(--muted); }
+body[data-theme='hud'] .connection-grid strong.gn-tabular,
+body[data-theme='hud'] .health-card strong.gn-tabular { font-family: var(--font-body); }
+
+/* 健康卡 LED：mono 显示三态灯，hud 保留原字符徽标 */
+.health-card > .gn-led { display: none; }
+body[data-theme='mono'][data-window='main'] .health-card > .gn-led { display: inline-block; flex: none; }
+body[data-theme='mono'][data-window='main'] .health-card .health-icon { display: none; }
+
+/* HUD 兼容：gn 表面只在 mono 主窗口生效 */
+body[data-theme='hud'] .plugin-item.gn-card { border: var(--edge) solid var(--line); border-radius: 5px; background: var(--panel); box-shadow: none; transition: none; }
+body[data-theme='hud'] .plugin-item.gn-card:hover { border-color: var(--line); background: var(--panel); }
+body[data-theme='hud'] .plugin-item.selected.gn-card--active { border-color: var(--accent); box-shadow: inset 2px 0 var(--accent); }
+body[data-theme='hud'] .health-card.gn-card { border: var(--edge) solid var(--line); border-radius: 0; background: var(--panel); transition: none; }
+body[data-theme='hud'] .health-card.gn-card:hover { border-color: var(--line); background: var(--panel); }
+body[data-theme='hud'] .health-card.warning.gn-card,
+body[data-theme='hud'] .health-card.warning.gn-card:hover { border-color: var(--line-secondary); }
+body[data-theme='hud'] .pair-box.gn-dot-grid { background: var(--bg); background-image: none; }
+body[data-theme='hud'] .tool-row .gn-diag-label { color: var(--muted); }
+body[data-theme='hud'] .tool-row .gn-diag-value { color: var(--paper); }
+
+/* mono 主窗口：连接器卡片哑光炭灰 + 选中亮白细边框（移除左侧白竖条） */
+body[data-theme='mono'][data-window='main'] .plugin-item.gn-card { border: 1px solid var(--gn-border-default); border-top-color: var(--gn-border-specular-top); border-radius: var(--gn-radius-md); background: var(--gn-bg-card); }
+body[data-theme='mono'][data-window='main'] .plugin-item.gn-card:hover { border-color: rgba(255,255,255,.18); background: var(--gn-bg-elevated); }
+body[data-theme='mono'][data-window='main'] .plugin-item.gn-card--active,
+body[data-theme='mono'][data-window='main'] .plugin-item.gn-card--active:hover { border-color: var(--gn-border-active); background: linear-gradient(180deg, rgba(255,255,255,.05) 0%, var(--gn-bg-card) 42%); box-shadow: 0 0 0 1px rgba(255,255,255,.08), inset 0 1px 0 rgba(255,255,255,.16); }
+body[data-theme='mono'][data-window='main'] .plugin-item.gn-card--active .plugin-index { color: var(--gn-text-hero); }
+body[data-theme='mono'][data-window='main'] .health-card.gn-card,
+body[data-theme='mono'][data-window='main'] .health-card.gn-card:hover { border: 1px solid var(--gn-border-default); border-top-color: var(--gn-border-specular-top); border-radius: var(--gn-radius-md); background: var(--gn-bg-card); }
+body[data-theme='mono'][data-window='main'] .health-card.warning.gn-card,
+body[data-theme='mono'][data-window='main'] .health-card.warning.gn-card:hover { border-color: var(--gn-border-default); border-top-color: var(--gn-border-specular-top); }
+body[data-theme='mono'][data-window='main'] .health-card strong { color: var(--gn-text-hero); }
+
+/* 配对码盒：微弱点阵 + 等宽宽字距 */
+body[data-theme='mono'][data-window='main'] .pair-box.gn-dot-grid { border: 1px solid var(--gn-border-default); border-radius: var(--gn-radius-sm); background-color: var(--gn-bg-canvas); background-image: radial-gradient(rgba(255,255,255,.05) 1px, transparent 1px); background-size: 18px 18px; }
+body[data-theme='mono'][data-window='main'] .pair-box code { font-family: var(--gn-font-mono); letter-spacing: .08em; }
+
+/* 详情操作：mono 下降级为金属描边，全页只保留「安装技能包」一个纯白主按钮 */
+body[data-theme='mono'][data-window='main'] .extension-page .gn-connector-action[data-variant='primary'] .hud-button-border { background: linear-gradient(180deg, var(--gn-border-specular-top), var(--gn-border-default) 45%); }
+body[data-theme='mono'][data-window='main'] .extension-page .gn-connector-action[data-variant='primary'] .hud-button-content { background: var(--gn-bg-card); color: var(--gn-text-primary); font-weight: 500; }
+body[data-theme='mono'][data-window='main'] .extension-page .gn-connector-action[data-variant='primary']:not([data-disabled]):hover .hud-button-border { background: rgba(255,255,255,.24); }
+body[data-theme='mono'][data-window='main'] .extension-page .gn-connector-action[data-variant='primary']:not([data-disabled]):hover .hud-button-content { background: var(--gn-bg-elevated); color: var(--gn-text-hero); }
+
+/* === Phase 4：HUD 战术连接与插件面板（严格限定 body[data-theme='hud'] .plugins-page） === */
+.hud-heartbeat-bars,
+.hud-warn-bar,
+.hud-warn-triangle,
+.hud-warn-counter,
+.hud-tri-dots,
+.hud-detail-scan-tag,
+.hud-cell-glyph,
+.hud-bus-telemetry { display: none; }
+
+body[data-theme='hud'] .plugins-page {
+  --hud-yellow: #FCEE0A;
+  --hud-cyan: #00F0FF;
+  --hud-danger: #FF4D5E;
+  --hud-canvas: #07080A;
+  --hud-panel: #0E1015;
+  --hud-card: #13161D;
+  --hud-poly: polygon(10px 0, calc(100% - 10px) 0, 100% 10px, 100% calc(100% - 10px), calc(100% - 10px) 100%, 10px 100%, 0 calc(100% - 10px), 0 10px);
+  --hud-poly-inner: polygon(9.5px 0, calc(100% - 9.5px) 0, 100% 9.5px, 100% calc(100% - 9.5px), calc(100% - 9.5px) 100%, 9.5px 100%, 0 calc(100% - 9.5px), 0 9.5px);
+  background: var(--hud-canvas);
+}
+
+body[data-theme='hud'] .plugins-page .extension-page-heading {
+  overflow: hidden;
+  border-bottom-color: rgba(252, 238, 10, 0.18);
+}
+
+body[data-theme='hud'] .plugins-page .extension-page-actions .hud-button-wrapper[data-variant='primary'],
+body[data-theme='hud'] .plugins-page .gn-connector-action[data-variant='primary'] {
+  box-shadow: none;
+  filter: drop-shadow(0 0 10px rgba(252, 238, 10, 0.30));
+}
+
+body[data-theme='hud'] .plugins-page .extension-page-actions .hud-button-border,
+body[data-theme='hud'] .plugins-page .extension-page-actions .hud-button-content,
+body[data-theme='hud'] .plugins-page .gn-connector-action .hud-button-border,
+body[data-theme='hud'] .plugins-page .gn-connector-action .hud-button-content {
+  -webkit-clip-path: var(--hud-poly);
+  clip-path: var(--hud-poly);
+}
+
+body[data-theme='hud'] .plugins-page .extension-page-actions .hud-button-wrapper[data-variant='primary'] .hud-button-border,
+body[data-theme='hud'] .plugins-page .gn-connector-action[data-variant='primary'] .hud-button-border {
+  background: var(--hud-yellow);
+}
+
+body[data-theme='hud'] .plugins-page .extension-page-actions .hud-button-wrapper[data-variant='primary'] .hud-button-content,
+body[data-theme='hud'] .plugins-page .gn-connector-action[data-variant='primary'] .hud-button-content {
+  background: var(--hud-yellow);
+  color: #07080A;
+  font-weight: 700;
+}
+
+body[data-theme='hud'] .plugins-page .extension-page-actions .hud-button-wrapper[data-variant='primary']:not([data-disabled]):hover .hud-button-content,
+body[data-theme='hud'] .plugins-page .gn-connector-action[data-variant='primary']:not([data-disabled]):hover .hud-button-content {
+  background: #FFF65C;
+  color: #07080A;
+}
+
+/* 高能 LIVE BUS 数据总线（34px） */
+body[data-theme='hud'] .plugins-page .connection-bus {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  margin: -4px 0 12px;
+}
+
+body[data-theme='hud'] .plugins-page .connection-bus .mech-gear {
+  width: 20px;
+  height: 20px;
+  color: var(--hud-yellow);
+  filter: drop-shadow(0 0 6px rgba(252, 238, 10, 0.65));
+}
+
+body[data-theme='hud'] .plugins-page .hud-bus-segment {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 48px;
+  height: 28px;
+}
+
+body[data-theme='hud'] .plugins-page .hud-bus-telemetry {
+  position: absolute;
+  top: 0;
+  left: 2px;
+  right: 2px;
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  color: rgba(255, 255, 255, 0.42);
+  font: 8px/1 var(--font-mono);
+  letter-spacing: 0.08em;
+  pointer-events: none;
+}
+
+body[data-theme='hud'] .plugins-page .hud-bus-telemetry b {
+  color: rgba(0, 240, 255, 0.78);
+  font-weight: 500;
+}
+
+body[data-theme='hud'] .plugins-page .hud-bus-track {
+  display: block;
+  width: 100%;
+  height: 12px;
+  margin-top: 6px;
+}
+
+body[data-theme='hud'] .plugins-page .connection-bus[data-live='false'] .bus-cyan-pulse {
+  opacity: 0.2;
+}
+
+body[data-theme='hud'][data-motion='full'] .plugins-page .connection-bus[data-live='true'] .bus-cyan-pulse {
+  animation: hud-bus-pulse 2.2s linear infinite;
+}
+
+@keyframes hud-bus-pulse {
+  from { stroke-dashoffset: 24; }
+  to { stroke-dashoffset: -176; }
+}
+
+body[data-theme='hud'] .plugins-page .connection-bus > span:last-child {
+  color: var(--hud-yellow);
+  font: 600 10px var(--font-mono);
+  letter-spacing: 0.14em;
+  text-shadow: 0 0 8px rgba(252, 238, 10, 0.35);
+}
+
+/* 顶部 3 张战术状态卡（45° 双层切角 + 告警斜纹 + 心跳微条） */
+body[data-theme='hud'] .plugins-page .health-card.gn-card {
+  position: relative;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 13px 15px;
+}
+
+body[data-theme='hud'] .plugins-page .health-card.gn-card::before,
+body[data-theme='hud'] .plugins-page .health-card.gn-card::after {
+  content: '';
+  position: absolute;
+  pointer-events: none;
+  z-index: 0;
+}
+
+body[data-theme='hud'] .plugins-page .health-card.gn-card::before {
+  inset: 0;
+  background: rgba(255, 255, 255, 0.12);
+  -webkit-clip-path: var(--hud-poly);
+  clip-path: var(--hud-poly);
+}
+
+body[data-theme='hud'] .plugins-page .health-card.gn-card::after {
+  inset: 1px;
+  background: var(--hud-card);
+  -webkit-clip-path: var(--hud-poly-inner);
+  clip-path: var(--hud-poly-inner);
+}
+
+body[data-theme='hud'] .plugins-page .health-card.gn-card > * {
+  position: relative;
+  z-index: 1;
+}
+
+body[data-theme='hud'] .plugins-page .health-card--bridge.ok.gn-card::before {
+  background: rgba(252, 238, 10, 0.32);
+}
+
+body[data-theme='hud'] .plugins-page .health-card--bridge .health-icon {
+  border-color: rgba(252, 238, 10, 0.45);
+  color: var(--hud-yellow);
+  box-shadow: 0 0 10px rgba(252, 238, 10, 0.22);
+}
+
+body[data-theme='hud'] .plugins-page .hud-heartbeat-bars {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
+  margin-left: auto;
+  height: 16px;
+}
+
+body[data-theme='hud'] .plugins-page .hud-heartbeat-bars i {
+  width: 3px;
+  height: 6px;
+  border-radius: 1px;
+  background: rgba(252, 238, 10, 0.22);
+}
+
+body[data-theme='hud'] .plugins-page .hud-heartbeat-bars i.cyan {
+  background: rgba(0, 240, 255, 0.24);
+}
+
+body[data-theme='hud'] .plugins-page .hud-heartbeat-bars i:nth-child(2) { height: 11px; }
+body[data-theme='hud'] .plugins-page .hud-heartbeat-bars i:nth-child(3) { height: 15px; }
+body[data-theme='hud'] .plugins-page .hud-heartbeat-bars i:nth-child(4) { height: 9px; }
+body[data-theme='hud'] .plugins-page .hud-heartbeat-bars i:nth-child(5) { height: 13px; }
+body[data-theme='hud'] .plugins-page .hud-heartbeat-bars i:nth-child(6) { height: 7px; }
+
+body[data-theme='hud'] .plugins-page .hud-heartbeat-bars.is-live i {
+  background: var(--hud-yellow);
+  box-shadow: 0 0 6px rgba(252, 238, 10, 0.42);
+}
+
+body[data-theme='hud'] .plugins-page .hud-heartbeat-bars.is-live i.cyan {
+  background: var(--hud-cyan);
+  box-shadow: 0 0 6px rgba(0, 240, 255, 0.48);
+}
+
+body[data-theme='hud'] .plugins-page .health-card--tools.warning.gn-card::before {
+  background: rgba(252, 238, 10, 0.56);
+}
+
+body[data-theme='hud'] .plugins-page .health-card--tools.warning.gn-card::after {
+  background-color: var(--hud-card);
+  background-image: repeating-linear-gradient(-45deg, rgba(252, 238, 10, 0.11) 0 10px, transparent 10px 20px);
+}
+
+body[data-theme='hud'] .plugins-page .hud-warn-bar {
+  display: block;
+  position: absolute !important;
+  top: 12px;
+  left: 0;
+  width: 4px;
+  height: 14px;
+  background: var(--hud-yellow);
+  box-shadow: 0 0 8px rgba(252, 238, 10, 0.65);
+  z-index: 2 !important;
+}
+
+body[data-theme='hud'] .plugins-page .health-card--tools.warning .health-icon {
+  border: 0;
+  width: 24px;
+  height: 22px;
+  animation: none;
+}
+
+body[data-theme='hud'] .plugins-page .hud-legacy-glyph {
+  display: none;
+}
+
+body[data-theme='hud'] .plugins-page .hud-warn-triangle {
+  display: block;
+  width: 22px;
+  height: 20px;
+  filter: drop-shadow(0 0 6px rgba(252, 238, 10, 0.45));
+}
+
+body[data-theme='hud'] .plugins-page .hud-warn-counter {
+  display: inline-flex;
+  align-items: center;
+  margin-left: auto;
+  padding: 2px 6px;
+  border: 1px solid rgba(252, 238, 10, 0.48);
+  background: rgba(252, 238, 10, 0.12);
+  color: var(--hud-yellow);
+  font: 600 10px var(--font-mono);
+}
+
+body[data-theme='hud'] .plugins-page .health-card--policy .health-icon {
+  border-color: rgba(255, 255, 255, 0.22);
+  color: var(--muted);
+}
+
+/* 左侧筛选与连接器列表（01 / 02 / 03） */
+body[data-theme='hud'] .plugins-page .extension-tabs button.active {
+  border: 1px solid var(--hud-yellow);
+  border-radius: 3px;
+  background: rgba(252, 238, 10, 0.10);
+  color: var(--hud-yellow);
+  box-shadow: 0 0 10px rgba(252, 238, 10, 0.18);
+}
+
+body[data-theme='hud'] .plugins-page .plugin-item.gn-card {
+  position: relative;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+body[data-theme='hud'] .plugins-page .plugin-item.gn-card::before,
+body[data-theme='hud'] .plugins-page .plugin-item.gn-card::after {
+  content: '';
+  position: absolute;
+  pointer-events: none;
+  z-index: 0;
+}
+
+body[data-theme='hud'] .plugins-page .plugin-item.gn-card::before {
+  inset: 0;
+  background: rgba(255, 255, 255, 0.12);
+  -webkit-clip-path: var(--hud-poly);
+  clip-path: var(--hud-poly);
+}
+
+body[data-theme='hud'] .plugins-page .plugin-item.gn-card::after {
+  inset: 1px;
+  background: var(--hud-card);
+  -webkit-clip-path: var(--hud-poly-inner);
+  clip-path: var(--hud-poly-inner);
+}
+
+body[data-theme='hud'] .plugins-page .plugin-item.gn-card > * {
+  position: relative;
+  z-index: 1;
+}
+
+body[data-theme='hud'] .plugins-page .plugin-item.gn-card:hover::before {
+  background: rgba(252, 238, 10, 0.42);
+}
+
+body[data-theme='hud'] .plugins-page .plugin-item.selected.gn-card {
+  border: 0;
+  box-shadow: none;
+  filter: drop-shadow(0 0 10px rgba(252, 238, 10, 0.32));
+}
+
+body[data-theme='hud'] .plugins-page .plugin-item.selected.gn-card::before {
+  background: var(--hud-yellow);
+}
+
+body[data-theme='hud'] .plugins-page .plugin-item.selected.gn-card::after {
+  inset: 1.5px;
+  background: linear-gradient(180deg, rgba(252, 238, 10, 0.14) 0%, var(--hud-card) 64%);
+}
+
+body[data-theme='hud'] .plugins-page .plugin-item .plugin-index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(7, 8, 10, 0.65);
+  color: var(--muted);
+  font-size: 11px;
+}
+
+body[data-theme='hud'] .plugins-page .plugin-item.selected .plugin-index {
+  border-color: rgba(252, 238, 10, 0.52);
+  color: var(--hud-yellow);
+  background: rgba(252, 238, 10, 0.10);
+}
+
+body[data-theme='hud'] .plugins-page .plugin-item .hud-tri-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+body[data-theme='hud'] .plugins-page .plugin-item .hud-tri-dots i {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.18);
+}
+
+body[data-theme='hud'] .plugins-page .plugin-item .hud-tri-dots.ok i:first-child {
+  background: var(--hud-yellow);
+  box-shadow: 0 0 5px rgba(252, 238, 10, 0.65);
+}
+
+body[data-theme='hud'] .plugins-page .plugin-item.selected .hud-tri-dots i:nth-child(2) {
+  background: rgba(252, 238, 10, 0.55);
+}
+
+body[data-theme='hud'] .plugins-page .plugin-item.selected .hud-tri-dots.ok i {
+  background: var(--hud-yellow);
+  box-shadow: 0 0 6px rgba(252, 238, 10, 0.72);
+}
+
+body[data-theme='hud'] .plugins-page .plugin-item .status-dot {
+  display: none;
+}
+
+body[data-theme='hud'] .plugins-page .plugin-list-note {
+  border: 1px dashed rgba(252, 238, 10, 0.22);
+  background: var(--hud-panel);
+}
+
+/* 右侧详情 HUD 面板（1% 冰青顶边扫描光 + 6px 黄色战术角标 + 红黄权限项） */
+body[data-theme='hud'] .plugins-page .extension-detail {
+  position: relative;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 20px;
+}
+
+body[data-theme='hud'] .plugins-page .extension-detail::before,
+body[data-theme='hud'] .plugins-page .extension-detail::after {
+  content: '';
+  position: absolute;
+  pointer-events: none;
+  z-index: 0;
+}
+
+body[data-theme='hud'] .plugins-page .extension-detail::before {
+  inset: 0;
+  background: linear-gradient(180deg, rgba(0, 240, 255, 0.52) 0%, rgba(252, 238, 10, 0.22) 64px, rgba(255, 255, 255, 0.10) 100%);
+  -webkit-clip-path: var(--hud-poly);
+  clip-path: var(--hud-poly);
+}
+
+body[data-theme='hud'] .plugins-page .extension-detail::after {
+  inset: 1px;
+  background-color: var(--hud-panel);
+  background-image: linear-gradient(180deg, rgba(0, 240, 255, 0.10) 0%, rgba(14, 16, 21, 0) 64px);
+  -webkit-clip-path: var(--hud-poly-inner);
+  clip-path: var(--hud-poly-inner);
+}
+
+body[data-theme='hud'] .plugins-page .extension-detail > * {
+  position: relative;
+  z-index: 1;
+}
+
+body[data-theme='hud'] .plugins-page .hud-detail-scan-tag {
+  display: inline-flex;
+  position: absolute !important;
+  top: 14px;
+  right: 18px;
+  padding: 2px 7px;
+  border: 1px solid rgba(0, 240, 255, 0.45);
+  background: rgba(0, 240, 255, 0.08);
+  color: var(--hud-cyan);
+  font: 600 8px/1.2 var(--font-mono);
+  letter-spacing: 0.14em;
+  z-index: 2 !important;
+}
+
+body[data-theme='hud'] .plugins-page .detail-index {
+  border: 1px solid rgba(252, 238, 10, 0.52);
+  border-radius: 2px;
+  background: rgba(252, 238, 10, 0.09);
+  color: var(--hud-yellow);
+  font: 600 12px var(--font-mono);
+}
+
+body[data-theme='hud'] .plugins-page .status-pill {
+  border: 1px solid rgba(252, 238, 10, 0.46);
+  border-radius: 3px;
+  background: rgba(252, 238, 10, 0.09);
+  color: var(--hud-yellow);
+}
+
+body[data-theme='hud'] .plugins-page .connection-grid {
+  position: relative;
+  border-color: rgba(255, 255, 255, 0.08);
+  background-color: var(--hud-card);
+  background-image:
+    linear-gradient(var(--hud-yellow), var(--hud-yellow)), linear-gradient(var(--hud-yellow), var(--hud-yellow)),
+    linear-gradient(var(--hud-yellow), var(--hud-yellow)), linear-gradient(var(--hud-yellow), var(--hud-yellow)),
+    linear-gradient(var(--hud-yellow), var(--hud-yellow)), linear-gradient(var(--hud-yellow), var(--hud-yellow)),
+    linear-gradient(var(--hud-yellow), var(--hud-yellow)), linear-gradient(var(--hud-yellow), var(--hud-yellow));
+  background-size: 6px 1px, 1px 6px, 6px 1px, 1px 6px, 6px 1px, 1px 6px, 6px 1px, 1px 6px;
+  background-position: top left, top left, top right, top right, bottom left, bottom left, bottom right, bottom right;
+  background-repeat: no-repeat;
+}
+
+body[data-theme='hud'] .plugins-page .connection-grid > div {
+  position: relative;
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+body[data-theme='hud'] .plugins-page .hud-cell-glyph {
+  display: block;
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 14px;
+  height: 14px;
+  color: rgba(252, 238, 10, 0.72);
+  pointer-events: none;
+}
+
+/* 配对码框：保留原有 .pair-box::before 垂直扫光线，叠加深黑点阵与暗金边框 */
+body[data-theme='hud'] .plugins-page .pair-box.gn-dot-grid {
+  background-color: #07080A;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.06) 1px, transparent 1px);
+  background-size: 14px 14px;
+  border: 1px solid rgba(252, 238, 10, 0.24);
+}
+
+body[data-theme='hud'] .plugins-page .pair-box .hud-button-border {
+  background: rgba(252, 238, 10, 0.42);
+}
+
+body[data-theme='hud'] .plugins-page .pair-box .hud-button-content {
+  background: #13161D;
+  color: var(--hud-yellow);
+}
+
+body[data-theme='hud'] .plugins-page .pair-box .hud-button-wrapper:not([data-disabled]):hover .hud-button-border {
+  background: var(--hud-yellow);
+  box-shadow: 0 0 8px rgba(252, 238, 10, 0.35);
+}
+
+body[data-theme='hud'] .plugins-page .pair-box .hud-button-wrapper:not([data-disabled]):hover .hud-button-content {
+  background: rgba(252, 238, 10, 0.14);
+  color: var(--hud-yellow);
+}
+
+body[data-theme='hud'] .plugins-page .permission-box {
+  background: rgba(7, 8, 10, 0.72);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+body[data-theme='hud'] .plugins-page .permission-box li.perm-allow::first-letter {
+  color: var(--hud-yellow);
+  font-weight: 700;
+}
+
+body[data-theme='hud'] .plugins-page .permission-box li.perm-deny {
+  color: rgba(255, 118, 132, 0.92);
+}
+
+body[data-theme='hud'] .plugins-page .permission-box li.perm-deny::first-letter {
+  color: var(--hud-danger);
+  font-weight: 700;
+}
+
+@media (max-width: 980px) {
+  body[data-theme='hud'] .plugins-page .hud-bus-telemetry { display: none; }
+}
+@media (max-width: 820px) {
+  body[data-theme='hud'] .plugins-page .connection-bus { display: none; }
+}
+
+/* === Phase 5：HUD 战术技能工作台（严格限定 body[data-theme='hud'] .skills-page） === */
+.hud-stats-led-cell,
+.hud-switch-cap { display: none; }
+
+body[data-theme='hud'] .skills-page {
+  --hud-yellow: #FCEE0A;
+  --hud-cyan: #00F0FF;
+  background: #07080A;
+}
+
+body[data-theme='hud'] .skills-page .extension-page-heading {
+  overflow: hidden;
+  margin-top: -20px;
+  padding-top: 18px;
+  min-height: 102px;
+  border-bottom-color: rgba(255, 255, 255, 0.10);
+}
+
+body[data-theme='hud'] .skills-page .extension-page-heading > div:first-child,
+body[data-theme='hud'] .skills-page .extension-page-actions {
+  position: relative;
+  z-index: 2;
+}
+
+/* 1. 左上角统计概览栏（渐隐斜纹 ::before + 9px 毫米刻度尺 ::after + 冰青脉冲 LED） */
+body[data-theme='hud'] .skills-page .extension-stats {
+  position: relative;
+  overflow: hidden;
+  padding: 12px 16px 19px;
+  min-height: 76px;
+  background: #101217;
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: 6px;
+}
+
+body[data-theme='hud'] .skills-page .extension-stats::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  width: auto;
+  height: auto;
+  pointer-events: none;
+  z-index: 0;
+  animation: none !important;
+  background-image: repeating-linear-gradient(-45deg, rgba(252, 238, 10, 0.15) 0 8px, transparent 8px 16px);
+  -webkit-mask-image: linear-gradient(to right, black 0%, rgba(0, 0, 0, 0.45) 45%, transparent 72%);
+  mask-image: linear-gradient(to right, black 0%, rgba(0, 0, 0, 0.45) 45%, transparent 72%);
+}
+
+body[data-theme='hud'] .skills-page .extension-stats::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 9px;
+  pointer-events: none;
+  z-index: 2;
+  background-image:
+    repeating-linear-gradient(to right, rgba(252, 238, 10, 0.72) 0 1px, transparent 1px 24px),
+    repeating-linear-gradient(to right, rgba(252, 238, 10, 0.32) 0 1px, transparent 1px 6px);
+  background-size: 100% 8px, 100% 4px;
+  background-position: left bottom, left bottom;
+  background-repeat: no-repeat;
+}
+
+body[data-theme='hud'] .skills-page .extension-stats > div,
+body[data-theme='hud'] .skills-page .extension-stats > p {
+  position: relative;
+  z-index: 1;
+}
+
+body[data-theme='hud'] .skills-page .extension-stats > div {
+  min-width: 112px;
+  padding: 0 18px;
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+body[data-theme='hud'] .skills-page .extension-stats > div:first-child {
+  padding-left: 2px;
+}
+
+body[data-theme='hud'] .skills-page .extension-stats strong {
+  font-family: var(--gn-font-mono), monospace;
+  font-variant-numeric: tabular-nums;
+  font-size: 20px;
+  font-weight: 600;
+  color: #FFFFFF;
+  line-height: 1.15;
+}
+
+body[data-theme='hud'] .skills-page .extension-stats > .hud-stats-led-cell {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  min-width: 46px;
+  width: 46px;
+  min-height: 40px;
+  padding: 0;
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+body[data-theme='hud'] .skills-page .hud-stats-led {
+  display: block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--hud-cyan);
+  box-shadow: 0 0 10px rgba(0, 240, 255, 0.8);
+}
+
+body[data-theme='hud'][data-motion='full'] .skills-page .hud-stats-led-cell[data-running='true'] .hud-stats-led {
+  animation: hud-cyan-breathe 1.6s ease-in-out infinite alternate;
+}
+
+@keyframes hud-cyan-breathe {
+  from { opacity: 0.45; box-shadow: 0 0 5px rgba(0, 240, 255, 0.45); }
+  to { opacity: 1; box-shadow: 0 0 14px rgba(0, 240, 255, 0.95); }
+}
+
+/* 2. 技能卡片（不透明深底 + 黄边高亮） */
+body[data-theme='hud'] .skills-page .skill-card.gn-card {
+  background: linear-gradient(145deg, #13161E, #0D0F14);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: 6px;
+}
+
+body[data-theme='hud'] .skills-page .skill-card.gn-card:hover {
+  border-color: rgba(252, 238, 10, 0.36);
+}
+
+body[data-theme='hud'] .skills-page .skill-card.selected.gn-card--active {
+  border-color: rgba(252, 238, 10, 0.72);
+  background: linear-gradient(155deg, rgba(252, 238, 10, 0.08) 0%, #111318 52%);
+  box-shadow: inset 2px 0 var(--hud-yellow), 0 0 14px rgba(252, 238, 10, 0.14);
+}
+
+/* 3. 右侧技能检视面板（#111318 + 暖黄氛围光 + 双角齿轮 + 总线资料清单 + 重工开关） */
+body[data-theme='hud'] .skills-page .extension-detail {
+  position: relative;
+  overflow: hidden;
+  padding: 15px 16px;
+  background-color: #111318;
+  background-image: radial-gradient(circle at 82% 16%, rgba(252, 238, 10, 0.13) 0%, rgba(252, 238, 10, 0.03) 45%, transparent 72%);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: 8px;
+}
+
+body[data-theme='hud'] .skills-page .extension-detail > :not(.mech-detail-watermark):not(.extruded-gear-3d) {
+  position: relative;
+  z-index: 1;
+}
+
+body[data-theme='hud'] .skills-page .extension-detail .mech-detail-watermark {
+  opacity: 0.08;
+  color: var(--hud-yellow);
+  z-index: 0 !important;
+}
+
+body[data-theme='hud'] .skills-page .detail-eyebrow {
+  display: block;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  color: #8A8A93;
+}
+
+body[data-theme='hud'] .skills-page .detail-title {
+  margin-top: 8px;
+}
+
+body[data-theme='hud'] .skills-page .detail-description {
+  margin: 10px 0 11px;
+  line-height: 1.65;
+}
+
+body[data-theme='hud'] .skills-page .record-picker {
+  margin: 8px 0;
+}
+
+body[data-theme='hud'] .skills-page .record-picker-head {
+  margin-bottom: 5px;
+}
+
+body[data-theme='hud'] .skills-page .record-picker-list {
+  gap: 2px;
+  max-height: 156px;
+}
+
+body[data-theme='hud'] .skills-page .detail-gear {
+  color: var(--hud-yellow);
+}
+
+body[data-theme='hud'] .skills-page .detail-title h2 {
+  color: #FFFFFF;
+  font-weight: 700;
+}
+
+body[data-theme='hud'] .skills-page .record-picker-list label {
+  position: relative;
+  display: grid;
+  grid-template-columns: 13px minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  min-height: 29px;
+  padding: 3px 8px 3px 20px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+}
+
+body[data-theme='hud'] .skills-page .record-picker-list label:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+body[data-theme='hud'] .skills-page .record-picker-list label[data-selected='true'] {
+  border: 0;
+  background: rgba(252, 238, 10, 0.07);
+  color: #FFFFFF;
+}
+
+body[data-theme='hud'] .skills-page .record-picker-list label::before {
+  content: '';
+  position: absolute;
+  left: 6px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  border-left: 1px dotted rgba(252, 238, 10, 0.28);
+  pointer-events: none;
+}
+
+body[data-theme='hud'] .skills-page .record-picker-list label:first-child::before {
+  top: 50%;
+}
+
+body[data-theme='hud'] .skills-page .record-picker-list label:last-child::before {
+  bottom: 50%;
+}
+
+body[data-theme='hud'] .skills-page .record-picker-list label:only-child::before {
+  display: none;
+}
+
+body[data-theme='hud'] .skills-page .record-picker-list label::after {
+  content: '';
+  position: absolute;
+  left: 4.5px;
+  top: 50%;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--hud-yellow);
+  box-shadow: 0 0 6px rgba(252, 238, 10, 0.65);
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+body[data-theme='hud'] .skills-page .record-picker-list input[type='checkbox'] {
+  appearance: none;
+  -webkit-appearance: none;
+  display: inline-grid;
+  place-items: center;
+  width: 13px;
+  height: 13px;
+  margin: 0;
+  border: 1.5px solid rgba(255, 255, 255, 0.62);
+  border-radius: 2px;
+  background: #07080A;
+  cursor: pointer;
+}
+
+body[data-theme='hud'] .skills-page .record-picker-list input[type='checkbox']:checked {
+  border-color: var(--hud-yellow);
+  background: var(--hud-yellow);
+}
+
+body[data-theme='hud'] .skills-page .record-picker-list input[type='checkbox']:checked::after {
+  content: '';
+  width: 7px;
+  height: 4px;
+  border-left: 1.6px solid #07080A;
+  border-bottom: 1.6px solid #07080A;
+  transform: rotate(-45deg) translateY(-1px);
+}
+
+body[data-theme='hud'] .skills-page .permission-box {
+  background: rgba(7, 8, 10, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 6px;
+  margin-top: 10px;
+  padding: 10px 12px;
+}
+
+body[data-theme='hud'] .skills-page .permission-box > strong {
+  margin-bottom: 6px;
+}
+
+body[data-theme='hud'] .skills-page .permission-box ul {
+  gap: 5px;
+}
+
+body[data-theme='hud'] .skills-page .detail-actions {
+  margin-top: 12px;
+}
+
+/* 底部「使用技能」重工物理触发开关（右下角 6px 45° 切角 + 斜纹机械装饰角） */
+body[data-theme='hud'] .skills-page .gn-skill-run[data-variant='primary'] {
+  box-shadow: none;
+  filter: drop-shadow(0 0 8px rgba(252, 238, 10, 0.25));
+}
+
+body[data-theme='hud'] .skills-page .gn-skill-run[data-variant='primary'] .hud-button-border,
+body[data-theme='hud'] .skills-page .gn-skill-run[data-variant='primary'] .hud-button-content {
+  -webkit-clip-path: polygon(0 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%);
+  clip-path: polygon(0 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%);
+}
+
+body[data-theme='hud'] .skills-page .gn-skill-run[data-variant='primary'] .hud-button-border {
+  background: var(--hud-yellow);
+}
+
+body[data-theme='hud'] .skills-page .gn-skill-run[data-variant='primary'] .hud-button-content {
+  display: inline-flex;
+  align-items: stretch;
+  gap: 14px;
+  min-height: 36px;
+  padding: 0 0 0 16px;
+  background: var(--hud-yellow);
+  color: #07080A;
+  font-weight: 700;
+}
+
+body[data-theme='hud'] .skills-page .gn-skill-run[data-variant='primary'] .hud-button-content > span:first-child {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 0;
+}
+
+body[data-theme='hud'] .skills-page .gn-skill-run[data-variant='primary']:not([data-disabled]):hover .hud-button-content {
+  background: #FFF65C;
+  color: #07080A;
+}
+
+body[data-theme='hud'] .skills-page .gn-skill-run[data-variant='primary'][data-disabled] {
+  filter: none;
+  opacity: 0.45;
+}
+
+body[data-theme='hud'] .skills-page .gn-skill-run .hud-switch-cap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  padding-right: 4px;
+  border-left: 1px solid rgba(7, 8, 10, 0.22);
+  background-image: repeating-linear-gradient(-45deg, rgba(0, 0, 0, 0.22) 0 3px, transparent 3px 6px);
+  color: #07080A;
+}
+
+body[data-theme='hud'] .skills-page .gn-skill-run .hud-switch-cap .gear-icon {
+  width: 12px;
+  height: 12px;
+}
+
+/* ============================================================================
+   黑黄主题：设置工作区概览（SETTINGS / CONTROL CENTER — 哑光扁平精密矢量风）
+   仅在 body[data-theme='hud'] 下生效，完全保持 mono 与业务逻辑不变
+   ============================================================================ */
+body[data-theme='hud'] .settings-page {
+  background-color: #07080A;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+
+.settings-heading-right {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-shrink: 0;
+}
+
+body[data-theme='hud'] .settings-page .settings-nav {
+  background: rgba(14, 16, 21, 0.94);
+  border-color: rgba(255, 255, 255, 0.10);
+}
+
+body[data-theme='hud'] .settings-page .settings-section-head {
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+body[data-theme='hud'] .settings-page .overview-status-item {
+  position: relative;
+  padding: 13px 14px 18px;
+}
+
+body[data-theme='hud'] .settings-page .overview-status-item::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgba(255, 255, 255, 0.11);
+  clip-path: polygon(0 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+body[data-theme='hud'] .settings-page .overview-status-item::after {
+  content: '';
+  position: absolute;
+  inset: 1px;
+  background: #0E1015;
+  clip-path: polygon(0 0, 100% 0, 100% calc(100% - 7.4px), calc(100% - 7.4px) 100%, 0 100%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+body[data-theme='hud'] .settings-page .overview-status-item > :not(.hud-kpi-index):not(.hud-kpi-ruler) {
+  position: relative;
+  z-index: 1;
+}
+
+body[data-theme='hud'] .settings-page .overview-status-item .gn-led--online {
+  background: #FCEE0A;
+  box-shadow: none;
+}
+
+body[data-theme='hud'] .settings-page .overview-status-item .gn-led--idle {
+  background: transparent;
+  border-color: rgba(255, 255, 255, 0.28);
+}
+
+body[data-theme='hud'] .settings-page .overview-status-item .gn-led--warn {
+  background: #D9822B;
+  box-shadow: none;
+}
+
+body[data-theme='hud'] .settings-page .hud-kpi-index {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  z-index: 1;
+  display: block;
+  color: rgba(255, 255, 255, 0.28);
+  font: 10px/1 var(--font-mono);
+  pointer-events: none;
+}
+
+body[data-theme='hud'] .settings-page .hud-kpi-ruler {
+  position: absolute;
+  left: 1px;
+  right: 10px;
+  bottom: 1px;
+  z-index: 1;
+  display: block;
+  height: 6px;
+  pointer-events: none;
+  background-repeat: repeat-x;
+  background-position: bottom left;
+  background-image:
+    repeating-linear-gradient(90deg, rgba(252, 238, 10, 0.34) 0 1px, transparent 1px 16px),
+    repeating-linear-gradient(90deg, rgba(252, 238, 10, 0.16) 0 1px, transparent 1px 4px);
+  background-size: 100% 6px, 100% 3px;
+}
+
+body[data-theme='hud'] .settings-page .quick-settings > :not(.hud-box-corners),
+body[data-theme='hud'] .settings-page .diagnostics-card > :not(.mech-diagnostics-gear):not(.hud-box-corners) {
+  position: relative;
+  z-index: 1;
+}
+
+body[data-theme='hud'] .settings-page .quick-settings > button,
+body[data-theme='hud'] .settings-page .current-config,
+body[data-theme='hud'] .settings-page .diagnostic-list > div,
+body[data-theme='hud'] .settings-page .diagnostics-cache {
+  border-top-color: rgba(255, 255, 255, 0.08);
+}
+
+body[data-theme='hud'] .settings-page .quick-index,
+body[data-theme='hud'] .settings-page .quick-status.ok,
+body[data-theme='hud'] .settings-page .current-config > span {
+  color: #FCEE0A;
+}
+
+body[data-theme='hud'] .settings-page .mech-diagnostics-gear {
+  color: rgba(255, 255, 255, 0.85);
+  opacity: 0.035;
+  filter: none;
 }
